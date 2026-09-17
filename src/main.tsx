@@ -1,0 +1,21 @@
+import React from "react";
+import ReactDOM from "react-dom/client";
+import App from "./App";
+import { ThemeProvider } from "@/components/theme-provider";
+import { Toaster } from "@/components/ui/sonner";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { GitProvider } from "@/state/git-context";
+import "./index.css";
+
+ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+  <React.StrictMode>
+    <ThemeProvider>
+      <TooltipProvider>
+        <GitProvider>
+          <App />
+          <Toaster position="bottom-right" />
+        </GitProvider>
+      </TooltipProvider>
+    </ThemeProvider>
+  </React.StrictMode>,
+);
