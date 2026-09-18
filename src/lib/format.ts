@@ -1,3 +1,12 @@
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+function formatEnglishDate(date: Date, withYear: boolean): string {
+  const month = MONTHS[date.getMonth()];
+  const day = date.getDate();
+  if (!withYear) return `${month} ${day}`;
+  return `${month} ${day}, ${date.getFullYear()}`;
+}
+
 export function formatRelativeTime(timestamp: number): string {
   const now = Date.now();
   const then = timestamp * 1000;
@@ -5,6 +14,7 @@ export function formatRelativeTime(timestamp: number): string {
   const minute = 60_000;
   const hour = 60 * minute;
   const day = 24 * hour;
+  const date = new Date(then);
 
   if (delta < minute) return "just now";
   if (delta < hour) {
@@ -19,15 +29,16 @@ export function formatRelativeTime(timestamp: number): string {
     const value = Math.floor(delta / day);
     return `${value}d ago`;
   }
-  return new Date(then).toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-    year: new Date(then).getFullYear() === new Date().getFullYear() ? undefined : "numeric",
-  });
+  return formatEnglishDate(date, date.getFullYear() !== new Date().getFullYear());
 }
 
 export function formatAbsoluteTime(timestamp: number): string {
-  return new Date(timestamp * 1000).toLocaleString();
+  const date = new Date(timestamp * 1000);
+  const hours = date.getHours();
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  const hour12 = hours % 12 || 12;
+  const suffix = hours < 12 ? "AM" : "PM";
+  return `${formatEnglishDate(date, true)}, ${hour12}:${minutes} ${suffix}`;
 }
 
 export function fileName(path: string): string {

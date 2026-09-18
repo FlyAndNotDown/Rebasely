@@ -48,7 +48,7 @@ export function HistoryPane() {
           <span className="w-14 shrink-0 font-mono text-[11px] text-muted-foreground">
             {commit.shortId}
           </span>
-          <span className="w-16 shrink-0 text-right text-[11px] text-muted-foreground">
+          <span className="min-w-[4.5rem] shrink-0 text-right text-[11px] tabular-nums text-muted-foreground">
             {formatRelativeTime(commit.timestamp)}
           </span>
         </button>
@@ -84,7 +84,7 @@ function GraphCell({
               x2={lane * LANE_GAP + LANE_GAP / 2}
               y2={mid}
               stroke={laneColor(lane)}
-              strokeWidth="1.5"
+              strokeWidth="1.25"
             />
           ))
         : null}
@@ -94,13 +94,13 @@ function GraphCell({
           d={connector(line.from, line.to, mid, ROW_HEIGHT)}
           fill="none"
           stroke={laneColor(line.to)}
-          strokeWidth="1.5"
+          strokeWidth="1.25"
         />
       ))}
       <circle
         cx={row.lane * LANE_GAP + LANE_GAP / 2}
         cy={mid}
-        r="3.5"
+        r="3"
         fill={laneColor(row.lane)}
       />
     </svg>

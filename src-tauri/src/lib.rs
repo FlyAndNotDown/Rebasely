@@ -1,6 +1,7 @@
 mod error;
 mod git;
 mod recents;
+mod session;
 
 use std::path::Path;
 
@@ -9,6 +10,7 @@ use tauri::AppHandle;
 use error::AppResult;
 use git::{CommitDetails, CommitSummary, FileDiff, WorkspaceSnapshot};
 use recents::RecentRepo;
+use session::AppSession;
 
 fn with_repo<T>(path: &str, f: impl FnOnce(&git2::Repository) -> AppResult<T>) -> AppResult<T> {
     let path = git::strip_verbatim_prefix(path);
@@ -24,6 +26,16 @@ fn list_recents(app: AppHandle) -> AppResult<Vec<RecentRepo>> {
 #[tauri::command]
 fn forget_recent(path: String, app: AppHandle) -> AppResult<Vec<RecentRepo>> {
     recents::forget_repo(&app, &path)
+}
+
+#[tauri::command]
+fn load_session(app: AppHandle) -> AppResult<AppSession> {
+    session::load_session(&app)
+}
+
+#[tauri::command]
+fn save_session(session: AppSession, app: AppHandle) -> AppResult<AppSession> {
+    session::save_session(&app, session)
 }
 
 #[tauri::command]
@@ -115,6 +127,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             list_recents,
             forget_recent,
+            load_session,
+            save_session,
             open_repository,
             refresh_workspace,
             get_commits,

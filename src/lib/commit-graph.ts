@@ -79,7 +79,7 @@ function firstEmpty(lanes: (string | null)[]): number {
 }
 
 export function laneColor(lane: number): string {
-  return `var(--chart-${(lane % 5) + 1})`;
+  return `var(--graph-${(lane % 6) + 1})`;
 }
 
 export function graphWidth(laneCount: number, gap = 12): number {

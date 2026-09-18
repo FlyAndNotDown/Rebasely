@@ -16,11 +16,11 @@ export function Workspace() {
     <div className="flex h-full min-h-0">
       <AppSidebar />
       <ResizablePanelGroup orientation="horizontal" className="min-h-0 flex-1">
-        <ResizablePanel defaultSize="28%" minSize="20%" maxSize="45%">
+        <ResizablePanel defaultSize="36%" minSize="24%" maxSize="52%">
           {view === "changes" ? <ChangesPane /> : <HistoryPane />}
         </ResizablePanel>
         <ResizableHandle />
-        <ResizablePanel defaultSize="72%" minSize="40%">
+        <ResizablePanel defaultSize="64%" minSize="36%">
           <DiffViewer />
         </ResizablePanel>
       </ResizablePanelGroup>

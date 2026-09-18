@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import { emptyBinaryDiff, errorMessage, gitApi } from "@/lib/git";
 import { sameRepoPath } from "@/lib/format";
 import type {
+  AppSession,
   CommitDetails,
   CommitSummary,
   FileDiff,
@@ -130,6 +131,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
   const [sessions, setSessions] = useState<Record<string, RepoSession>>({});
   const [loading, setLoading] = useState(true);
   const [opening, setOpening] = useState(false);
+  const restoredRef = useRef(false);
 
   const tabsRef = useRef(tabs);
   const sessionsRef = useRef(sessions);
@@ -175,19 +177,65 @@ export function GitProvider({ children }: { children: ReactNode }) {
     return tab?.kind === "repo" ? tab.path : null;
   }, []);
 
-  const loadRecents = useCallback(async () => {
-    try {
-      setRecents(await gitApi.listRecents());
-    } catch (error) {
-      toast.error(errorMessage(error));
-    } finally {
-      setLoading(false);
+  const persistSession = useCallback((nextTabs: AppTab[], nextActiveId: string) => {
+    const openPaths = nextTabs
+      .filter((tab): tab is RepoTab => tab.kind === "repo")
+      .map((tab) => tab.path);
+    const activeTab = nextTabs.find((tab) => tab.id === nextActiveId);
+    const active = activeTab?.kind === "repo" ? activeTab.path : "welcome";
+    void gitApi.saveSession({ openPaths, active }).catch(() => undefined);
+  }, []);
+
+  const restoreSession = useCallback(async (session: AppSession) => {
+    const nextTabs: AppTab[] = [{ id: WELCOME_TAB_ID, kind: "welcome" }];
+    const nextSessions: Record<string, RepoSession> = {};
+    let activeId = WELCOME_TAB_ID;
+
+    for (const path of session.openPaths) {
+      try {
+        const snapshot = await gitApi.openRepository(path);
+        const tab = tabFromSnapshot(snapshot);
+        if (nextTabs.some((item) => item.id === tab.id)) continue;
+        const commits = await gitApi.getCommits(snapshot.repo.path, 120);
+        nextTabs.push(tab);
+        nextSessions[tab.id] = { ...emptySession(snapshot.repo.path), snapshot, commits };
+        if (session.active !== "welcome" && sameRepoPath(session.active, snapshot.repo.path)) {
+          activeId = tab.id;
+        }
+      } catch {
+        // Skip folders that disappeared since the last session.
+      }
     }
+
+    if (session.active !== "welcome" && activeId === WELCOME_TAB_ID) {
+      const fallback = nextTabs.find((tab): tab is RepoTab => tab.kind === "repo");
+      if (fallback) activeId = fallback.id;
+    }
+
+    setSessions(nextSessions);
+    setTabs(nextTabs);
+    setActiveTabId(activeId);
+    setRecents(await gitApi.listRecents());
   }, []);
 
   useEffect(() => {
-    void loadRecents();
-  }, [loadRecents]);
+    void (async () => {
+      try {
+        setRecents(await gitApi.listRecents());
+        await restoreSession(await gitApi.loadSession());
+      } catch (error) {
+        toast.error(errorMessage(error));
+      } finally {
+        restoredRef.current = true;
+        setLoading(false);
+      }
+    })();
+  }, [restoreSession]);
+
+  useEffect(() => {
+    if (!restoredRef.current) return;
+    persistSession(tabs, activeTabId);
+  }, [activeTabId, persistSession, tabs]);
 
   const openPath = useCallback(async (path: string) => {
     const existing = findRepoTab(tabsRef.current, path);

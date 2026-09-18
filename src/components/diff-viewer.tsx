@@ -1,6 +1,12 @@
 import { fileName } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useGit } from "@/state/git-context";
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+} from "@/components/ui/resizable";
+import type { FileDiff } from "@/types/git";
 
 export function DiffViewer() {
   const { view, changeSelection, historySelection, changeDiff, historyDiff, commitDetails } =
@@ -13,6 +19,7 @@ export function DiffViewer() {
       : selection?.type === "commit"
         ? (selection.path ?? commitDetails?.commit.summary ?? "Commit")
         : "Diff";
+  const showCommitFiles = view === "history" && commitDetails && selection?.type === "commit";
 
   if (!selection) {
     return (
@@ -39,46 +46,61 @@ export function DiffViewer() {
           </span>
         ) : null}
       </div>
-      <div className="min-h-0 flex-1 overflow-auto">
-        {diff?.binary ? (
-          <p className="p-4 text-sm text-muted-foreground">Binary file</p>
-        ) : !diff || diff.lines.length === 0 ? (
-          <p className="p-4 text-sm text-muted-foreground">No textual diff</p>
-        ) : (
-          <pre className="min-w-max font-mono text-[12px] leading-5">
-            {diff.lines.map((line, index) => (
-              <div
-                key={`${line.kind}-${index}-${line.oldLineno}-${line.newLineno}`}
-                className={cn(
-                  "grid grid-cols-[3rem_3rem_1.25rem_minmax(0,1fr)] px-2",
-                  line.kind === "add" && "bg-diff-add-bg text-diff-add",
-                  line.kind === "delete" && "bg-diff-del-bg text-diff-del",
-                  line.kind === "hunk" && "bg-muted/50 text-diff-hunk",
-                )}
-              >
-                <span className="pr-2 text-right text-muted-foreground/70 tabular-nums">
-                  {line.kind === "hunk" ? "" : line.oldLineno ?? ""}
-                </span>
-                <span className="pr-2 text-right text-muted-foreground/70 tabular-nums">
-                  {line.kind === "hunk" ? "" : line.newLineno ?? ""}
-                </span>
-                <span className="text-center">
-                  {line.kind === "add" ? "+" : line.kind === "delete" ? "-" : line.kind === "hunk" ? "" : " "}
-                </span>
-                <span className="whitespace-pre">
-                  {line.kind === "hunk" ? line.content : line.content || " "}
-                </span>
-              </div>
-            ))}
-            {diff.truncated ? (
-              <div className="px-3 py-2 text-muted-foreground">Diff truncated</div>
-            ) : null}
-          </pre>
-        )}
-      </div>
-      {view === "history" && commitDetails && selection.type === "commit" ? (
-        <CommitFiles />
-      ) : null}
+      {showCommitFiles ? (
+        <ResizablePanelGroup orientation="vertical" className="min-h-0 flex-1">
+          <ResizablePanel defaultSize="68%" minSize="28%">
+            <DiffBody diff={diff} />
+          </ResizablePanel>
+          <ResizableHandle withHandle />
+          <ResizablePanel defaultSize="32%" minSize="18%" maxSize="62%">
+            <CommitFiles />
+          </ResizablePanel>
+        </ResizablePanelGroup>
+      ) : (
+        <DiffBody diff={diff} />
+      )}
+    </div>
+  );
+}
+
+function DiffBody({ diff }: { diff: FileDiff | null }) {
+  return (
+    <div className="h-full min-h-0 overflow-auto">
+      {diff?.binary ? (
+        <p className="p-4 text-sm text-muted-foreground">Binary file</p>
+      ) : !diff || diff.lines.length === 0 ? (
+        <p className="p-4 text-sm text-muted-foreground">No textual diff</p>
+      ) : (
+        <pre className="min-w-max font-mono text-[12px] leading-5">
+          {diff.lines.map((line, index) => (
+            <div
+              key={`${line.kind}-${index}-${line.oldLineno}-${line.newLineno}`}
+              className={cn(
+                "grid grid-cols-[3rem_3rem_1.25rem_minmax(0,1fr)] px-2",
+                line.kind === "add" && "bg-diff-add-bg text-diff-add",
+                line.kind === "delete" && "bg-diff-del-bg text-diff-del",
+                line.kind === "hunk" && "bg-muted/50 text-diff-hunk",
+              )}
+            >
+              <span className="pr-2 text-right text-muted-foreground/70 tabular-nums">
+                {line.kind === "hunk" ? "" : line.oldLineno ?? ""}
+              </span>
+              <span className="pr-2 text-right text-muted-foreground/70 tabular-nums">
+                {line.kind === "hunk" ? "" : line.newLineno ?? ""}
+              </span>
+              <span className="text-center">
+                {line.kind === "add" ? "+" : line.kind === "delete" ? "-" : line.kind === "hunk" ? "" : " "}
+              </span>
+              <span className="whitespace-pre">
+                {line.kind === "hunk" ? line.content : line.content || " "}
+              </span>
+            </div>
+          ))}
+          {diff.truncated ? (
+            <div className="px-3 py-2 text-muted-foreground">Diff truncated</div>
+          ) : null}
+        </pre>
+      )}
     </div>
   );
 }
@@ -89,8 +111,8 @@ function CommitFiles() {
   const selectedPath = historySelection?.path;
 
   return (
-    <div className="max-h-48 shrink-0 overflow-auto border-t">
-      <div className="px-3 py-2">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
+      <div className="shrink-0 px-3 py-2">
         <div className="text-sm font-medium">{commitDetails.commit.summary}</div>
         <div className="text-[11px] text-muted-foreground">
           {commitDetails.commit.authorName} · {commitDetails.commit.shortId}
@@ -101,7 +123,7 @@ function CommitFiles() {
           </p>
         ) : null}
       </div>
-      <ul className="border-t px-1 py-1">
+      <ul className="min-h-0 flex-1 overflow-auto border-t px-1 py-1">
         {commitDetails.files.map((file) => (
           <li key={file.path}>
             <button

@@ -94,6 +94,11 @@ export interface RecentRepo {
   lastOpened: number;
 }
 
+export interface AppSession {
+  openPaths: string[];
+  active: string;
+}
+
 export type Selection =
   | { type: "change"; path: string; staged: boolean }
   | { type: "commit"; id: string; path?: string };

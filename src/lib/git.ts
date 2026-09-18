@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  AppSession,
   CommitDetails,
   CommitSummary,
   FileDiff,
@@ -26,6 +27,8 @@ export function errorMessage(error: unknown): string {
 export const gitApi = {
   listRecents: () => invoke<RecentRepo[]>("list_recents"),
   forgetRecent: (path: string) => invoke<RecentRepo[]>("forget_recent", { path }),
+  loadSession: () => invoke<AppSession>("load_session"),
+  saveSession: (session: AppSession) => invoke<AppSession>("save_session", { session }),
   openRepository: (path: string) =>
     invoke<WorkspaceSnapshot>("open_repository", { path }),
   refreshWorkspace: (repoPath: string) =>
