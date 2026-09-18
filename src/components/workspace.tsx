@@ -2,6 +2,7 @@ import { ChangesPane } from "@/components/changes-pane";
 import { CommitFiles } from "@/components/commit-files";
 import { DiffViewer } from "@/components/diff-viewer";
 import { HistoryPane } from "@/components/history-pane";
+import { StashPane } from "@/components/stash-pane";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -14,7 +15,9 @@ export function Workspace() {
 
   return (
     <div className="flex h-full min-h-0">
-      {view === "history" ? (
+      {view === "stash" ? (
+        <StashPane />
+      ) : view === "history" ? (
         <ResizablePanelGroup orientation="vertical" className="min-h-0 flex-1">
           <ResizablePanel defaultSize="40%" minSize="22%">
             <HistoryPane />

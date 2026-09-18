@@ -129,8 +129,7 @@ function FileRow({
 }
 
 export function ChangesPane() {
-  const { snapshot, changeSelection, selectChange, stage, unstage, discard, commit, busy } =
-    useGit();
+  const { snapshot, changeSelection, selectChange, stage, unstage, discard, commit } = useGit();
   const [message, setMessage] = useState("");
   const [discardTarget, setDiscardTarget] = useState<string[] | null>(null);
   const [stagedOpen, setStagedOpen] = useState(true);
@@ -139,7 +138,7 @@ export function ChangesPane() {
   const unstaged = snapshot?.status.unstaged ?? [];
   const branch = snapshot?.repo.currentBranch ?? "HEAD";
   const selectedChange = changeSelection;
-  const canCommit = staged.length > 0 && message.trim().length > 0 && !busy;
+  const canCommit = staged.length > 0 && message.trim().length > 0;
 
   const counts = useMemo(
     () => ({ staged: staged.length, unstaged: unstaged.length }),
@@ -234,7 +233,7 @@ export function ChangesPane() {
             type="button"
             variant="ghost"
             size="sm"
-            disabled={!unstaged.length || busy}
+            disabled={!unstaged.length}
             onClick={() => setDiscardTarget(unstaged.map((file) => file.path))}
           >
             <Undo2Icon data-icon="inline-start" />
@@ -293,11 +292,11 @@ function Section({
   children: ReactNode;
 }) {
   return (
-    <section className="mb-2 rounded-lg border">
-      <div className="flex items-center gap-1 px-1.5 py-1">
+    <section className="mb-1">
+      <div className="flex items-center gap-1">
         <button
           type="button"
-          className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1 py-1 text-left hover:bg-muted/70"
+          className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1.5 py-1 text-left hover:bg-muted/70"
           onClick={() => onOpenChange(!open)}
           aria-expanded={open}
         >
@@ -313,7 +312,7 @@ function Section({
           </Button>
         ) : null}
       </div>
-      {open ? <div className="border-t px-1.5 py-1">{children}</div> : null}
+      {open ? <div className="pb-1">{children}</div> : null}
     </section>
   );
 }

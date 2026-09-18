@@ -26,6 +26,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Kbd } from "@/components/ui/kbd";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { ActivityMeter } from "@/components/activity-meter";
 import { cn } from "@/lib/utils";
 import { useGit, type AppTab } from "@/state/git-context";
 
@@ -40,7 +41,6 @@ export function AppHeader() {
     revealRepo,
     checkoutBranch,
     createBranch,
-    busy,
   } = useGit();
   const [branchOpen, setBranchOpen] = useState(false);
   const [newBranch, setNewBranch] = useState("");
@@ -70,7 +70,6 @@ export function AppHeader() {
               size="icon-xs"
               className="shrink-0"
               onClick={() => void openFolder()}
-              disabled={busy}
               aria-label="Open repository"
             >
               <PlusIcon />
@@ -97,7 +96,7 @@ export function AppHeader() {
               {local.map((branch) => (
                 <DropdownMenuItem
                   key={`local:${branch.name}`}
-                  disabled={branch.isHead || busy}
+                  disabled={branch.isHead}
                   onClick={() => void checkoutBranch(branch.name)}
                 >
                   <span className="min-w-4">
@@ -113,7 +112,6 @@ export function AppHeader() {
                   {remote.map((branch) => (
                     <DropdownMenuItem
                       key={`remote:${branch.name}`}
-                      disabled={busy}
                       onClick={() => void checkoutBranch(branch.name)}
                     >
                       <span className="min-w-4" />
@@ -142,6 +140,7 @@ export function AppHeader() {
       ) : null}
 
       <div className="flex shrink-0 items-center gap-1">
+        <ActivityMeter />
         {repo ? (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -183,7 +182,7 @@ export function AppHeader() {
               <Button type="button" variant="outline" onClick={() => setBranchOpen(false)}>
                 Cancel
               </Button>
-              <Button type="submit" disabled={!newBranch.trim() || busy}>
+              <Button type="submit" disabled={!newBranch.trim()}>
                 Create and checkout
               </Button>
             </DialogFooter>

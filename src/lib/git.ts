@@ -58,6 +58,14 @@ export const gitApi = {
       name,
       switch: switchTo,
     }),
+  stashSave: (repoPath: string, message: string, includeUntracked: boolean) =>
+    invoke<WorkspaceSnapshot>("stash_save", { repoPath, message, includeUntracked }),
+  stashApply: (repoPath: string, index: number) =>
+    invoke<WorkspaceSnapshot>("stash_apply", { repoPath, index }),
+  stashPop: (repoPath: string, index: number) =>
+    invoke<WorkspaceSnapshot>("stash_pop", { repoPath, index }),
+  stashDrop: (repoPath: string, index: number) =>
+    invoke<WorkspaceSnapshot>("stash_drop", { repoPath, index }),
   getGitIdentity: () => invoke<GitIdentity>("get_git_identity"),
   setGitIdentity: (identity: GitIdentity) =>
     invoke<GitIdentity>("set_git_identity", { identity }),

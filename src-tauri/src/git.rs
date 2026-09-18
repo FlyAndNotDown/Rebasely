@@ -118,6 +118,24 @@ pub struct WorkspaceSnapshot {
     pub repo: RepoInfo,
     pub status: StatusSnapshot,
     pub branches: BranchList,
+    pub remotes: Vec<RemoteInfo>,
+    pub stashes: Vec<StashInfo>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteInfo {
+    pub name: String,
+    pub url: Option<String>,
+    pub push_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StashInfo {
+    pub index: usize,
+    pub message: String,
+    pub id: String,
 }
 
 pub fn strip_verbatim_prefix(path: &str) -> String {
@@ -890,12 +908,95 @@ pub fn create_branch(repo: &Repository, name: &str, switch: bool) -> AppResult<(
     Ok(())
 }
 
-pub fn snapshot(repo: &Repository) -> AppResult<WorkspaceSnapshot> {
+pub fn snapshot(repo: &mut Repository) -> AppResult<WorkspaceSnapshot> {
     Ok(WorkspaceSnapshot {
         repo: repo_info(repo)?,
         status: status_snapshot(repo)?,
         branches: branches(repo)?,
+        remotes: list_remotes(repo)?,
+        stashes: list_stashes(repo)?,
     })
+}
+
+pub fn list_remotes(repo: &Repository) -> AppResult<Vec<RemoteInfo>> {
+    let names = repo.remotes()?;
+    let mut remotes = Vec::new();
+    for name in names.iter().flatten() {
+        let remote = repo.find_remote(name)?;
+        remotes.push(RemoteInfo {
+            name: name.to_string(),
+            url: remote.url().map(str::to_string),
+            push_url: remote.pushurl().map(str::to_string),
+        });
+    }
+    remotes.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    Ok(remotes)
+}
+
+pub fn add_remote(repo: &Repository, name: &str, url: &str) -> AppResult<()> {
+    let name = name.trim();
+    let url = url.trim();
+    if name.is_empty() || url.is_empty() {
+        return Err(AppError::msg("Remote name and URL are required"));
+    }
+    repo.remote(name, url)?;
+    Ok(())
+}
+
+pub fn set_remote_url(repo: &Repository, name: &str, url: &str) -> AppResult<()> {
+    let url = url.trim();
+    if url.is_empty() {
+        return Err(AppError::msg("Remote URL is required"));
+    }
+    repo.remote_set_url(name, url)?;
+    Ok(())
+}
+
+pub fn delete_remote(repo: &Repository, name: &str) -> AppResult<()> {
+    repo.remote_delete(name)?;
+    Ok(())
+}
+
+pub fn list_stashes(repo: &mut Repository) -> AppResult<Vec<StashInfo>> {
+    let mut stashes = Vec::new();
+    repo.stash_foreach(|index, message, id| {
+        stashes.push(StashInfo {
+            index,
+            message: message.to_string(),
+            id: id.to_string(),
+        });
+        true
+    })?;
+    Ok(stashes)
+}
+
+pub fn stash_save(repo: &mut Repository, message: &str, include_untracked: bool) -> AppResult<()> {
+    let signature = repo
+        .signature()
+        .map_err(|_| AppError::msg("Set user.name and user.email in Settings before stashing"))?;
+    let mut flags = git2::StashFlags::DEFAULT;
+    if include_untracked {
+        flags |= git2::StashFlags::INCLUDE_UNTRACKED;
+    }
+    let message = message.trim();
+    let message = if message.is_empty() { "WIP" } else { message };
+    repo.stash_save(&signature, message, Some(flags))?;
+    Ok(())
+}
+
+pub fn stash_apply(repo: &mut Repository, index: usize) -> AppResult<()> {
+    repo.stash_apply(index, None)?;
+    Ok(())
+}
+
+pub fn stash_pop(repo: &mut Repository, index: usize) -> AppResult<()> {
+    repo.stash_pop(index, None)?;
+    Ok(())
+}
+
+pub fn stash_drop(repo: &mut Repository, index: usize) -> AppResult<()> {
+    repo.stash_drop(index)?;
+    Ok(())
 }
 
 pub fn read_git_identity() -> AppResult<GitIdentity> {

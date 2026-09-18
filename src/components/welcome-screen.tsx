@@ -4,7 +4,7 @@ import { displayPath, formatRelativeTime } from "@/lib/format";
 import { useGit } from "@/state/git-context";
 
 export function WelcomeScreen() {
-  const { recents, openFolder, openPath, forgetRecent, busy } = useGit();
+  const { recents, openFolder, openPath, forgetRecent } = useGit();
 
   return (
     <div className="flex h-full items-center justify-center bg-background p-8">
@@ -21,7 +21,7 @@ export function WelcomeScreen() {
           </div>
         </div>
 
-        <Button onClick={() => void openFolder()} disabled={busy} className="w-full">
+        <Button onClick={() => void openFolder()} className="w-full">
           <FolderOpenIcon data-icon="inline-start" />
           Open repository
         </Button>
@@ -36,7 +36,6 @@ export function WelcomeScreen() {
                     type="button"
                     className="min-w-0 flex-1 px-3 py-2.5 text-left hover:bg-muted/60"
                     onClick={() => void openPath(repo.path)}
-                    disabled={busy}
                   >
                     <div className="truncate text-sm font-medium">{repo.name}</div>
                     <div className="truncate font-mono text-[11px] text-muted-foreground">

@@ -169,3 +169,18 @@
     cursor: pointer;
   }
 }
+
+@keyframes activity-indeterminate {
+  0% {
+    transform: translateX(-100%);
+    width: 36%;
+  }
+  100% {
+    transform: translateX(280%);
+    width: 36%;
+  }
+}
+
+.activity-indeterminate {
+  animation: activity-indeterminate 1.15s ease-in-out infinite;
+}

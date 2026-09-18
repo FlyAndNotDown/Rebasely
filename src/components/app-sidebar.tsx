@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { CircleDotIcon, HistoryIcon, SettingsIcon } from "lucide-react";
+import { ArchiveIcon, CircleDotIcon, HistoryIcon, SettingsIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SettingsDialog } from "@/components/settings-dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -9,6 +9,7 @@ import { useGit, type View } from "@/state/git-context";
 const items: { view: View; label: string; icon: typeof CircleDotIcon }[] = [
   { view: "changes", label: "Changes", icon: CircleDotIcon },
   { view: "history", label: "History", icon: HistoryIcon },
+  { view: "stash", label: "Stash", icon: ArchiveIcon },
 ];
 
 export function AppSidebar() {

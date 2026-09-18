@@ -8,16 +8,26 @@ use std::path::Path;
 
 use tauri::{AppHandle, State};
 
-use error::AppResult;
+use error::{AppError, AppResult};
 use git::{CommitDetails, CommitSummary, FileDiff, GitIdentity, WorkspaceSnapshot};
 use recents::RecentRepo;
 use session::AppSession;
 use watch::WatchState;
 
-fn with_repo<T>(path: &str, f: impl FnOnce(&git2::Repository) -> AppResult<T>) -> AppResult<T> {
+fn with_repo<T>(path: &str, f: impl FnOnce(&mut git2::Repository) -> AppResult<T>) -> AppResult<T> {
     let path = git::strip_verbatim_prefix(path);
-    let repo = git::open_at(Path::new(&path))?;
-    f(&repo)
+    let mut repo = git::open_at(Path::new(&path))?;
+    f(&mut repo)
+}
+
+async fn with_repo_async<T, F>(path: String, f: F) -> AppResult<T>
+where
+    T: Send + 'static,
+    F: FnOnce(&mut git2::Repository) -> AppResult<T> + Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(move || with_repo(&path, f))
+        .await
+        .map_err(|err| AppError::msg(err.to_string()))?
 }
 
 #[tauri::command]
@@ -41,84 +51,161 @@ fn save_session(session: AppSession, app: AppHandle) -> AppResult<AppSession> {
 }
 
 #[tauri::command]
-fn open_repository(path: String, app: AppHandle) -> AppResult<WorkspaceSnapshot> {
-    let repo = git::discover(&path)?;
-    let snapshot = git::snapshot(&repo)?;
-    recents::remember_repo(&app, &snapshot.repo.path, &snapshot.repo.name)?;
-    Ok(snapshot)
+async fn open_repository(path: String, app: AppHandle) -> AppResult<WorkspaceSnapshot> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut repo = git::discover(&path)?;
+        let snapshot = git::snapshot(&mut repo)?;
+        recents::remember_repo(&app, &snapshot.repo.path, &snapshot.repo.name)?;
+        Ok(snapshot)
+    })
+    .await
+    .map_err(|err| AppError::msg(err.to_string()))?
 }
 
 #[tauri::command]
-fn refresh_workspace(repo_path: String) -> AppResult<WorkspaceSnapshot> {
-    with_repo(&repo_path, git::snapshot)
+async fn refresh_workspace(repo_path: String) -> AppResult<WorkspaceSnapshot> {
+    with_repo_async(repo_path, git::snapshot).await
 }
 
 #[tauri::command]
-fn get_commits(repo_path: String, limit: Option<usize>) -> AppResult<Vec<CommitSummary>> {
-    with_repo(&repo_path, |repo| git::commits(repo, limit.unwrap_or(100)))
+async fn get_commits(repo_path: String, limit: Option<usize>) -> AppResult<Vec<CommitSummary>> {
+    with_repo_async(repo_path, move |repo| git::commits(repo, limit.unwrap_or(100))).await
 }
 
 #[tauri::command]
-fn get_workdir_diff(repo_path: String, path: String, staged: bool) -> AppResult<FileDiff> {
-    with_repo(&repo_path, |repo| git::workdir_diff(repo, &path, staged))
+async fn get_workdir_diff(repo_path: String, path: String, staged: bool) -> AppResult<FileDiff> {
+    with_repo_async(repo_path, move |repo| git::workdir_diff(repo, &path, staged)).await
 }
 
 #[tauri::command]
-fn get_commit_details(repo_path: String, oid: String) -> AppResult<CommitDetails> {
-    with_repo(&repo_path, |repo| git::commit_details(repo, &oid))
+async fn get_commit_details(repo_path: String, oid: String) -> AppResult<CommitDetails> {
+    with_repo_async(repo_path, move |repo| git::commit_details(repo, &oid)).await
 }
 
 #[tauri::command]
-fn get_commit_diff(repo_path: String, oid: String, path: String) -> AppResult<FileDiff> {
-    with_repo(&repo_path, |repo| git::commit_file_diff(repo, &oid, &path))
+async fn get_commit_diff(repo_path: String, oid: String, path: String) -> AppResult<FileDiff> {
+    with_repo_async(repo_path, move |repo| git::commit_file_diff(repo, &oid, &path)).await
 }
 
 #[tauri::command]
-fn stage_paths(repo_path: String, paths: Vec<String>) -> AppResult<WorkspaceSnapshot> {
-    with_repo(&repo_path, |repo| {
+async fn stage_paths(repo_path: String, paths: Vec<String>) -> AppResult<WorkspaceSnapshot> {
+    with_repo_async(repo_path, move |repo| {
         git::stage_paths(repo, &paths)?;
         git::snapshot(repo)
     })
+    .await
 }
 
 #[tauri::command]
-fn unstage_paths(repo_path: String, paths: Vec<String>) -> AppResult<WorkspaceSnapshot> {
-    with_repo(&repo_path, |repo| {
+async fn unstage_paths(repo_path: String, paths: Vec<String>) -> AppResult<WorkspaceSnapshot> {
+    with_repo_async(repo_path, move |repo| {
         git::unstage_paths(repo, &paths)?;
         git::snapshot(repo)
     })
+    .await
 }
 
 #[tauri::command]
-fn discard_paths(repo_path: String, paths: Vec<String>) -> AppResult<WorkspaceSnapshot> {
-    with_repo(&repo_path, |repo| {
+async fn discard_paths(repo_path: String, paths: Vec<String>) -> AppResult<WorkspaceSnapshot> {
+    with_repo_async(repo_path, move |repo| {
         git::discard_paths(repo, &paths)?;
         git::snapshot(repo)
     })
+    .await
 }
 
 #[tauri::command]
-fn commit_changes(repo_path: String, message: String) -> AppResult<WorkspaceSnapshot> {
-    with_repo(&repo_path, |repo| {
+async fn commit_changes(repo_path: String, message: String) -> AppResult<WorkspaceSnapshot> {
+    with_repo_async(repo_path, move |repo| {
         git::commit(repo, &message)?;
         git::snapshot(repo)
     })
+    .await
 }
 
 #[tauri::command]
-fn checkout_branch(repo_path: String, name: String) -> AppResult<WorkspaceSnapshot> {
-    with_repo(&repo_path, |repo| {
+async fn checkout_branch(repo_path: String, name: String) -> AppResult<WorkspaceSnapshot> {
+    with_repo_async(repo_path, move |repo| {
         git::checkout_branch(repo, &name)?;
         git::snapshot(repo)
     })
+    .await
 }
 
 #[tauri::command]
-fn create_branch(repo_path: String, name: String, switch: bool) -> AppResult<WorkspaceSnapshot> {
-    with_repo(&repo_path, |repo| {
+async fn create_branch(repo_path: String, name: String, switch: bool) -> AppResult<WorkspaceSnapshot> {
+    with_repo_async(repo_path, move |repo| {
         git::create_branch(repo, &name, switch)?;
         git::snapshot(repo)
     })
+    .await
+}
+
+#[tauri::command]
+async fn add_remote(repo_path: String, name: String, url: String) -> AppResult<WorkspaceSnapshot> {
+    with_repo_async(repo_path, move |repo| {
+        git::add_remote(repo, &name, &url)?;
+        git::snapshot(repo)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn set_remote_url(repo_path: String, name: String, url: String) -> AppResult<WorkspaceSnapshot> {
+    with_repo_async(repo_path, move |repo| {
+        git::set_remote_url(repo, &name, &url)?;
+        git::snapshot(repo)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn delete_remote(repo_path: String, name: String) -> AppResult<WorkspaceSnapshot> {
+    with_repo_async(repo_path, move |repo| {
+        git::delete_remote(repo, &name)?;
+        git::snapshot(repo)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn stash_save(
+    repo_path: String,
+    message: String,
+    include_untracked: bool,
+) -> AppResult<WorkspaceSnapshot> {
+    with_repo_async(repo_path, move |repo| {
+        git::stash_save(repo, &message, include_untracked)?;
+        git::snapshot(repo)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn stash_apply(repo_path: String, index: usize) -> AppResult<WorkspaceSnapshot> {
+    with_repo_async(repo_path, move |repo| {
+        git::stash_apply(repo, index)?;
+        git::snapshot(repo)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn stash_pop(repo_path: String, index: usize) -> AppResult<WorkspaceSnapshot> {
+    with_repo_async(repo_path, move |repo| {
+        git::stash_pop(repo, index)?;
+        git::snapshot(repo)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn stash_drop(repo_path: String, index: usize) -> AppResult<WorkspaceSnapshot> {
+    with_repo_async(repo_path, move |repo| {
+        git::stash_drop(repo, index)?;
+        git::snapshot(repo)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -165,6 +252,13 @@ pub fn run() {
             commit_changes,
             checkout_branch,
             create_branch,
+            add_remote,
+            set_remote_url,
+            delete_remote,
+            stash_save,
+            stash_apply,
+            stash_pop,
+            stash_drop,
             get_git_identity,
             set_git_identity,
             open_in_file_manager,

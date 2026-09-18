@@ -88,10 +88,30 @@ export interface GitIdentity {
   email: string;
 }
 
+export interface RemoteInfo {
+  name: string;
+  url: string | null;
+  pushUrl: string | null;
+}
+
+export interface StashInfo {
+  index: number;
+  message: string;
+  id: string;
+}
+
 export interface WorkspaceSnapshot {
   repo: RepoInfo;
   status: StatusSnapshot;
   branches: BranchList;
+  remotes: RemoteInfo[];
+  stashes: StashInfo[];
+}
+
+export interface Activity {
+  id: string;
+  label: string;
+  detail?: string;
 }
 
 export interface RecentRepo {
