@@ -129,14 +129,14 @@ function FileRow({
 }
 
 export function ChangesPane() {
-  const { snapshot, selection, selectChange, stage, unstage, discard, commit, busy } =
+  const { snapshot, changeSelection, selectChange, stage, unstage, discard, commit, busy } =
     useGit();
   const [message, setMessage] = useState("");
   const [discardTarget, setDiscardTarget] = useState<string[] | null>(null);
   const staged = snapshot?.status.staged ?? [];
   const unstaged = snapshot?.status.unstaged ?? [];
   const branch = snapshot?.repo.currentBranch ?? "HEAD";
-  const selectedChange = selection?.type === "change" ? selection : null;
+  const selectedChange = changeSelection;
   const canCommit = staged.length > 0 && message.trim().length > 0 && !busy;
 
   const counts = useMemo(

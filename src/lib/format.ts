@@ -39,3 +39,21 @@ export function parentPath(path: string): string {
   const idx = path.lastIndexOf("/");
   return idx === -1 ? "" : path.slice(0, idx);
 }
+
+export function displayPath(path: string): string {
+  if (path.startsWith("\\\\?\\UNC\\")) {
+    return `\\\\${path.slice(8)}`;
+  }
+  if (path.startsWith("\\\\?\\")) {
+    return path.slice(4);
+  }
+  return path;
+}
+
+export function normalizeRepoPath(path: string): string {
+  return displayPath(path).replace(/\//g, "\\").replace(/\\+$/, "").toLowerCase();
+}
+
+export function sameRepoPath(a: string, b: string): boolean {
+  return normalizeRepoPath(a) === normalizeRepoPath(b);
+}

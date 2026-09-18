@@ -7,6 +7,16 @@ import type {
   WorkspaceSnapshot,
 } from "@/types/git";
 
+export function emptyBinaryDiff(path: string, oldPath: string | null = null): FileDiff {
+  return {
+    path,
+    oldPath,
+    binary: true,
+    truncated: false,
+    lines: [],
+  };
+}
+
 export function errorMessage(error: unknown): string {
   if (typeof error === "string") return error;
   if (error instanceof Error) return error.message;
@@ -18,25 +28,30 @@ export const gitApi = {
   forgetRecent: (path: string) => invoke<RecentRepo[]>("forget_recent", { path }),
   openRepository: (path: string) =>
     invoke<WorkspaceSnapshot>("open_repository", { path }),
-  closeRepository: () => invoke<void>("close_repository"),
-  refreshWorkspace: () => invoke<WorkspaceSnapshot>("refresh_workspace"),
-  getCommits: (limit = 100) => invoke<CommitSummary[]>("get_commits", { limit }),
-  getWorkdirDiff: (path: string, staged: boolean) =>
-    invoke<FileDiff>("get_workdir_diff", { path, staged }),
-  getCommitDetails: (oid: string) =>
-    invoke<CommitDetails>("get_commit_details", { oid }),
-  getCommitDiff: (oid: string, path: string) =>
-    invoke<FileDiff>("get_commit_diff", { oid, path }),
-  stagePaths: (paths: string[]) =>
-    invoke<WorkspaceSnapshot>("stage_paths", { paths }),
-  unstagePaths: (paths: string[]) =>
-    invoke<WorkspaceSnapshot>("unstage_paths", { paths }),
-  discardPaths: (paths: string[]) =>
-    invoke<WorkspaceSnapshot>("discard_paths", { paths }),
-  commit: (message: string) =>
-    invoke<WorkspaceSnapshot>("commit_changes", { message }),
-  checkoutBranch: (name: string) =>
-    invoke<WorkspaceSnapshot>("checkout_branch", { name }),
-  createBranch: (name: string, switchTo: boolean) =>
-    invoke<WorkspaceSnapshot>("create_branch", { name, switch: switchTo }),
+  refreshWorkspace: (repoPath: string) =>
+    invoke<WorkspaceSnapshot>("refresh_workspace", { repoPath }),
+  getCommits: (repoPath: string, limit = 100) =>
+    invoke<CommitSummary[]>("get_commits", { repoPath, limit }),
+  getWorkdirDiff: (repoPath: string, path: string, staged: boolean) =>
+    invoke<FileDiff>("get_workdir_diff", { repoPath, path, staged }),
+  getCommitDetails: (repoPath: string, oid: string) =>
+    invoke<CommitDetails>("get_commit_details", { repoPath, oid }),
+  getCommitDiff: (repoPath: string, oid: string, path: string) =>
+    invoke<FileDiff>("get_commit_diff", { repoPath, oid, path }),
+  stagePaths: (repoPath: string, paths: string[]) =>
+    invoke<WorkspaceSnapshot>("stage_paths", { repoPath, paths }),
+  unstagePaths: (repoPath: string, paths: string[]) =>
+    invoke<WorkspaceSnapshot>("unstage_paths", { repoPath, paths }),
+  discardPaths: (repoPath: string, paths: string[]) =>
+    invoke<WorkspaceSnapshot>("discard_paths", { repoPath, paths }),
+  commit: (repoPath: string, message: string) =>
+    invoke<WorkspaceSnapshot>("commit_changes", { repoPath, message }),
+  checkoutBranch: (repoPath: string, name: string) =>
+    invoke<WorkspaceSnapshot>("checkout_branch", { repoPath, name }),
+  createBranch: (repoPath: string, name: string, switchTo: boolean) =>
+    invoke<WorkspaceSnapshot>("create_branch", {
+      repoPath,
+      name,
+      switch: switchTo,
+    }),
 };

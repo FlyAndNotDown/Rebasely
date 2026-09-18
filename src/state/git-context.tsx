@@ -4,12 +4,14 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { toast } from "sonner";
-import { errorMessage, gitApi } from "@/lib/git";
+import { emptyBinaryDiff, errorMessage, gitApi } from "@/lib/git";
+import { sameRepoPath } from "@/lib/format";
 import type {
   CommitDetails,
   CommitSummary,
@@ -19,23 +21,94 @@ import type {
   WorkspaceSnapshot,
 } from "@/types/git";
 
-type View = "changes" | "history";
+export type View = "changes" | "history";
+export const WELCOME_TAB_ID = "welcome";
 
-interface GitContextValue {
-  recents: RecentRepo[];
+export type WelcomeTab = { id: typeof WELCOME_TAB_ID; kind: "welcome" };
+export type RepoTab = {
+  id: string;
+  kind: "repo";
+  path: string;
+  name: string;
+  branch: string | null;
+  isDetached: boolean;
+};
+export type AppTab = WelcomeTab | RepoTab;
+
+type ChangeSelection = Extract<Selection, { type: "change" }>;
+type HistorySelection = Extract<Selection, { type: "commit" }>;
+
+interface RepoSession {
+  path: string;
   snapshot: WorkspaceSnapshot | null;
   commits: CommitSummary[];
   view: View;
-  selection: Selection | null;
-  diff: FileDiff | null;
+  changeSelection: ChangeSelection | null;
+  historySelection: HistorySelection | null;
+  changeDiff: FileDiff | null;
+  historyDiff: FileDiff | null;
+  commitDetails: CommitDetails | null;
+  busy: boolean;
+}
+
+function repoTabId(path: string): string {
+  return `repo:${path}`;
+}
+
+function emptySession(path: string): RepoSession {
+  return {
+    path,
+    snapshot: null,
+    commits: [],
+    view: "changes",
+    changeSelection: null,
+    historySelection: null,
+    changeDiff: null,
+    historyDiff: null,
+    commitDetails: null,
+    busy: false,
+  };
+}
+
+function tabFromSnapshot(snapshot: WorkspaceSnapshot): RepoTab {
+  return {
+    id: repoTabId(snapshot.repo.path),
+    kind: "repo",
+    path: snapshot.repo.path,
+    name: snapshot.repo.name,
+    branch: snapshot.repo.currentBranch,
+    isDetached: snapshot.repo.isDetached,
+  };
+}
+
+function findRepoTab(tabs: AppTab[], path: string): RepoTab | undefined {
+  return tabs.find(
+    (tab): tab is RepoTab => tab.kind === "repo" && sameRepoPath(tab.path, path),
+  );
+}
+
+interface GitContextValue {
+  recents: RecentRepo[];
+  tabs: AppTab[];
+  activeTabId: string;
+  activeTab: AppTab;
+  snapshot: WorkspaceSnapshot | null;
+  commits: CommitSummary[];
+  view: View;
+  changeSelection: ChangeSelection | null;
+  historySelection: HistorySelection | null;
+  changeDiff: FileDiff | null;
+  historyDiff: FileDiff | null;
   commitDetails: CommitDetails | null;
   loading: boolean;
   busy: boolean;
   setView: (view: View) => void;
+  setActiveTab: (id: string) => void;
+  closeTab: (id: string) => void;
   openFolder: () => Promise<void>;
   openPath: (path: string) => Promise<void>;
   forgetRecent: (path: string) => Promise<void>;
-  closeRepo: () => Promise<void>;
+  closeRepo: () => void;
   refresh: () => Promise<void>;
   selectChange: (path: string, staged: boolean) => Promise<void>;
   selectCommit: (id: string) => Promise<void>;
@@ -52,14 +125,55 @@ const GitContext = createContext<GitContextValue | null>(null);
 
 export function GitProvider({ children }: { children: ReactNode }) {
   const [recents, setRecents] = useState<RecentRepo[]>([]);
-  const [snapshot, setSnapshot] = useState<WorkspaceSnapshot | null>(null);
-  const [commits, setCommits] = useState<CommitSummary[]>([]);
-  const [view, setView] = useState<View>("changes");
-  const [selection, setSelection] = useState<Selection | null>(null);
-  const [diff, setDiff] = useState<FileDiff | null>(null);
-  const [commitDetails, setCommitDetails] = useState<CommitDetails | null>(null);
+  const [tabs, setTabs] = useState<AppTab[]>([{ id: WELCOME_TAB_ID, kind: "welcome" }]);
+  const [activeTabId, setActiveTabId] = useState(WELCOME_TAB_ID);
+  const [sessions, setSessions] = useState<Record<string, RepoSession>>({});
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
+  const [opening, setOpening] = useState(false);
+
+  const tabsRef = useRef(tabs);
+  const sessionsRef = useRef(sessions);
+  const activeTabIdRef = useRef(activeTabId);
+  const openingPathsRef = useRef(new Set<string>());
+  tabsRef.current = tabs;
+  sessionsRef.current = sessions;
+  activeTabIdRef.current = activeTabId;
+
+  const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? tabs[0];
+  const session = activeTab.kind === "repo" ? sessions[activeTab.id] : undefined;
+
+  const syncTabMeta = useCallback((tabId: string, snapshot: WorkspaceSnapshot) => {
+    setTabs((current) =>
+      current.map((tab) =>
+        tab.id === tabId && tab.kind === "repo"
+          ? {
+              ...tab,
+              path: snapshot.repo.path,
+              name: snapshot.repo.name,
+              branch: snapshot.repo.currentBranch,
+              isDetached: snapshot.repo.isDetached,
+            }
+          : tab,
+      ),
+    );
+  }, []);
+
+  const patchSession = useCallback(
+    (tabId: string, patch: Partial<RepoSession>) => {
+      setSessions((current) => {
+        const existing = current[tabId];
+        if (!existing) return current;
+        return { ...current, [tabId]: { ...existing, ...patch } };
+      });
+      if (patch.snapshot) syncTabMeta(tabId, patch.snapshot);
+    },
+    [syncTabMeta],
+  );
+
+  const activeRepoPath = useCallback(() => {
+    const tab = tabsRef.current.find((item) => item.id === activeTabIdRef.current);
+    return tab?.kind === "repo" ? tab.path : null;
+  }, []);
 
   const loadRecents = useCallback(async () => {
     try {
@@ -75,38 +189,42 @@ export function GitProvider({ children }: { children: ReactNode }) {
     void loadRecents();
   }, [loadRecents]);
 
-  const applySnapshot = useCallback((next: WorkspaceSnapshot) => {
-    setSnapshot(next);
-  }, []);
+  const openPath = useCallback(async (path: string) => {
+    const existing = findRepoTab(tabsRef.current, path);
+    if (existing) {
+      setActiveTabId(existing.id);
+      return;
+    }
 
-  const refreshCommits = useCallback(async () => {
+    const pendingKey = path.toLowerCase();
+    if (openingPathsRef.current.has(pendingKey)) return;
+    openingPathsRef.current.add(pendingKey);
+    setOpening(true);
     try {
-      setCommits(await gitApi.getCommits(120));
+      const snapshot = await gitApi.openRepository(path);
+      const opened = findRepoTab(tabsRef.current, snapshot.repo.path);
+      if (opened) {
+        setActiveTabId(opened.id);
+        setRecents(await gitApi.listRecents());
+        return;
+      }
+
+      const tab = tabFromSnapshot(snapshot);
+      const commits = await gitApi.getCommits(snapshot.repo.path, 120);
+      setSessions((current) => ({
+        ...current,
+        [tab.id]: { ...emptySession(snapshot.repo.path), snapshot, commits },
+      }));
+      setTabs((current) => (current.some((item) => item.id === tab.id) ? current : [...current, tab]));
+      setActiveTabId(tab.id);
+      setRecents(await gitApi.listRecents());
     } catch (error) {
       toast.error(errorMessage(error));
+    } finally {
+      openingPathsRef.current.delete(pendingKey);
+      setOpening(openingPathsRef.current.size > 0);
     }
   }, []);
-
-  const openPath = useCallback(
-    async (path: string) => {
-      setBusy(true);
-      try {
-        const next = await gitApi.openRepository(path);
-        applySnapshot(next);
-        setSelection(null);
-        setDiff(null);
-        setCommitDetails(null);
-        setView("changes");
-        setRecents(await gitApi.listRecents());
-        await refreshCommits();
-      } catch (error) {
-        toast.error(errorMessage(error));
-      } finally {
-        setBusy(false);
-      }
-    },
-    [applySnapshot, refreshCommits],
-  );
 
   const openFolder = useCallback(async () => {
     const selected = await open({
@@ -127,27 +245,44 @@ export function GitProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const closeRepo = useCallback(async () => {
-    await gitApi.closeRepository();
-    setSnapshot(null);
-    setCommits([]);
-    setSelection(null);
-    setDiff(null);
-    setCommitDetails(null);
+  const closeTab = useCallback((id: string) => {
+    if (id === WELCOME_TAB_ID) return;
+    setTabs((current) => {
+      const index = current.findIndex((tab) => tab.id === id);
+      const next = current.filter((tab) => tab.id !== id);
+      setActiveTabId((active) => {
+        if (active !== id) return active;
+        return next[Math.max(0, index - 1)]?.id ?? WELCOME_TAB_ID;
+      });
+      return next.length > 0 ? next : [{ id: WELCOME_TAB_ID, kind: "welcome" }];
+    });
+    setSessions((current) => {
+      const { [id]: _dropped, ...rest } = current;
+      return rest;
+    });
   }, []);
 
+  const closeRepo = useCallback(() => {
+    const tab = tabsRef.current.find((item) => item.id === activeTabIdRef.current);
+    if (tab?.kind === "repo") closeTab(tab.id);
+  }, [closeTab]);
+
   const refresh = useCallback(async () => {
-    if (!snapshot) return;
-    setBusy(true);
+    const path = activeRepoPath();
+    const tabId = activeTabIdRef.current;
+    if (!path) return;
+    patchSession(tabId, { busy: true });
     try {
-      applySnapshot(await gitApi.refreshWorkspace());
-      await refreshCommits();
+      const [snapshot, commits] = await Promise.all([
+        gitApi.refreshWorkspace(path),
+        gitApi.getCommits(path, 120),
+      ]);
+      patchSession(tabId, { snapshot, commits, busy: false });
     } catch (error) {
+      patchSession(tabId, { busy: false });
       toast.error(errorMessage(error));
-    } finally {
-      setBusy(false);
     }
-  }, [applySnapshot, refreshCommits, snapshot]);
+  }, [activeRepoPath, patchSession]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -161,128 +296,184 @@ export function GitProvider({ children }: { children: ReactNode }) {
         event.preventDefault();
         void refresh();
       }
+      if (event.key.toLowerCase() === "w") {
+        event.preventDefault();
+        closeRepo();
+      }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [openFolder, refresh]);
+  }, [closeRepo, openFolder, refresh]);
 
-  const selectChange = useCallback(async (path: string, staged: boolean) => {
-    setView("changes");
-    setSelection({ type: "change", path, staged });
-    setCommitDetails(null);
-    try {
-      setDiff(await gitApi.getWorkdirDiff(path, staged));
-    } catch (error) {
-      setDiff(null);
-      toast.error(errorMessage(error));
-    }
-  }, []);
+  const setView = useCallback(
+    (view: View) => {
+      patchSession(activeTabIdRef.current, { view });
+    },
+    [patchSession],
+  );
 
-  const selectCommit = useCallback(async (id: string) => {
-    setView("history");
-    setSelection({ type: "commit", id });
-    try {
-      const details = await gitApi.getCommitDetails(id);
-      setCommitDetails(details);
-      const first = details.files[0];
-      if (first) {
-        setSelection({ type: "commit", id, path: first.path });
-        setDiff(await gitApi.getCommitDiff(id, first.path));
-      } else {
-        setDiff(null);
-      }
-    } catch (error) {
-      setCommitDetails(null);
-      setDiff(null);
-      toast.error(errorMessage(error));
-    }
-  }, []);
-
-  const selectCommitFile = useCallback(async (id: string, path: string) => {
-    setView("history");
-    setSelection({ type: "commit", id, path });
-    try {
-      if (!commitDetails || commitDetails.commit.id !== id) {
-        setCommitDetails(await gitApi.getCommitDetails(id));
-      }
-      setDiff(await gitApi.getCommitDiff(id, path));
-    } catch (error) {
-      setDiff(null);
-      toast.error(errorMessage(error));
-    }
-  }, [commitDetails]);
-
-  const runMutation = useCallback(
-    async (action: () => Promise<WorkspaceSnapshot>, success?: string) => {
-      setBusy(true);
+  const selectChange = useCallback(
+    async (path: string, staged: boolean) => {
+      const repoPath = activeRepoPath();
+      const tabId = activeTabIdRef.current;
+      if (!repoPath) return;
+      patchSession(tabId, { view: "changes", changeSelection: { type: "change", path, staged } });
       try {
-        applySnapshot(await action());
-        if (success) toast.success(success);
-        if (selection?.type === "change") {
-          try {
-            setDiff(await gitApi.getWorkdirDiff(selection.path, selection.staged));
-          } catch {
-            setDiff(null);
-            setSelection(null);
-          }
-        }
-        await refreshCommits();
+        patchSession(tabId, { changeDiff: await gitApi.getWorkdirDiff(repoPath, path, staged) });
       } catch (error) {
+        patchSession(tabId, { changeDiff: null });
         toast.error(errorMessage(error));
-      } finally {
-        setBusy(false);
       }
     },
-    [applySnapshot, refreshCommits, selection],
+    [activeRepoPath, patchSession],
+  );
+
+  const selectCommit = useCallback(
+    async (id: string) => {
+      const repoPath = activeRepoPath();
+      const tabId = activeTabIdRef.current;
+      if (!repoPath) return;
+      patchSession(tabId, { view: "history", historySelection: { type: "commit", id } });
+      try {
+        const details = await gitApi.getCommitDetails(repoPath, id);
+        const first = details.files[0];
+        patchSession(tabId, {
+          commitDetails: details,
+          historySelection: first ? { type: "commit", id, path: first.path } : { type: "commit", id },
+          historyDiff: first
+            ? first.binary
+              ? emptyBinaryDiff(first.path, first.oldPath)
+              : await gitApi.getCommitDiff(repoPath, id, first.path)
+            : null,
+        });
+      } catch (error) {
+        patchSession(tabId, { commitDetails: null, historyDiff: null });
+        toast.error(errorMessage(error));
+      }
+    },
+    [activeRepoPath, patchSession],
+  );
+
+  const selectCommitFile = useCallback(
+    async (id: string, path: string) => {
+      const repoPath = activeRepoPath();
+      const tabId = activeTabIdRef.current;
+      if (!repoPath) return;
+      patchSession(tabId, { view: "history", historySelection: { type: "commit", id, path } });
+      try {
+        const current = sessionsRef.current[tabId];
+        const details =
+          current?.commitDetails?.commit.id === id
+            ? current.commitDetails
+            : await gitApi.getCommitDetails(repoPath, id);
+        const file = details.files.find((item) => item.path === path);
+        patchSession(tabId, {
+          commitDetails: details,
+          historyDiff: file?.binary
+            ? emptyBinaryDiff(path, file.oldPath)
+            : await gitApi.getCommitDiff(repoPath, id, path),
+        });
+      } catch (error) {
+        patchSession(tabId, { historyDiff: null });
+        toast.error(errorMessage(error));
+      }
+    },
+    [activeRepoPath, patchSession],
+  );
+
+  const runMutation = useCallback(
+    async (action: (repoPath: string) => Promise<WorkspaceSnapshot>, success?: string) => {
+      const repoPath = activeRepoPath();
+      const tabId = activeTabIdRef.current;
+      if (!repoPath) return;
+      const current = sessionsRef.current[tabId];
+      const changeSelection = current?.changeSelection ?? null;
+      patchSession(tabId, { busy: true });
+      try {
+        const snapshot = await action(repoPath);
+        const commits = await gitApi.getCommits(repoPath, 120);
+        let changeDiff = current?.changeDiff ?? null;
+        let nextSelection = changeSelection;
+        if (changeSelection) {
+          try {
+            changeDiff = await gitApi.getWorkdirDiff(
+              repoPath,
+              changeSelection.path,
+              changeSelection.staged,
+            );
+          } catch {
+            changeDiff = null;
+            nextSelection = null;
+          }
+        }
+        patchSession(tabId, {
+          snapshot,
+          commits,
+          changeDiff,
+          changeSelection: nextSelection,
+          busy: false,
+        });
+        if (success) toast.success(success);
+      } catch (error) {
+        patchSession(tabId, { busy: false });
+        toast.error(errorMessage(error));
+      }
+    },
+    [activeRepoPath, patchSession],
   );
 
   const stage = useCallback(
     async (paths: string[]) => {
-      await runMutation(() => gitApi.stagePaths(paths));
+      await runMutation((repoPath) => gitApi.stagePaths(repoPath, paths));
     },
     [runMutation],
   );
 
   const unstage = useCallback(
     async (paths: string[]) => {
-      await runMutation(() => gitApi.unstagePaths(paths));
+      await runMutation((repoPath) => gitApi.unstagePaths(repoPath, paths));
     },
     [runMutation],
   );
 
   const discard = useCallback(
     async (paths: string[]) => {
-      await runMutation(() => gitApi.discardPaths(paths), "Discarded changes");
-      if (selection?.type === "change" && paths.includes(selection.path)) {
-        setSelection(null);
-        setDiff(null);
+      await runMutation((repoPath) => gitApi.discardPaths(repoPath, paths), "Discarded changes");
+      const tabId = activeTabIdRef.current;
+      const selected = sessionsRef.current[tabId]?.changeSelection;
+      if (selected && paths.includes(selected.path)) {
+        patchSession(tabId, { changeSelection: null, changeDiff: null });
       }
     },
-    [runMutation, selection],
+    [patchSession, runMutation],
   );
 
   const commit = useCallback(
     async (message: string) => {
-      await runMutation(() => gitApi.commit(message), "Created commit");
-      setSelection(null);
-      setDiff(null);
+      await runMutation((repoPath) => gitApi.commit(repoPath, message), "Created commit");
+      patchSession(activeTabIdRef.current, { changeSelection: null, changeDiff: null });
     },
-    [runMutation],
+    [patchSession, runMutation],
   );
 
   const checkoutBranch = useCallback(
     async (name: string) => {
-      await runMutation(() => gitApi.checkoutBranch(name), `Checked out ${name}`);
-      setSelection(null);
-      setDiff(null);
+      await runMutation((repoPath) => gitApi.checkoutBranch(repoPath, name), `Checked out ${name}`);
+      patchSession(activeTabIdRef.current, {
+        changeSelection: null,
+        historySelection: null,
+        changeDiff: null,
+        historyDiff: null,
+        commitDetails: null,
+      });
     },
-    [runMutation],
+    [patchSession, runMutation],
   );
 
   const createBranch = useCallback(
     async (name: string, switchTo: boolean) => {
       await runMutation(
-        () => gitApi.createBranch(name, switchTo),
+        (repoPath) => gitApi.createBranch(repoPath, name, switchTo),
         switchTo ? `Created and checked out ${name}` : `Created ${name}`,
       );
     },
@@ -292,15 +483,22 @@ export function GitProvider({ children }: { children: ReactNode }) {
   const value = useMemo<GitContextValue>(
     () => ({
       recents,
-      snapshot,
-      commits,
-      view,
-      selection,
-      diff,
-      commitDetails,
+      tabs,
+      activeTabId,
+      activeTab,
+      snapshot: session?.snapshot ?? null,
+      commits: session?.commits ?? [],
+      view: session?.view ?? "changes",
+      changeSelection: session?.changeSelection ?? null,
+      historySelection: session?.historySelection ?? null,
+      changeDiff: session?.changeDiff ?? null,
+      historyDiff: session?.historyDiff ?? null,
+      commitDetails: session?.commitDetails ?? null,
       loading,
-      busy,
+      busy: opening || (session?.busy ?? false),
       setView,
+      setActiveTab: setActiveTabId,
+      closeTab,
       openFolder,
       openPath,
       forgetRecent,
@@ -318,14 +516,14 @@ export function GitProvider({ children }: { children: ReactNode }) {
     }),
     [
       recents,
-      snapshot,
-      commits,
-      view,
-      selection,
-      diff,
-      commitDetails,
+      tabs,
+      activeTabId,
+      activeTab,
+      session,
       loading,
-      busy,
+      opening,
+      setView,
+      closeTab,
       openFolder,
       openPath,
       forgetRecent,

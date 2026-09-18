@@ -3,7 +3,10 @@ import { cn } from "@/lib/utils";
 import { useGit } from "@/state/git-context";
 
 export function DiffViewer() {
-  const { diff, selection, commitDetails } = useGit();
+  const { view, changeSelection, historySelection, changeDiff, historyDiff, commitDetails } =
+    useGit();
+  const selection = view === "changes" ? changeSelection : historySelection;
+  const diff = view === "changes" ? changeDiff : historyDiff;
   const title =
     selection?.type === "change"
       ? selection.path
@@ -14,7 +17,7 @@ export function DiffViewer() {
   if (!selection) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-        Select a file to see its diff
+        {view === "history" ? "Select a commit to see its diff" : "Select a file to see its diff"}
       </div>
     );
   }
@@ -62,7 +65,9 @@ export function DiffViewer() {
                 <span className="text-center">
                   {line.kind === "add" ? "+" : line.kind === "delete" ? "-" : line.kind === "hunk" ? "" : " "}
                 </span>
-                <span className="whitespace-pre">{line.kind === "hunk" ? line.content : line.content || " "}</span>
+                <span className="whitespace-pre">
+                  {line.kind === "hunk" ? line.content : line.content || " "}
+                </span>
               </div>
             ))}
             {diff.truncated ? (
@@ -71,7 +76,7 @@ export function DiffViewer() {
           </pre>
         )}
       </div>
-      {commitDetails && selection.type === "commit" ? (
+      {view === "history" && commitDetails && selection.type === "commit" ? (
         <CommitFiles />
       ) : null}
     </div>
@@ -79,9 +84,9 @@ export function DiffViewer() {
 }
 
 function CommitFiles() {
-  const { commitDetails, selection, selectCommitFile } = useGit();
+  const { commitDetails, historySelection, selectCommitFile } = useGit();
   if (!commitDetails) return null;
-  const selectedPath = selection?.type === "commit" ? selection.path : undefined;
+  const selectedPath = historySelection?.path;
 
   return (
     <div className="max-h-48 shrink-0 overflow-auto border-t">
@@ -107,9 +112,13 @@ function CommitFiles() {
               )}
               onClick={() => void selectCommitFile(commitDetails.commit.id, file.path)}
             >
-              <span className="font-mono text-[11px] text-muted-foreground">{file.kind[0]?.toUpperCase()}</span>
+              <span className="font-mono text-[11px] text-muted-foreground">
+                {file.kind[0]?.toUpperCase()}
+              </span>
               <span className="truncate font-mono">{file.path}</span>
-              <span className="ml-auto truncate text-muted-foreground">{fileName(file.path)}</span>
+              <span className="ml-auto truncate text-muted-foreground">
+                {file.binary ? "binary" : fileName(file.path)}
+              </span>
             </button>
           </li>
         ))}

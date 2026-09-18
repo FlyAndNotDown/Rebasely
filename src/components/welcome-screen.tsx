@@ -1,6 +1,6 @@
 import { FolderOpenIcon, GitBranchIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { formatRelativeTime } from "@/lib/format";
+import { displayPath, formatRelativeTime } from "@/lib/format";
 import { useGit } from "@/state/git-context";
 
 export function WelcomeScreen() {
@@ -40,7 +40,7 @@ export function WelcomeScreen() {
                   >
                     <div className="truncate text-sm font-medium">{repo.name}</div>
                     <div className="truncate font-mono text-[11px] text-muted-foreground">
-                      {repo.path}
+                      {displayPath(repo.path)}
                     </div>
                   </button>
                   <span className="shrink-0 text-[11px] text-muted-foreground">

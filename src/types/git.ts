@@ -61,6 +61,7 @@ export interface CommitFile {
   path: string;
   oldPath: string | null;
   kind: FileKind | string;
+  binary: boolean;
 }
 
 export interface CommitDetails {

@@ -5,6 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Manager};
 
 use crate::error::AppResult;
+use crate::git::strip_verbatim_prefix;
 
 const MAX_RECENTS: usize = 12;
 
@@ -29,8 +30,20 @@ pub fn load_recents(app: &AppHandle) -> AppResult<Vec<RecentRepo>> {
     if !path.exists() {
         return Ok(Vec::new());
     }
-    let data = fs::read_to_string(path)?;
-    Ok(serde_json::from_str(&data).unwrap_or_default())
+    let data = fs::read_to_string(&path)?;
+    let mut recents: Vec<RecentRepo> = serde_json::from_str(&data).unwrap_or_default();
+    let mut changed = false;
+    for item in &mut recents {
+        let normalized = strip_verbatim_prefix(&item.path);
+        if normalized != item.path {
+            item.path = normalized;
+            changed = true;
+        }
+    }
+    if changed {
+        let _ = save_recents(app, &recents);
+    }
+    Ok(recents)
 }
 
 fn save_recents(app: &AppHandle, recents: &[RecentRepo]) -> AppResult<()> {
@@ -44,12 +57,13 @@ pub fn remember_repo(app: &AppHandle, path: &str, name: &str) -> AppResult<Vec<R
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
+    let path = strip_verbatim_prefix(path);
     let mut recents = load_recents(app)?;
     recents.retain(|item| item.path != path);
     recents.insert(
         0,
         RecentRepo {
-            path: path.to_string(),
+            path,
             name: name.to_string(),
             last_opened: now,
         },
@@ -60,6 +74,7 @@ pub fn remember_repo(app: &AppHandle, path: &str, name: &str) -> AppResult<Vec<R
 }
 
 pub fn forget_repo(app: &AppHandle, path: &str) -> AppResult<Vec<RecentRepo>> {
+    let path = strip_verbatim_prefix(path);
     let mut recents = load_recents(app)?;
     recents.retain(|item| item.path != path);
     save_recents(app, &recents)?;

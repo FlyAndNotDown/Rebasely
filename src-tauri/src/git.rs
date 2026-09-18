@@ -77,6 +77,7 @@ pub struct CommitFile {
     pub path: String,
     pub old_path: Option<String>,
     pub kind: String,
+    pub binary: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -111,8 +112,82 @@ pub struct WorkspaceSnapshot {
     pub branches: BranchList,
 }
 
+pub fn strip_verbatim_prefix(path: &str) -> String {
+    let path = path.trim();
+    if let Some(rest) = path.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{rest}")
+    } else if let Some(rest) = path.strip_prefix(r"\\?\") {
+        rest.to_string()
+    } else {
+        path.to_string()
+    }
+}
+
+fn strip_verbatim_path(path: PathBuf) -> PathBuf {
+    PathBuf::from(strip_verbatim_prefix(&path.to_string_lossy()))
+}
+
 fn to_git_path(path: &str) -> String {
     path.replace('\\', "/").trim_matches('/').to_string()
+}
+
+fn looks_binary_path(path: &str) -> bool {
+    let ext = Path::new(path)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    matches!(
+        ext.as_str(),
+        "png"
+            | "jpg"
+            | "jpeg"
+            | "gif"
+            | "webp"
+            | "ico"
+            | "bmp"
+            | "pdf"
+            | "zip"
+            | "7z"
+            | "rar"
+            | "gz"
+            | "tar"
+            | "exe"
+            | "dll"
+            | "pdb"
+            | "so"
+            | "dylib"
+            | "uasset"
+            | "umap"
+            | "ubulk"
+            | "uexp"
+            | "locres"
+            | "archive"
+            | "bin"
+            | "dat"
+            | "wasm"
+            | "ttf"
+            | "otf"
+            | "woff"
+            | "woff2"
+            | "mp3"
+            | "mp4"
+            | "wav"
+            | "ogg"
+    )
+}
+
+fn is_delta_binary(delta: &git2::DiffDelta<'_>) -> bool {
+    if delta.flags().contains(git2::DiffFlags::BINARY) {
+        return true;
+    }
+    let path = delta
+        .new_file()
+        .path()
+        .or_else(|| delta.old_file().path())
+        .and_then(|path| path.to_str())
+        .unwrap_or("");
+    looks_binary_path(path)
 }
 
 fn workdir(repo: &Repository) -> AppResult<&Path> {
@@ -140,7 +215,8 @@ fn ensure_inside_workdir(repo: &Repository, relative: &str) -> AppResult<PathBuf
 }
 
 pub fn discover(path: &str) -> AppResult<Repository> {
-    let repo = Repository::discover(path).map_err(|_| {
+    let path = strip_verbatim_prefix(path);
+    let repo = Repository::discover(&path).map_err(|_| {
         AppError::msg(format!("No Git repository found at {path}"))
     })?;
     if repo.is_bare() {
@@ -159,7 +235,7 @@ pub fn open_at(path: &Path) -> AppResult<Repository> {
 
 pub fn canonical_workdir(repo: &Repository) -> AppResult<PathBuf> {
     let path = workdir_owned(repo)?;
-    Ok(path.canonicalize().unwrap_or(path))
+    Ok(strip_verbatim_path(path.canonicalize().unwrap_or(path)))
 }
 
 pub fn repo_info(repo: &Repository) -> AppResult<RepoInfo> {
@@ -502,11 +578,9 @@ pub fn commits(repo: &Repository, limit: usize) -> AppResult<Vec<CommitSummary>>
 fn collect_patch(diff: git2::Diff<'_>, fallback_path: &str) -> AppResult<FileDiff> {
     let mut path = fallback_path.to_string();
     let mut old_path = None;
-    let mut binary = false;
-    let mut lines = Vec::new();
-    let mut truncated = false;
+    let mut binary = looks_binary_path(fallback_path);
 
-    diff.print(DiffFormat::Patch, |delta, hunk, line| {
+    for delta in diff.deltas() {
         if let Some(new_path) = delta.new_file().path() {
             path = new_path.to_string_lossy().replace('\\', "/");
         }
@@ -516,28 +590,39 @@ fn collect_patch(diff: git2::Diff<'_>, fallback_path: &str) -> AppResult<FileDif
                 old_path = Some(prev);
             }
         }
-        if delta.status() == git2::Delta::Unmodified {
+        if is_delta_binary(&delta) {
+            binary = true;
+        }
+    }
+
+    if binary {
+        return Ok(FileDiff {
+            path,
+            old_path,
+            binary: true,
+            truncated: false,
+            lines: Vec::new(),
+        });
+    }
+
+    let mut lines = Vec::new();
+    let mut truncated = false;
+    let print_result = diff.print(DiffFormat::Patch, |_, _, line| {
+        if binary || truncated {
             return true;
         }
-        match delta.status() {
-            git2::Delta::Unreadable => {}
-            _ if matches!(line.origin(), 'F' | 'H') => {}
-            _ => {}
+        if matches!(line.origin(), 'B') || line.content().contains(&0) {
+            binary = true;
+            lines.clear();
+            return true;
         }
-
-        if hunk.is_none() && matches!(line.origin(), 'F' | 'G' | 'I') {
-            if line.origin() == 'F' || line.content().windows(7).any(|w| w == b"Binary ") {
-                let content = String::from_utf8_lossy(line.content());
-                if content.to_ascii_lowercase().contains("binary") {
-                    binary = true;
-                }
+        if hunk_or_meta_only(line.origin()) && matches!(line.origin(), 'F' | 'G' | 'I' | 'B') {
+            let content = String::from_utf8_lossy(line.content());
+            if content.to_ascii_lowercase().contains("binary") {
+                binary = true;
+                lines.clear();
             }
             return true;
-        }
-
-        if lines.len() >= 4000 {
-            truncated = true;
-            return false;
         }
 
         let kind = match line.origin() {
@@ -547,8 +632,11 @@ fn collect_patch(diff: git2::Diff<'_>, fallback_path: &str) -> AppResult<FileDif
             'H' | '@' => "hunk",
             _ => "meta",
         };
-
         if kind == "meta" {
+            return true;
+        }
+        if lines.len() >= 4000 {
+            truncated = true;
             return true;
         }
 
@@ -567,15 +655,36 @@ fn collect_patch(diff: git2::Diff<'_>, fallback_path: &str) -> AppResult<FileDif
             new_lineno: line.new_lineno(),
         });
         true
-    })?;
+    });
+
+    if let Err(err) = print_result {
+        if err.code() != ErrorCode::User {
+            return Err(err.into());
+        }
+        truncated = true;
+    }
+
+    if binary {
+        return Ok(FileDiff {
+            path,
+            old_path,
+            binary: true,
+            truncated: false,
+            lines: Vec::new(),
+        });
+    }
 
     Ok(FileDiff {
         path,
         old_path,
-        binary,
+        binary: false,
         truncated,
         lines,
     })
+}
+
+fn hunk_or_meta_only(origin: char) -> bool {
+    matches!(origin, 'F' | 'G' | 'I' | 'B' | 'H')
 }
 
 fn diff_options_for(path: &str) -> DiffOptions {
@@ -583,7 +692,6 @@ fn diff_options_for(path: &str) -> DiffOptions {
     opts.pathspec(path)
         .include_untracked(true)
         .recurse_untracked_dirs(true)
-        .force_text(true)
         .minimal(true);
     opts
 }
@@ -645,6 +753,7 @@ pub fn commit_details(repo: &Repository, oid: &str) -> AppResult<CommitDetails> 
                 .map(|p| p.to_string_lossy().replace('\\', "/"))
                 .filter(|old| old != &path);
             files.push(CommitFile {
+                binary: is_delta_binary(&delta) || looks_binary_path(&path),
                 path,
                 old_path,
                 kind: delta_kind(delta.status()).to_string(),

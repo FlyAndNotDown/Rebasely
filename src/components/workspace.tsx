@@ -1,4 +1,4 @@
-import { AppHeader } from "@/components/app-header";
+import { AppSidebar } from "@/components/app-sidebar";
 import { ChangesPane } from "@/components/changes-pane";
 import { DiffViewer } from "@/components/diff-viewer";
 import { HistoryPane } from "@/components/history-pane";
@@ -13,8 +13,8 @@ export function Workspace() {
   const { view } = useGit();
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <AppHeader />
+    <div className="flex h-full min-h-0">
+      <AppSidebar />
       <ResizablePanelGroup orientation="horizontal" className="min-h-0 flex-1">
         <ResizablePanel defaultSize="28%" minSize="20%" maxSize="45%">
           {view === "changes" ? <ChangesPane /> : <HistoryPane />}

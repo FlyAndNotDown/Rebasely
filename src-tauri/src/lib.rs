@@ -2,28 +2,17 @@ mod error;
 mod git;
 mod recents;
 
-use std::path::PathBuf;
-use std::sync::Mutex;
+use std::path::Path;
 
-use tauri::{AppHandle, State};
+use tauri::AppHandle;
 
-use error::{AppError, AppResult};
+use error::AppResult;
 use git::{CommitDetails, CommitSummary, FileDiff, WorkspaceSnapshot};
 use recents::RecentRepo;
 
-#[derive(Default)]
-struct AppState {
-    repo_path: Mutex<Option<PathBuf>>,
-}
-
-fn with_repo<T>(state: &AppState, f: impl FnOnce(&git2::Repository) -> AppResult<T>) -> AppResult<T> {
-    let path = state
-        .repo_path
-        .lock()
-        .map_err(|_| AppError::msg("Repository state is locked"))?
-        .clone()
-        .ok_or_else(|| AppError::msg("Open a repository first"))?;
-    let repo = git::open_at(&path)?;
+fn with_repo<T>(path: &str, f: impl FnOnce(&git2::Repository) -> AppResult<T>) -> AppResult<T> {
+    let path = git::strip_verbatim_prefix(path);
+    let repo = git::open_at(Path::new(&path))?;
     f(&repo)
 }
 
@@ -38,103 +27,81 @@ fn forget_recent(path: String, app: AppHandle) -> AppResult<Vec<RecentRepo>> {
 }
 
 #[tauri::command]
-fn open_repository(path: String, state: State<AppState>, app: AppHandle) -> AppResult<WorkspaceSnapshot> {
+fn open_repository(path: String, app: AppHandle) -> AppResult<WorkspaceSnapshot> {
     let repo = git::discover(&path)?;
-    let workdir = git::canonical_workdir(&repo)?;
-    {
-        let mut current = state
-            .repo_path
-            .lock()
-            .map_err(|_| AppError::msg("Repository state is locked"))?;
-        *current = Some(workdir.clone());
-    }
     let snapshot = git::snapshot(&repo)?;
     recents::remember_repo(&app, &snapshot.repo.path, &snapshot.repo.name)?;
     Ok(snapshot)
 }
 
 #[tauri::command]
-fn close_repository(state: State<AppState>) -> AppResult<()> {
-    let mut current = state
-        .repo_path
-        .lock()
-        .map_err(|_| AppError::msg("Repository state is locked"))?;
-    *current = None;
-    Ok(())
+fn refresh_workspace(repo_path: String) -> AppResult<WorkspaceSnapshot> {
+    with_repo(&repo_path, git::snapshot)
 }
 
 #[tauri::command]
-fn refresh_workspace(state: State<AppState>) -> AppResult<WorkspaceSnapshot> {
-    with_repo(&state, git::snapshot)
+fn get_commits(repo_path: String, limit: Option<usize>) -> AppResult<Vec<CommitSummary>> {
+    with_repo(&repo_path, |repo| git::commits(repo, limit.unwrap_or(100)))
 }
 
 #[tauri::command]
-fn get_commits(state: State<AppState>, limit: Option<usize>) -> AppResult<Vec<CommitSummary>> {
-    with_repo(&state, |repo| git::commits(repo, limit.unwrap_or(100)))
+fn get_workdir_diff(repo_path: String, path: String, staged: bool) -> AppResult<FileDiff> {
+    with_repo(&repo_path, |repo| git::workdir_diff(repo, &path, staged))
 }
 
 #[tauri::command]
-fn get_workdir_diff(state: State<AppState>, path: String, staged: bool) -> AppResult<FileDiff> {
-    with_repo(&state, |repo| git::workdir_diff(repo, &path, staged))
+fn get_commit_details(repo_path: String, oid: String) -> AppResult<CommitDetails> {
+    with_repo(&repo_path, |repo| git::commit_details(repo, &oid))
 }
 
 #[tauri::command]
-fn get_commit_details(state: State<AppState>, oid: String) -> AppResult<CommitDetails> {
-    with_repo(&state, |repo| git::commit_details(repo, &oid))
+fn get_commit_diff(repo_path: String, oid: String, path: String) -> AppResult<FileDiff> {
+    with_repo(&repo_path, |repo| git::commit_file_diff(repo, &oid, &path))
 }
 
 #[tauri::command]
-fn get_commit_diff(state: State<AppState>, oid: String, path: String) -> AppResult<FileDiff> {
-    with_repo(&state, |repo| git::commit_file_diff(repo, &oid, &path))
-}
-
-#[tauri::command]
-fn stage_paths(state: State<AppState>, paths: Vec<String>) -> AppResult<WorkspaceSnapshot> {
-    with_repo(&state, |repo| {
+fn stage_paths(repo_path: String, paths: Vec<String>) -> AppResult<WorkspaceSnapshot> {
+    with_repo(&repo_path, |repo| {
         git::stage_paths(repo, &paths)?;
         git::snapshot(repo)
     })
 }
 
 #[tauri::command]
-fn unstage_paths(state: State<AppState>, paths: Vec<String>) -> AppResult<WorkspaceSnapshot> {
-    with_repo(&state, |repo| {
+fn unstage_paths(repo_path: String, paths: Vec<String>) -> AppResult<WorkspaceSnapshot> {
+    with_repo(&repo_path, |repo| {
         git::unstage_paths(repo, &paths)?;
         git::snapshot(repo)
     })
 }
 
 #[tauri::command]
-fn discard_paths(state: State<AppState>, paths: Vec<String>) -> AppResult<WorkspaceSnapshot> {
-    with_repo(&state, |repo| {
+fn discard_paths(repo_path: String, paths: Vec<String>) -> AppResult<WorkspaceSnapshot> {
+    with_repo(&repo_path, |repo| {
         git::discard_paths(repo, &paths)?;
         git::snapshot(repo)
     })
 }
 
 #[tauri::command]
-fn commit_changes(state: State<AppState>, message: String) -> AppResult<WorkspaceSnapshot> {
-    with_repo(&state, |repo| {
+fn commit_changes(repo_path: String, message: String) -> AppResult<WorkspaceSnapshot> {
+    with_repo(&repo_path, |repo| {
         git::commit(repo, &message)?;
         git::snapshot(repo)
     })
 }
 
 #[tauri::command]
-fn checkout_branch(state: State<AppState>, name: String) -> AppResult<WorkspaceSnapshot> {
-    with_repo(&state, |repo| {
+fn checkout_branch(repo_path: String, name: String) -> AppResult<WorkspaceSnapshot> {
+    with_repo(&repo_path, |repo| {
         git::checkout_branch(repo, &name)?;
         git::snapshot(repo)
     })
 }
 
 #[tauri::command]
-fn create_branch(
-    state: State<AppState>,
-    name: String,
-    switch: bool,
-) -> AppResult<WorkspaceSnapshot> {
-    with_repo(&state, |repo| {
+fn create_branch(repo_path: String, name: String, switch: bool) -> AppResult<WorkspaceSnapshot> {
+    with_repo(&repo_path, |repo| {
         git::create_branch(repo, &name, switch)?;
         git::snapshot(repo)
     })
@@ -145,12 +112,10 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .manage(AppState::default())
         .invoke_handler(tauri::generate_handler![
             list_recents,
             forget_recent,
             open_repository,
-            close_repository,
             refresh_workspace,
             get_commits,
             get_workdir_diff,
