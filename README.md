@@ -14,13 +14,13 @@ Version 1 focuses on local repository workflows: open a repo, inspect the workin
 
 ```bash
 npm install
-npm run tauri dev
+npm run dev
 ```
 
 ## Build
 
 ```bash
-npm run tauri build
+npm run build
 ```
 
 ## Current features
