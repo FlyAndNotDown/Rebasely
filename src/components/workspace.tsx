@@ -1,5 +1,5 @@
-import { AppSidebar } from "@/components/app-sidebar";
 import { ChangesPane } from "@/components/changes-pane";
+import { CommitFiles } from "@/components/commit-files";
 import { DiffViewer } from "@/components/diff-viewer";
 import { HistoryPane } from "@/components/history-pane";
 import {
@@ -14,16 +14,35 @@ export function Workspace() {
 
   return (
     <div className="flex h-full min-h-0">
-      <AppSidebar />
-      <ResizablePanelGroup orientation="horizontal" className="min-h-0 flex-1">
-        <ResizablePanel defaultSize="36%" minSize="24%" maxSize="52%">
-          {view === "changes" ? <ChangesPane /> : <HistoryPane />}
-        </ResizablePanel>
-        <ResizableHandle />
-        <ResizablePanel defaultSize="64%" minSize="36%">
-          <DiffViewer />
-        </ResizablePanel>
-      </ResizablePanelGroup>
+      {view === "history" ? (
+        <ResizablePanelGroup orientation="vertical" className="min-h-0 flex-1">
+          <ResizablePanel defaultSize="40%" minSize="22%">
+            <HistoryPane />
+          </ResizablePanel>
+          <ResizableHandle withHandle />
+          <ResizablePanel defaultSize="60%" minSize="28%">
+            <ResizablePanelGroup orientation="horizontal" className="min-h-0">
+              <ResizablePanel defaultSize="34%" minSize="20%" maxSize="55%">
+                <CommitFiles />
+              </ResizablePanel>
+              <ResizableHandle />
+              <ResizablePanel defaultSize="66%" minSize="30%">
+                <DiffViewer />
+              </ResizablePanel>
+            </ResizablePanelGroup>
+          </ResizablePanel>
+        </ResizablePanelGroup>
+      ) : (
+        <ResizablePanelGroup orientation="horizontal" className="min-h-0 flex-1">
+          <ResizablePanel defaultSize="36%" minSize="24%" maxSize="52%">
+            <ChangesPane />
+          </ResizablePanel>
+          <ResizableHandle />
+          <ResizablePanel defaultSize="64%" minSize="36%">
+            <DiffViewer />
+          </ResizablePanel>
+        </ResizablePanelGroup>
+      )}
     </div>
   );
 }

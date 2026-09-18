@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from "react";
-import { MinusIcon, PlusIcon, Undo2Icon } from "lucide-react";
+import { ChevronDownIcon, MinusIcon, PlusIcon, Undo2Icon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   ContextMenu,
@@ -133,6 +133,8 @@ export function ChangesPane() {
     useGit();
   const [message, setMessage] = useState("");
   const [discardTarget, setDiscardTarget] = useState<string[] | null>(null);
+  const [stagedOpen, setStagedOpen] = useState(true);
+  const [changesOpen, setChangesOpen] = useState(true);
   const staged = snapshot?.status.staged ?? [];
   const unstaged = snapshot?.status.unstaged ?? [];
   const branch = snapshot?.repo.currentBranch ?? "HEAD";
@@ -157,6 +159,8 @@ export function ChangesPane() {
         <Section
           title="Staged"
           count={counts.staged}
+          open={stagedOpen}
+          onOpenChange={setStagedOpen}
           actionLabel="Unstage all"
           onAction={
             staged.length ? () => void unstage(staged.map((file) => file.path)) : undefined
@@ -181,6 +185,8 @@ export function ChangesPane() {
         <Section
           title="Changes"
           count={counts.unstaged}
+          open={changesOpen}
+          onOpenChange={setChangesOpen}
           actionLabel="Stage all"
           onAction={
             unstaged.length ? () => void stage(unstaged.map((file) => file.path)) : undefined
@@ -272,30 +278,42 @@ export function ChangesPane() {
 function Section({
   title,
   count,
+  open,
+  onOpenChange,
   actionLabel,
   onAction,
   children,
 }: {
   title: string;
   count: number;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
   actionLabel: string;
   onAction?: () => void;
   children: ReactNode;
 }) {
   return (
-    <section className="mb-3">
-      <div className="mb-1 flex items-center justify-between px-1.5">
-        <h2 className="text-xs font-medium text-muted-foreground">
-          {title}
-          <span className="ml-1 tabular-nums">{count}</span>
-        </h2>
+    <section className="mb-2 rounded-lg border">
+      <div className="flex items-center gap-1 px-1.5 py-1">
+        <button
+          type="button"
+          className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1 py-1 text-left hover:bg-muted/70"
+          onClick={() => onOpenChange(!open)}
+          aria-expanded={open}
+        >
+          <ChevronDownIcon
+            className={cn("size-3.5 text-muted-foreground transition-transform", !open && "-rotate-90")}
+          />
+          <span className="text-xs font-medium">{title}</span>
+          <span className="tabular-nums text-xs text-muted-foreground">{count}</span>
+        </button>
         {onAction ? (
           <Button variant="ghost" size="xs" onClick={onAction}>
             {actionLabel}
           </Button>
         ) : null}
       </div>
-      {children}
+      {open ? <div className="border-t px-1.5 py-1">{children}</div> : null}
     </section>
   );
 }

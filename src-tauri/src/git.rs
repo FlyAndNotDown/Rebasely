@@ -102,6 +102,14 @@ pub struct BranchList {
     pub current: Option<String>,
     pub is_detached: bool,
     pub local: Vec<BranchInfo>,
+    pub remote: Vec<BranchInfo>,
+}
+
+#[derive(Debug, Clone, Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitIdentity {
+    pub name: String,
+    pub email: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -808,15 +816,32 @@ pub fn branches(repo: &Repository) -> AppResult<BranchList> {
         });
     }
     local.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+
+    let mut remote = Vec::new();
+    for item in repo.branches(Some(BranchType::Remote))? {
+        let (branch, _) = item?;
+        let name = branch.name()?.unwrap_or_default().to_string();
+        if name.is_empty() || name.ends_with("/HEAD") {
+            continue;
+        }
+        remote.push(BranchInfo {
+            is_head: false,
+            is_remote: true,
+            name,
+            upstream: None,
+        });
+    }
+    remote.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+
     Ok(BranchList {
         current: info.current_branch,
         is_detached: info.is_detached,
         local,
+        remote,
     })
 }
 
-pub fn checkout_branch(repo: &Repository, name: &str) -> AppResult<()> {
-    let branch = repo.find_branch(name, BranchType::Local)?;
+fn checkout_local_branch(repo: &Repository, branch: &git2::Branch<'_>) -> AppResult<()> {
     let reference = branch.get();
     let commit = reference.peel_to_commit()?;
     repo.checkout_tree(commit.as_object(), None)?;
@@ -825,6 +850,28 @@ pub fn checkout_branch(repo: &Repository, name: &str) -> AppResult<()> {
         .ok_or_else(|| AppError::msg("Invalid branch reference"))?;
     repo.set_head(refname)?;
     Ok(())
+}
+
+pub fn checkout_branch(repo: &Repository, name: &str) -> AppResult<()> {
+    let name = name.trim();
+    if let Ok(branch) = repo.find_branch(name, BranchType::Local) {
+        return checkout_local_branch(repo, &branch);
+    }
+
+    let remote = repo
+        .find_branch(name, BranchType::Remote)
+        .map_err(|_| AppError::msg(format!("Branch not found: {name}")))?;
+    let local_name = name.split_once('/').map(|(_, rest)| rest).unwrap_or(name);
+    if local_name.is_empty() || local_name == "HEAD" {
+        return Err(AppError::msg("Cannot check out that remote ref"));
+    }
+    if let Ok(existing) = repo.find_branch(local_name, BranchType::Local) {
+        return checkout_local_branch(repo, &existing);
+    }
+    let commit = remote.get().peel_to_commit()?;
+    let mut local = repo.branch(local_name, &commit, false)?;
+    let _ = local.set_upstream(Some(name));
+    checkout_local_branch(repo, &local)
 }
 
 pub fn create_branch(repo: &Repository, name: &str, switch: bool) -> AppResult<()> {
@@ -849,4 +896,61 @@ pub fn snapshot(repo: &Repository) -> AppResult<WorkspaceSnapshot> {
         status: status_snapshot(repo)?,
         branches: branches(repo)?,
     })
+}
+
+pub fn read_git_identity() -> AppResult<GitIdentity> {
+    let cfg = git2::Config::open_default().ok();
+    Ok(GitIdentity {
+        name: cfg
+            .as_ref()
+            .and_then(|cfg| cfg.get_string("user.name").ok())
+            .unwrap_or_default(),
+        email: cfg
+            .as_ref()
+            .and_then(|cfg| cfg.get_string("user.email").ok())
+            .unwrap_or_default(),
+    })
+}
+
+fn global_gitconfig_path() -> AppResult<PathBuf> {
+    if let Ok(path) = git2::Config::find_global() {
+        return Ok(path);
+    }
+    let home = std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .map_err(|_| AppError::msg("Could not resolve home directory"))?;
+    Ok(PathBuf::from(home).join(".gitconfig"))
+}
+
+pub fn write_git_identity(name: &str, email: &str) -> AppResult<()> {
+    let path = global_gitconfig_path()?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    if !path.exists() {
+        fs::write(&path, "")?;
+    }
+    let mut cfg = git2::Config::open(&path)?;
+    let name = name.trim();
+    let email = email.trim();
+    if name.is_empty() {
+        let _ = cfg.remove("user.name");
+    } else {
+        cfg.set_str("user.name", name)?;
+    }
+    if email.is_empty() {
+        let _ = cfg.remove("user.email");
+    } else {
+        cfg.set_str("user.email", email)?;
+    }
+    Ok(())
+}
+
+pub fn open_in_file_manager(path: &str) -> AppResult<()> {
+    let path = strip_verbatim_prefix(path);
+    std::process::Command::new("explorer")
+        .arg(&path)
+        .spawn()
+        .map_err(|err| AppError::msg(format!("Could not open folder: {err}")))?;
+    Ok(())
 }

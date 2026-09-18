@@ -3,13 +3,9 @@ import {
   CheckIcon,
   FolderOpenIcon,
   GitBranchIcon,
-  MoonIcon,
   PlusIcon,
-  RefreshCwIcon,
-  SunIcon,
   XIcon,
 } from "lucide-react";
-import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -41,16 +37,16 @@ export function AppHeader() {
     setActiveTab,
     closeTab,
     openFolder,
-    refresh,
+    revealRepo,
     checkoutBranch,
     createBranch,
     busy,
   } = useGit();
-  const { theme, setTheme, resolvedTheme } = useTheme();
   const [branchOpen, setBranchOpen] = useState(false);
   const [newBranch, setNewBranch] = useState("");
   const repo = snapshot?.repo;
-  const branches = snapshot?.branches.local ?? [];
+  const local = snapshot?.branches.local ?? [];
+  const remote = snapshot?.branches.remote ?? [];
   const current = repo?.isDetached
     ? (repo.headId?.slice(0, 7) ?? "detached")
     : (repo?.currentBranch ?? "unknown");
@@ -96,11 +92,11 @@ export function AppHeader() {
                 <span className="truncate">{current}</span>
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent className="w-64">
+            <DropdownMenuContent className="w-72">
               <DropdownMenuLabel>Local branches</DropdownMenuLabel>
-              {branches.map((branch) => (
+              {local.map((branch) => (
                 <DropdownMenuItem
-                  key={branch.name}
+                  key={`local:${branch.name}`}
                   disabled={branch.isHead || busy}
                   onClick={() => void checkoutBranch(branch.name)}
                 >
@@ -110,6 +106,24 @@ export function AppHeader() {
                   <span className="truncate font-mono">{branch.name}</span>
                 </DropdownMenuItem>
               ))}
+              {remote.length > 0 ? (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuLabel>Remote branches</DropdownMenuLabel>
+                  {remote.map((branch) => (
+                    <DropdownMenuItem
+                      key={`remote:${branch.name}`}
+                      disabled={busy}
+                      onClick={() => void checkoutBranch(branch.name)}
+                    >
+                      <span className="min-w-4" />
+                      <span className="truncate font-mono text-muted-foreground">
+                        {branch.name}
+                      </span>
+                    </DropdownMenuItem>
+                  ))}
+                </>
+              ) : null}
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => setBranchOpen(true)}>
                 <PlusIcon />
@@ -128,39 +142,16 @@ export function AppHeader() {
       ) : null}
 
       <div className="flex shrink-0 items-center gap-1">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon-sm" onClick={() => void openFolder()} disabled={busy}>
-              <FolderOpenIcon />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>
-            Open repository
-            <Kbd>Ctrl+O</Kbd>
-          </TooltipContent>
-        </Tooltip>
         {repo ? (
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon-sm" onClick={() => void refresh()} disabled={busy}>
-                <RefreshCwIcon className={busy ? "animate-spin" : undefined} />
+              <Button variant="ghost" size="icon-sm" onClick={() => void revealRepo()}>
+                <FolderOpenIcon />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>
-              Refresh
-              <Kbd>Ctrl+R</Kbd>
-            </TooltipContent>
+            <TooltipContent>Open folder</TooltipContent>
           </Tooltip>
         ) : null}
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          onClick={() => setTheme((resolvedTheme ?? theme) === "dark" ? "light" : "dark")}
-          aria-label="Toggle theme"
-        >
-          <SunIcon className="hidden dark:block" />
-          <MoonIcon className="dark:hidden" />
-        </Button>
       </div>
 
       <Dialog open={branchOpen} onOpenChange={setBranchOpen}>
@@ -216,7 +207,7 @@ function TabButton({
 }) {
   const closable = tab.kind === "repo";
   const label = tab.kind === "welcome" ? "Rebasely" : tab.name;
-  const hint = tab.kind === "repo" ? tab.path : "Welcome";
+  const hint = tab.kind === "welcome" ? "Welcome" : tab.path;
 
   function handleAuxClick(event: MouseEvent<HTMLButtonElement>) {
     if (event.button === 1 && closable) {

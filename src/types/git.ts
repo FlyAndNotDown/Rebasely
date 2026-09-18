@@ -80,6 +80,12 @@ export interface BranchList {
   current: string | null;
   isDetached: boolean;
   local: BranchInfo[];
+  remote: BranchInfo[];
+}
+
+export interface GitIdentity {
+  name: string;
+  email: string;
 }
 
 export interface WorkspaceSnapshot {

@@ -4,6 +4,7 @@ import type {
   CommitDetails,
   CommitSummary,
   FileDiff,
+  GitIdentity,
   RecentRepo,
   WorkspaceSnapshot,
 } from "@/types/git";
@@ -57,4 +58,9 @@ export const gitApi = {
       name,
       switch: switchTo,
     }),
+  getGitIdentity: () => invoke<GitIdentity>("get_git_identity"),
+  setGitIdentity: (identity: GitIdentity) =>
+    invoke<GitIdentity>("set_git_identity", { identity }),
+  openInFileManager: (path: string) => invoke<void>("open_in_file_manager", { path }),
+  syncWatches: (paths: string[]) => invoke<void>("sync_watches", { paths }),
 };

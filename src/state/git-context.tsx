@@ -8,6 +8,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { toast } from "sonner";
 import { emptyBinaryDiff, errorMessage, gitApi } from "@/lib/git";
@@ -108,9 +109,9 @@ interface GitContextValue {
   closeTab: (id: string) => void;
   openFolder: () => Promise<void>;
   openPath: (path: string) => Promise<void>;
+  revealRepo: () => Promise<void>;
   forgetRecent: (path: string) => Promise<void>;
   closeRepo: () => void;
-  refresh: () => Promise<void>;
   selectChange: (path: string, staged: boolean) => Promise<void>;
   selectCommit: (id: string) => Promise<void>;
   selectCommitFile: (id: string, path: string) => Promise<void>;
@@ -315,22 +316,77 @@ export function GitProvider({ children }: { children: ReactNode }) {
     if (tab?.kind === "repo") closeTab(tab.id);
   }, [closeTab]);
 
-  const refresh = useCallback(async () => {
+  const revealRepo = useCallback(async () => {
     const path = activeRepoPath();
-    const tabId = activeTabIdRef.current;
     if (!path) return;
-    patchSession(tabId, { busy: true });
     try {
-      const [snapshot, commits] = await Promise.all([
-        gitApi.refreshWorkspace(path),
-        gitApi.getCommits(path, 120),
-      ]);
-      patchSession(tabId, { snapshot, commits, busy: false });
+      await gitApi.openInFileManager(path);
     } catch (error) {
-      patchSession(tabId, { busy: false });
       toast.error(errorMessage(error));
     }
-  }, [activeRepoPath, patchSession]);
+  }, [activeRepoPath]);
+
+  const refreshRepo = useCallback(
+    async (path: string) => {
+      const tab = findRepoTab(tabsRef.current, path);
+      if (!tab) return;
+      const current = sessionsRef.current[tab.id];
+      try {
+        const [snapshot, commits] = await Promise.all([
+          gitApi.refreshWorkspace(path),
+          gitApi.getCommits(path, 120),
+        ]);
+        let changeDiff = current?.changeDiff ?? null;
+        let historyDiff = current?.historyDiff ?? null;
+        if (current?.changeSelection) {
+          try {
+            changeDiff = await gitApi.getWorkdirDiff(
+              path,
+              current.changeSelection.path,
+              current.changeSelection.staged,
+            );
+          } catch {
+            changeDiff = null;
+          }
+        }
+        if (current?.historySelection?.path) {
+          try {
+            historyDiff = await gitApi.getCommitDiff(
+              path,
+              current.historySelection.id,
+              current.historySelection.path,
+            );
+          } catch {
+            historyDiff = null;
+          }
+        }
+        patchSession(tab.id, { snapshot, commits, changeDiff, historyDiff });
+      } catch {
+        // Watch refreshes stay quiet when a repo is mid-write.
+      }
+    },
+    [patchSession],
+  );
+
+  useEffect(() => {
+    const paths = tabs.filter((tab): tab is RepoTab => tab.kind === "repo").map((tab) => tab.path);
+    void gitApi.syncWatches(paths).catch(() => undefined);
+  }, [tabs]);
+
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void listen<string>("repo-changed", (event) => {
+      void refreshRepo(event.payload);
+    }).then((fn) => {
+      if (disposed) fn();
+      else unlisten = fn;
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [refreshRepo]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -340,10 +396,6 @@ export function GitProvider({ children }: { children: ReactNode }) {
         event.preventDefault();
         void openFolder();
       }
-      if (event.key.toLowerCase() === "r") {
-        event.preventDefault();
-        void refresh();
-      }
       if (event.key.toLowerCase() === "w") {
         event.preventDefault();
         closeRepo();
@@ -351,7 +403,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [closeRepo, openFolder, refresh]);
+  }, [closeRepo, openFolder]);
 
   const setView = useCallback(
     (view: View) => {
@@ -549,9 +601,9 @@ export function GitProvider({ children }: { children: ReactNode }) {
       closeTab,
       openFolder,
       openPath,
+      revealRepo,
       forgetRecent,
       closeRepo,
-      refresh,
       selectChange,
       selectCommit,
       selectCommitFile,
@@ -574,9 +626,9 @@ export function GitProvider({ children }: { children: ReactNode }) {
       closeTab,
       openFolder,
       openPath,
+      revealRepo,
       forgetRecent,
       closeRepo,
-      refresh,
       selectChange,
       selectCommit,
       selectCommitFile,

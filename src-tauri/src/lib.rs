@@ -2,15 +2,17 @@ mod error;
 mod git;
 mod recents;
 mod session;
+mod watch;
 
 use std::path::Path;
 
-use tauri::AppHandle;
+use tauri::{AppHandle, State};
 
 use error::AppResult;
-use git::{CommitDetails, CommitSummary, FileDiff, WorkspaceSnapshot};
+use git::{CommitDetails, CommitSummary, FileDiff, GitIdentity, WorkspaceSnapshot};
 use recents::RecentRepo;
 use session::AppSession;
+use watch::WatchState;
 
 fn with_repo<T>(path: &str, f: impl FnOnce(&git2::Repository) -> AppResult<T>) -> AppResult<T> {
     let path = git::strip_verbatim_prefix(path);
@@ -119,11 +121,33 @@ fn create_branch(repo_path: String, name: String, switch: bool) -> AppResult<Wor
     })
 }
 
+#[tauri::command]
+fn get_git_identity() -> AppResult<GitIdentity> {
+    git::read_git_identity()
+}
+
+#[tauri::command]
+fn set_git_identity(identity: GitIdentity) -> AppResult<GitIdentity> {
+    git::write_git_identity(&identity.name, &identity.email)?;
+    git::read_git_identity()
+}
+
+#[tauri::command]
+fn open_in_file_manager(path: String) -> AppResult<()> {
+    git::open_in_file_manager(&path)
+}
+
+#[tauri::command]
+fn sync_watches(paths: Vec<String>, app: AppHandle, state: State<WatchState>) -> AppResult<()> {
+    watch::sync_watches(&app, &state, paths)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .manage(WatchState::default())
         .invoke_handler(tauri::generate_handler![
             list_recents,
             forget_recent,
@@ -140,7 +164,11 @@ pub fn run() {
             discard_paths,
             commit_changes,
             checkout_branch,
-            create_branch
+            create_branch,
+            get_git_identity,
+            set_git_identity,
+            open_in_file_manager,
+            sync_watches
         ])
         .run(tauri::generate_context!())
         .expect("error while running Rebasely");
