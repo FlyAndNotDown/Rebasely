@@ -82,6 +82,8 @@ export function AppHeader() {
         </Tooltip>
       </nav>
 
+      <ActivityMeter />
+
       {repo ? (
         <>
           <DropdownMenu>
@@ -139,19 +141,16 @@ export function AppHeader() {
         </>
       ) : null}
 
-      <div className="flex shrink-0 items-center gap-1">
-        <ActivityMeter />
-        {repo ? (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon-sm" onClick={() => void revealRepo()}>
-                <FolderOpenIcon />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Open folder</TooltipContent>
-          </Tooltip>
-        ) : null}
-      </div>
+      {repo ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="icon-sm" onClick={() => void revealRepo()}>
+              <FolderOpenIcon />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Open folder</TooltipContent>
+        </Tooltip>
+      ) : null}
 
       <Dialog open={branchOpen} onOpenChange={setBranchOpen}>
         <DialogContent>
