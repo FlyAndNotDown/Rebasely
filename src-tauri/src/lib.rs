@@ -149,6 +149,21 @@ async fn checkout_branch(repo_path: String, name: String) -> AppResult<Workspace
 }
 
 #[tauri::command]
+async fn fetch_remote(repo_path: String) -> AppResult<WorkspaceSnapshot> {
+    with_repo_async(repo_path, git::fetch_remote).await
+}
+
+#[tauri::command]
+async fn pull_remote(repo_path: String) -> AppResult<WorkspaceSnapshot> {
+    with_repo_async(repo_path, git::pull_remote).await
+}
+
+#[tauri::command]
+async fn push_remote(repo_path: String) -> AppResult<WorkspaceSnapshot> {
+    with_repo_async(repo_path, git::push_remote).await
+}
+
+#[tauri::command]
 async fn create_branch(repo_path: String, name: String, switch: bool) -> AppResult<WorkspaceSnapshot> {
     with_repo_async(repo_path, move |repo| {
         git::create_branch(repo, &name, switch)?;
@@ -289,6 +304,9 @@ pub fn run() {
             discard_paths,
             commit_changes,
             checkout_branch,
+            fetch_remote,
+            pull_remote,
+            push_remote,
             create_branch,
             add_remote,
             set_remote_url,

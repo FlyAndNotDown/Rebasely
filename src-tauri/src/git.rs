@@ -4,8 +4,8 @@ use std::process::Command;
 
 use git2::build::CheckoutBuilder;
 use git2::{
-    BranchType, DiffFindOptions, DiffFormat, DiffOptions, ErrorCode, IndexAddOption, ObjectType,
-    Oid, Repository, Sort, Status, StatusOptions,
+    BranchType, DiffFormat, DiffOptions, ErrorCode, IndexAddOption, ObjectType, Oid, Repository,
+    Sort, Status, StatusOptions,
 };
 use serde::Serialize;
 
@@ -373,26 +373,77 @@ pub fn status_snapshot(repo: &Repository) -> AppResult<StatusSnapshot> {
 }
 
 fn status_from_git(root: &Path) -> AppResult<StatusSnapshot> {
-    let git = find_git().ok_or_else(|| AppError::msg("git executable not found"))?;
-    let output = Command::new(git)
-        .args([
-            "-C",
-            &root.to_string_lossy(),
+    let output = run_git(
+        root,
+        &[
             "--no-optional-locks",
             "status",
             "--porcelain=v1",
             "-z",
             "--untracked-files=all",
             "--ignored=no",
-        ])
-        .output()
-        .map_err(|err| AppError::msg(err.to_string()))?;
+        ],
+    )?;
     if !output.status.success() {
         return Err(AppError::msg(
             String::from_utf8_lossy(&output.stderr).trim().to_string(),
         ));
     }
     parse_porcelain(&output.stdout)
+}
+
+pub fn fetch_remote(repo: &mut Repository) -> AppResult<WorkspaceSnapshot> {
+    run_git_ok(workdir(repo)?, &["fetch"])?;
+    snapshot(repo)
+}
+
+pub fn pull_remote(repo: &mut Repository) -> AppResult<WorkspaceSnapshot> {
+    run_git_ok(workdir(repo)?, &["pull"])?;
+    snapshot(repo)
+}
+
+pub fn push_remote(repo: &mut Repository) -> AppResult<WorkspaceSnapshot> {
+    run_git_ok(workdir(repo)?, &["push"])?;
+    snapshot(repo)
+}
+
+fn run_git(root: &Path, args: &[&str]) -> AppResult<std::process::Output> {
+    let git = find_git().ok_or_else(|| AppError::msg("Git executable was not found"))?;
+    let mut command = Command::new(git);
+    command.arg("-C").arg(root).args(args);
+    command.env("GIT_TERMINAL_PROMPT", "0");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    command
+        .output()
+        .map_err(|err| AppError::msg(err.to_string()))
+}
+
+fn run_git_ok(root: &Path, args: &[&str]) -> AppResult<()> {
+    run_git_stdout(root, args).map(|_| ())
+}
+
+fn run_git_stdout(root: &Path, args: &[&str]) -> AppResult<Vec<u8>> {
+    let output = run_git(root, args)?;
+    if output.status.success() {
+        return Ok(output.stdout);
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let message = [stderr.trim(), stdout.trim()]
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    Err(AppError::msg(if message.is_empty() {
+        "Git command failed".to_string()
+    } else {
+        message
+    }))
 }
 
 fn find_git() -> Option<PathBuf> {
@@ -735,6 +786,31 @@ fn summarize_oid(repo: &Repository, oid: Oid) -> AppResult<CommitSummary> {
 }
 
 pub fn commits(repo: &Repository, limit: usize, skip: usize) -> AppResult<Vec<CommitSummary>> {
+    if let Ok(root) = workdir(repo) {
+        let n = format!("-n{limit}");
+        let s = format!("--skip={skip}");
+        if let Ok(stdout) = run_git_stdout(
+            root,
+            &[
+                "-c",
+                "log.showSignature=false",
+                "log",
+                &n,
+                &s,
+                "--pretty=format:%H%x00%h%x00%s%x00%an%x00%ae%x00%at%x00%P",
+            ],
+        ) {
+            return parse_git_log(&stdout);
+        }
+    }
+    commits_from_revwalk(repo, limit, skip)
+}
+
+fn commits_from_revwalk(
+    repo: &Repository,
+    limit: usize,
+    skip: usize,
+) -> AppResult<Vec<CommitSummary>> {
     let mut revwalk = repo.revwalk()?;
     match repo.head() {
         Ok(head) => {
@@ -747,11 +823,44 @@ pub fn commits(repo: &Repository, limit: usize, skip: usize) -> AppResult<Vec<Co
         Err(err) if err.code() == ErrorCode::UnbornBranch => return Ok(Vec::new()),
         Err(err) => return Err(err.into()),
     }
-    revwalk.set_sorting(Sort::TIME)?;
+    revwalk.set_sorting(Sort::NONE)?;
 
     let mut items = Vec::new();
     for oid in revwalk.skip(skip).take(limit) {
         items.push(summarize_oid(repo, oid?)?);
+    }
+    Ok(items)
+}
+
+fn parse_git_log(bytes: &[u8]) -> AppResult<Vec<CommitSummary>> {
+    let text = String::from_utf8_lossy(bytes);
+    let mut items = Vec::new();
+    for line in text.split('\n') {
+        if line.is_empty() {
+            continue;
+        }
+        let mut fields = line.split('\0');
+        let Some(id) = fields.next() else { continue };
+        let Some(short_id) = fields.next() else { continue };
+        let Some(summary) = fields.next() else { continue };
+        let Some(author_name) = fields.next() else { continue };
+        let Some(author_email) = fields.next() else { continue };
+        let Some(timestamp) = fields.next() else { continue };
+        let parents = fields.next().unwrap_or("");
+        items.push(CommitSummary {
+            id: id.to_string(),
+            short_id: short_id.to_string(),
+            summary: summary.to_string(),
+            body: String::new(),
+            author_name: author_name.to_string(),
+            author_email: author_email.to_string(),
+            timestamp: timestamp.parse().unwrap_or(0),
+            parents: if parents.is_empty() {
+                Vec::new()
+            } else {
+                parents.split_whitespace().map(str::to_string).collect()
+            },
+        });
     }
     Ok(items)
 }
@@ -868,19 +977,20 @@ fn hunk_or_meta_only(origin: char) -> bool {
     matches!(origin, 'F' | 'G' | 'I' | 'B' | 'H')
 }
 
-fn diff_options_for(path: &str) -> DiffOptions {
+fn diff_options_for(path: &str, include_untracked: bool) -> DiffOptions {
     let mut opts = DiffOptions::new();
-    opts.pathspec(path)
-        .include_untracked(true)
-        .recurse_untracked_dirs(true)
-        .minimal(true);
+    opts.pathspec(path).minimal(true);
+    if include_untracked {
+        opts.include_untracked(true)
+            .recurse_untracked_dirs(true);
+    }
     opts
 }
 
 pub fn workdir_diff(repo: &Repository, path: &str, staged: bool) -> AppResult<FileDiff> {
     let rel = to_git_path(path);
-    let mut opts = diff_options_for(&rel);
-    let mut diff = if staged {
+    let mut opts = diff_options_for(&rel, !staged);
+    let diff = if staged {
         let head_tree = match repo.head() {
             Ok(head) => Some(head.peel_to_tree()?),
             Err(err) if err.code() == ErrorCode::UnbornBranch => None,
@@ -890,7 +1000,6 @@ pub fn workdir_diff(repo: &Repository, path: &str, staged: bool) -> AppResult<Fi
     } else {
         repo.diff_index_to_workdir(None, Some(&mut opts))?
     };
-    let _ = diff.find_similar(Some(&mut DiffFindOptions::new()));
     collect_patch(diff, &rel)
 }
 
@@ -908,7 +1017,80 @@ fn delta_kind(delta: git2::Delta) -> &'static str {
 }
 
 pub fn commit_details(repo: &Repository, oid: &str) -> AppResult<CommitDetails> {
-    let oid = Oid::from_str(oid)?;
+    let parsed = Oid::from_str(oid)?;
+    let files = if let Ok(root) = workdir(repo) {
+        match commit_files_from_git(root, oid) {
+            Ok(files) => files,
+            Err(_) => commit_files_from_git2(repo, parsed)?,
+        }
+    } else {
+        commit_files_from_git2(repo, parsed)?
+    };
+    Ok(CommitDetails {
+        commit: summarize_oid(repo, parsed)?,
+        files,
+    })
+}
+
+fn commit_files_from_git(root: &Path, oid: &str) -> AppResult<Vec<CommitFile>> {
+    let stdout = run_git_stdout(
+        root,
+        &[
+            "diff-tree",
+            "--no-commit-id",
+            "--name-status",
+            "-r",
+            "--no-renames",
+            "--root",
+            "-z",
+            oid,
+        ],
+    )?;
+    parse_name_status_z(&stdout)
+}
+
+fn parse_name_status_z(bytes: &[u8]) -> AppResult<Vec<CommitFile>> {
+    let mut files = Vec::new();
+    let mut parts = bytes.split(|b| *b == 0);
+    while let Some(status) = parts.next() {
+        if status.is_empty() {
+            continue;
+        }
+        let status = std::str::from_utf8(status).unwrap_or("");
+        let kind = match status.as_bytes().first() {
+            Some(b'A') => "added",
+            Some(b'D') => "deleted",
+            Some(b'R') => "renamed",
+            Some(b'C') => "copied",
+            Some(b'T') => "typechange",
+            Some(b'U') => "conflicted",
+            _ => "modified",
+        };
+        let first = match parts.next() {
+            Some(path) if !path.is_empty() => String::from_utf8_lossy(path).replace('\\', "/"),
+            _ => continue,
+        };
+        let (path, old_path) = if matches!(kind, "renamed" | "copied") {
+            match parts.next() {
+                Some(path) if !path.is_empty() => {
+                    (String::from_utf8_lossy(path).replace('\\', "/"), Some(first))
+                }
+                _ => (first, None),
+            }
+        } else {
+            (first, None)
+        };
+        files.push(CommitFile {
+            binary: looks_binary_path(&path),
+            path,
+            old_path,
+            kind: kind.to_string(),
+        });
+    }
+    Ok(files)
+}
+
+fn commit_files_from_git2(repo: &Repository, oid: Oid) -> AppResult<Vec<CommitFile>> {
     let commit = repo.find_commit(oid)?;
     let tree = commit.tree()?;
     let parent_tree = if commit.parent_count() > 0 {
@@ -916,9 +1098,9 @@ pub fn commit_details(repo: &Repository, oid: &str) -> AppResult<CommitDetails> 
     } else {
         None
     };
-    let mut diff = repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), None)?;
-    let _ = diff.find_similar(Some(&mut DiffFindOptions::new()));
-
+    let mut opts = DiffOptions::new();
+    opts.skip_binary_check(true);
+    let diff = repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), Some(&mut opts))?;
     let mut files = Vec::new();
     diff.foreach(
         &mut |delta, _| {
@@ -934,7 +1116,7 @@ pub fn commit_details(repo: &Repository, oid: &str) -> AppResult<CommitDetails> 
                 .map(|p| p.to_string_lossy().replace('\\', "/"))
                 .filter(|old| old != &path);
             files.push(CommitFile {
-                binary: is_delta_binary(&delta) || looks_binary_path(&path),
+                binary: looks_binary_path(&path),
                 path,
                 old_path,
                 kind: delta_kind(delta.status()).to_string(),
@@ -945,11 +1127,7 @@ pub fn commit_details(repo: &Repository, oid: &str) -> AppResult<CommitDetails> 
         None,
         None,
     )?;
-
-    Ok(CommitDetails {
-        commit: summarize_oid(repo, oid)?,
-        files,
-    })
+    Ok(files)
 }
 
 pub fn commit_file_diff(repo: &Repository, oid: &str, path: &str) -> AppResult<FileDiff> {
@@ -962,9 +1140,8 @@ pub fn commit_file_diff(repo: &Repository, oid: &str, path: &str) -> AppResult<F
         None
     };
     let rel = to_git_path(path);
-    let mut opts = diff_options_for(&rel);
-    let mut diff = repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), Some(&mut opts))?;
-    let _ = diff.find_similar(Some(&mut DiffFindOptions::new()));
+    let mut opts = diff_options_for(&rel, false);
+    let diff = repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), Some(&mut opts))?;
     collect_patch(diff, &rel)
 }
 
@@ -992,20 +1169,27 @@ pub fn branches(repo: &Repository, include_remote: bool) -> AppResult<BranchList
 
     let mut remote = Vec::new();
     if include_remote {
-        for item in repo.branches(Some(BranchType::Remote))? {
-            let (branch, _) = item?;
-            let name = branch.name()?.unwrap_or_default().to_string();
-            if name.is_empty() || name.ends_with("/HEAD") {
-                continue;
+        remote = match workdir(repo).ok().and_then(|root| remote_branches_from_git(root).ok()) {
+            Some(items) => items,
+            None => {
+                let mut items = Vec::new();
+                for item in repo.branches(Some(BranchType::Remote))? {
+                    let (branch, _) = item?;
+                    let name = branch.name()?.unwrap_or_default().to_string();
+                    if name.is_empty() || name.ends_with("/HEAD") {
+                        continue;
+                    }
+                    items.push(BranchInfo {
+                        is_head: false,
+                        is_remote: true,
+                        name,
+                        upstream: None,
+                    });
+                }
+                items.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+                items
             }
-            remote.push(BranchInfo {
-                is_head: false,
-                is_remote: true,
-                name,
-                upstream: None,
-            });
-        }
-        remote.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        };
     }
 
     Ok(BranchList {
@@ -1014,6 +1198,28 @@ pub fn branches(repo: &Repository, include_remote: bool) -> AppResult<BranchList
         local,
         remote,
     })
+}
+
+fn remote_branches_from_git(root: &Path) -> AppResult<Vec<BranchInfo>> {
+    let stdout = run_git_stdout(
+        root,
+        &["for-each-ref", "--format=%(refname:short)", "refs/remotes"],
+    )?;
+    let text = String::from_utf8_lossy(&stdout);
+    let mut remote = Vec::new();
+    for line in text.lines() {
+        let name = line.trim();
+        if name.is_empty() || name.ends_with("/HEAD") {
+            continue;
+        }
+        remote.push(BranchInfo {
+            is_head: false,
+            is_remote: true,
+            name: name.to_string(),
+            upstream: None,
+        });
+    }
+    Ok(remote)
 }
 
 fn checkout_local_branch(repo: &Repository, branch: &git2::Branch<'_>) -> AppResult<()> {

@@ -1,4 +1,4 @@
-import { useState, type MouseEvent } from "react";
+import { useMemo, useState, type MouseEvent, type UIEvent } from "react";
 import {
   CheckIcon,
   FolderOpenIcon,
@@ -22,6 +22,9 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
@@ -30,6 +33,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { ActivityMeter } from "@/components/activity-meter";
 import { cn } from "@/lib/utils";
 import { useGit, type AppTab } from "@/state/git-context";
+import type { BranchInfo } from "@/types/git";
 
 export function AppHeader() {
   const {
@@ -46,10 +50,18 @@ export function AppHeader() {
     createBranch,
   } = useGit();
   const [branchOpen, setBranchOpen] = useState(false);
+  const [branchMenuOpen, setBranchMenuOpen] = useState(false);
+  const [branchQuery, setBranchQuery] = useState("");
   const [newBranch, setNewBranch] = useState("");
   const repo = snapshot?.repo;
   const local = snapshot?.branches.local ?? [];
   const remote = snapshot?.branches.remote ?? [];
+  const query = branchQuery.trim().toLowerCase();
+  const remoteGroups = useMemo(() => groupRemoteBranches(remote), [remote]);
+  const filteredRemote = useMemo(() => {
+    if (!query) return [];
+    return remote.filter((branch) => branch.name.toLowerCase().includes(query)).slice(0, 80);
+  }, [query, remote]);
   const current = repo?.isDetached
     ? (repo.headId?.slice(0, 7) ?? "detached")
     : (repo?.currentBranch ?? "unknown");
@@ -89,42 +101,80 @@ export function AppHeader() {
 
       {repo ? (
         <>
-          <DropdownMenu onOpenChange={(open) => { if (open) void ensureBranches(); }}>
+          <DropdownMenu
+            open={branchMenuOpen}
+            onOpenChange={(open) => {
+              setBranchMenuOpen(open);
+              if (open) void ensureBranches();
+              else setBranchQuery("");
+            }}
+          >
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="sm" className="max-w-44 shrink-0 font-mono">
                 <GitBranchIcon data-icon="inline-start" />
                 <span className="truncate">{current}</span>
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent className="w-72">
+            <DropdownMenuContent className="w-80">
+              <div className="px-1.5 pb-1.5" onPointerDown={(event) => event.stopPropagation()}>
+                <Input
+                  value={branchQuery}
+                  onChange={(event) => setBranchQuery(event.target.value)}
+                  onKeyDown={(event) => event.stopPropagation()}
+                  placeholder="Filter branches"
+                  className="h-7"
+                />
+              </div>
               <DropdownMenuLabel>Local branches</DropdownMenuLabel>
-              {local.map((branch) => (
-                <DropdownMenuItem
-                  key={`local:${branch.name}`}
-                  disabled={branch.isHead}
-                  onClick={() => void checkoutBranch(branch.name)}
-                >
-                  <span className="min-w-4">
-                    {branch.isHead ? <CheckIcon className="size-3.5" /> : null}
-                  </span>
-                  <span className="truncate font-mono">{branch.name}</span>
-                </DropdownMenuItem>
-              ))}
+              {local
+                .filter((branch) => !query || branch.name.toLowerCase().includes(query))
+                .map((branch) => (
+                  <DropdownMenuItem
+                    key={`local:${branch.name}`}
+                    disabled={branch.isHead}
+                    onClick={() => void checkoutBranch(branch.name)}
+                  >
+                    <span className="min-w-4">
+                      {branch.isHead ? <CheckIcon className="size-3.5" /> : null}
+                    </span>
+                    <span className="truncate font-mono">{branch.name}</span>
+                  </DropdownMenuItem>
+                ))}
               {remote.length > 0 ? (
                 <>
                   <DropdownMenuSeparator />
                   <DropdownMenuLabel>Remote branches</DropdownMenuLabel>
-                  {remote.map((branch) => (
-                    <DropdownMenuItem
-                      key={`remote:${branch.name}`}
-                      onClick={() => void checkoutBranch(branch.name)}
-                    >
-                      <span className="min-w-4" />
-                      <span className="truncate font-mono text-muted-foreground">
-                        {branch.name}
-                      </span>
-                    </DropdownMenuItem>
-                  ))}
+                  {query
+                    ? filteredRemote.map((branch) => (
+                        <DropdownMenuItem
+                          key={`remote:${branch.name}`}
+                          onClick={() => void checkoutBranch(branch.name)}
+                        >
+                          <span className="truncate font-mono text-muted-foreground">
+                            {branch.name}
+                          </span>
+                        </DropdownMenuItem>
+                      ))
+                    : remoteGroups.map(([remoteName, branches]) => (
+                        <DropdownMenuSub key={remoteName}>
+                          <DropdownMenuSubTrigger>
+                            <span className="truncate font-mono">{remoteName}</span>
+                            <span className="ml-auto text-[11px] text-muted-foreground">
+                              {branches.length}
+                            </span>
+                          </DropdownMenuSubTrigger>
+                          <DropdownMenuSubContent className="w-72 p-0">
+                            <VirtualBranchList
+                              items={branches}
+                              remoteName={remoteName}
+                              onPick={(name) => {
+                                setBranchMenuOpen(false);
+                                void checkoutBranch(name);
+                              }}
+                            />
+                          </DropdownMenuSubContent>
+                        </DropdownMenuSub>
+                      ))}
                 </>
               ) : null}
               <DropdownMenuSeparator />
@@ -264,5 +314,61 @@ function TabButton({
       </TooltipTrigger>
       <TooltipContent>{hint}</TooltipContent>
     </Tooltip>
+  );
+}
+
+function groupRemoteBranches(branches: BranchInfo[]) {
+  const groups = new Map<string, BranchInfo[]>();
+  for (const branch of branches) {
+    const slash = branch.name.indexOf("/");
+    const remote = slash === -1 ? branch.name : branch.name.slice(0, slash);
+    const list = groups.get(remote) ?? [];
+    list.push(branch);
+    groups.set(remote, list);
+  }
+  return [...groups.entries()].sort(([left], [right]) => left.localeCompare(right));
+}
+
+function shortRemoteName(fullName: string, remoteName: string) {
+  const prefix = `${remoteName}/`;
+  return fullName.startsWith(prefix) ? fullName.slice(prefix.length) : fullName;
+}
+
+function VirtualBranchList({
+  items,
+  remoteName,
+  onPick,
+}: {
+  items: BranchInfo[];
+  remoteName: string;
+  onPick: (name: string) => void;
+}) {
+  const [scrollTop, setScrollTop] = useState(0);
+  const row = 28;
+  const height = Math.min(320, Math.max(row, items.length * row));
+  const start = Math.max(0, Math.floor(scrollTop / row) - 6);
+  const visible = Math.ceil(height / row) + 12;
+  const slice = items.slice(start, start + visible);
+
+  function onScroll(event: UIEvent<HTMLDivElement>) {
+    setScrollTop(event.currentTarget.scrollTop);
+  }
+
+  return (
+    <div className="overflow-y-auto" style={{ height }} onScroll={onScroll}>
+      <div className="relative" style={{ height: items.length * row }}>
+        {slice.map((branch, index) => (
+          <button
+            key={branch.name}
+            type="button"
+            className="absolute right-0 left-0 truncate px-2 text-left font-mono text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+            style={{ top: (start + index) * row, height: row }}
+            onClick={() => onPick(branch.name)}
+          >
+            {shortRemoteName(branch.name, remoteName)}
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }

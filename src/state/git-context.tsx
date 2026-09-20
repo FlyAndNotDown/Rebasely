@@ -135,6 +135,9 @@ interface GitContextValue {
   discard: (paths: string[]) => Promise<void>;
   commit: (message: string) => Promise<void>;
   checkoutBranch: (name: string) => Promise<void>;
+  fetchRemote: () => Promise<void>;
+  pullRemote: () => Promise<void>;
+  pushRemote: () => Promise<void>;
   createBranch: (name: string, switchTo: boolean) => Promise<void>;
   stashSave: (message: string, includeUntracked: boolean) => Promise<void>;
   stashApply: (index: number) => Promise<void>;
@@ -387,11 +390,15 @@ export function GitProvider({ children }: { children: ReactNode }) {
     }
   }, [activeRepoPath, patchSession]);
 
+  const historyInflightRef = useRef(new Set<string>());
+
   const ensureHistory = useCallback(async () => {
     const repoPath = activeRepoPath();
     const tabId = activeTabIdRef.current;
     const current = sessionsRef.current[tabId];
     if (!repoPath || !current || current.commitsLoaded || current.commitsLoading) return;
+    if (historyInflightRef.current.has(tabId)) return;
+    historyInflightRef.current.add(tabId);
     patchSession(tabId, { commitsLoading: true });
     try {
       const commits = await runActivity("Loading history", current.snapshot?.repo.name, () =>
@@ -406,6 +413,8 @@ export function GitProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       patchSession(tabId, { commitsLoading: false });
       toast.error(errorMessage(error));
+    } finally {
+      historyInflightRef.current.delete(tabId);
     }
   }, [activeRepoPath, patchSession, runActivity]);
 
@@ -534,13 +543,8 @@ export function GitProvider({ children }: { children: ReactNode }) {
   const setView = useCallback(
     (view: View) => {
       patchSession(activeTabIdRef.current, { view });
-      if (view === "history") {
-        queueMicrotask(() => {
-          void ensureHistory();
-        });
-      }
     },
-    [ensureHistory, patchSession],
+    [patchSession],
   );
 
   const selectChange = useCallback(
@@ -571,12 +575,15 @@ export function GitProvider({ children }: { children: ReactNode }) {
         patchSession(tabId, {
           commitDetails: details,
           historySelection: first ? { type: "commit", id, path: first.path } : { type: "commit", id },
-          historyDiff: first
-            ? first.binary
-              ? emptyBinaryDiff(first.path, first.oldPath)
-              : await gitApi.getCommitDiff(repoPath, id, first.path)
-            : null,
+          historyDiff: first?.binary ? emptyBinaryDiff(first.path, first.oldPath) : null,
         });
+        if (first && !first.binary) {
+          const historyDiff = await gitApi.getCommitDiff(repoPath, id, first.path);
+          const selected = sessionsRef.current[tabId]?.historySelection;
+          if (selected?.id === id && (selected.path ?? first.path) === first.path) {
+            patchSession(tabId, { historyDiff });
+          }
+        }
       } catch (error) {
         patchSession(tabId, { commitDetails: null, historyDiff: null });
         toast.error(errorMessage(error));
@@ -732,6 +739,18 @@ export function GitProvider({ children }: { children: ReactNode }) {
     [ensureHistory, patchSession, runMutation],
   );
 
+  const fetchRemote = useCallback(async () => {
+    await runMutation("Fetching", (repoPath) => gitApi.fetchRemote(repoPath), "Fetched");
+  }, [runMutation]);
+
+  const pullRemote = useCallback(async () => {
+    await runMutation("Pulling", (repoPath) => gitApi.pullRemote(repoPath), "Pulled");
+  }, [runMutation]);
+
+  const pushRemote = useCallback(async () => {
+    await runMutation("Pushing", (repoPath) => gitApi.pushRemote(repoPath), "Pushed");
+  }, [runMutation]);
+
   const createBranch = useCallback(
     async (name: string, switchTo: boolean) => {
       await runMutation(
@@ -819,6 +838,9 @@ export function GitProvider({ children }: { children: ReactNode }) {
       discard,
       commit,
       checkoutBranch,
+      fetchRemote,
+      pullRemote,
+      pushRemote,
       createBranch,
       stashSave,
       stashApply,
@@ -853,6 +875,9 @@ export function GitProvider({ children }: { children: ReactNode }) {
       discard,
       commit,
       checkoutBranch,
+      fetchRemote,
+      pullRemote,
+      pushRemote,
       createBranch,
       stashSave,
       stashApply,

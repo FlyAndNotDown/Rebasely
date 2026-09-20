@@ -40,7 +40,9 @@ export function DiffViewer() {
       <div className="min-h-0 flex-1 overflow-auto">
         {diff?.binary ? (
           <p className="p-4 text-sm text-muted-foreground">Binary file</p>
-        ) : !diff || diff.lines.length === 0 ? (
+        ) : !diff ? (
+          <p className="p-4 text-sm text-muted-foreground">Loading diff…</p>
+        ) : diff.lines.length === 0 ? (
           <p className="p-4 text-sm text-muted-foreground">No textual diff</p>
         ) : (
           <pre className="min-w-max font-mono text-[12px] leading-5">
