@@ -1,7 +1,11 @@
 use std::collections::HashMap;
 use std::fs;
+use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::sync::mpsc;
+use std::thread;
+use std::time::Duration;
 
 use git2::build::CheckoutBuilder;
 use git2::{
@@ -402,18 +406,27 @@ fn status_from_git(root: &Path) -> AppResult<StatusSnapshot> {
     parse_porcelain(&output.stdout)
 }
 
-pub fn fetch_remote(repo: &mut Repository) -> AppResult<WorkspaceSnapshot> {
-    run_git_ok(workdir(repo)?, &["fetch"])?;
+pub fn fetch_remote(
+    repo: &mut Repository,
+    on_progress: impl FnMut(&str) + Send,
+) -> AppResult<WorkspaceSnapshot> {
+    run_git_ok_progress(workdir(repo)?, &["fetch", "--progress"], on_progress)?;
     snapshot(repo)
 }
 
-pub fn pull_remote(repo: &mut Repository) -> AppResult<WorkspaceSnapshot> {
-    run_git_ok(workdir(repo)?, &["pull"])?;
+pub fn pull_remote(
+    repo: &mut Repository,
+    on_progress: impl FnMut(&str) + Send,
+) -> AppResult<WorkspaceSnapshot> {
+    run_git_ok_progress(workdir(repo)?, &["pull", "--progress"], on_progress)?;
     snapshot(repo)
 }
 
-pub fn push_remote(repo: &mut Repository) -> AppResult<WorkspaceSnapshot> {
-    run_git_ok(workdir(repo)?, &["push"])?;
+pub fn push_remote(
+    repo: &mut Repository,
+    on_progress: impl FnMut(&str) + Send,
+) -> AppResult<WorkspaceSnapshot> {
+    run_git_ok_progress(workdir(repo)?, &["push", "--progress"], on_progress)?;
     snapshot(repo)
 }
 
@@ -433,8 +446,130 @@ fn run_git(root: &Path, args: &[&str]) -> AppResult<std::process::Output> {
         .map_err(|err| AppError::msg(err.to_string()))
 }
 
-fn run_git_ok(root: &Path, args: &[&str]) -> AppResult<()> {
-    run_git_stdout(root, args).map(|_| ())
+fn run_git_ok_progress(
+    root: &Path,
+    args: &[&str],
+    mut on_progress: impl FnMut(&str) + Send,
+) -> AppResult<()> {
+    let git = find_git().ok_or_else(|| AppError::msg("Git executable was not found"))?;
+    let mut command = Command::new(git);
+    command.arg("-C").arg(root).args(args);
+    command.env("GIT_TERMINAL_PROMPT", "0");
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    let mut child = command
+        .spawn()
+        .map_err(|err| AppError::msg(err.to_string()))?;
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+    let (tx, rx) = mpsc::channel::<String>();
+
+    let stderr_thread = stderr.map(|pipe| {
+        let tx = tx.clone();
+        thread::spawn(move || {
+            let mut reader = BufReader::new(pipe);
+            let mut buf = Vec::new();
+            while read_progress_line(&mut reader, &mut buf).unwrap_or(0) > 0 {
+                let line = String::from_utf8_lossy(&buf).trim().to_string();
+                if !line.is_empty() {
+                    let _ = tx.send(line);
+                }
+            }
+        })
+    });
+    drop(tx);
+
+    let stdout_thread = stdout.map(|mut pipe| {
+        thread::spawn(move || {
+            let mut bytes = Vec::new();
+            let _ = pipe.read_to_end(&mut bytes);
+            bytes
+        })
+    });
+
+    let mut logs = Vec::new();
+    loop {
+        match rx.recv_timeout(Duration::from_millis(30)) {
+            Ok(line) => {
+                logs.push(line.clone());
+                on_progress(&line);
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+    }
+    while let Ok(line) = rx.try_recv() {
+        logs.push(line.clone());
+        on_progress(&line);
+    }
+
+    let status = child
+        .wait()
+        .map_err(|err| AppError::msg(err.to_string()))?;
+    if let Some(handle) = stderr_thread {
+        let _ = handle.join();
+    }
+    let stdout_bytes = stdout_thread
+        .and_then(|handle| handle.join().ok())
+        .unwrap_or_default();
+    if status.success() {
+        return Ok(());
+    }
+    let stdout = String::from_utf8_lossy(&stdout_bytes);
+    let stderr = logs
+        .into_iter()
+        .rev()
+        .take(8)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<Vec<_>>()
+        .join("\n");
+    let message = [stderr.trim(), stdout.trim()]
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    Err(AppError::msg(if message.is_empty() {
+        "Git command failed".to_string()
+    } else {
+        message
+    }))
+}
+
+fn read_progress_line(reader: &mut impl BufRead, buf: &mut Vec<u8>) -> std::io::Result<usize> {
+    buf.clear();
+    loop {
+        let consumed = {
+            let available = match reader.fill_buf() {
+                Ok(bytes) => bytes,
+                Err(err) if err.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(err) => return Err(err),
+            };
+            if available.is_empty() {
+                return Ok(buf.len());
+            }
+            let mut take = 0;
+            for byte in available {
+                take += 1;
+                if *byte == b'\n' || *byte == b'\r' {
+                    break;
+                }
+                buf.push(*byte);
+            }
+            take
+        };
+        reader.consume(consumed);
+        if buf.is_empty() {
+            continue;
+        }
+        return Ok(buf.len());
+    }
 }
 
 fn run_git_stdout(root: &Path, args: &[&str]) -> AppResult<Vec<u8>> {

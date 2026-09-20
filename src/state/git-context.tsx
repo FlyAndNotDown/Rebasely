@@ -263,17 +263,43 @@ export function GitProvider({ children }: { children: ReactNode }) {
   }, [activeTabId, persistSession, tabs]);
 
   const runActivity = useCallback(
-    async <T,>(label: string, detail: string | undefined, fn: () => Promise<T>) => {
+    async <T,>(
+      label: string,
+      detail: string | undefined,
+      fn: (activityId: string) => Promise<T>,
+    ) => {
       const id = crypto.randomUUID();
       setActivities((current) => [...current, { id, label, detail }]);
       try {
-        return await fn();
+        return await fn(id);
       } finally {
         setActivities((current) => current.filter((item) => item.id !== id));
       }
     },
     [],
   );
+
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void listen<{ id: string; line: string }>("git-progress", (event) => {
+      setActivities((current) =>
+        current.map((item) =>
+          item.id === event.payload.id ? { ...item, detail: event.payload.line } : item,
+        ),
+      );
+    }).then((fn) => {
+      if (disposed) {
+        fn();
+        return;
+      }
+      unlisten = fn;
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
 
   const openPath = useCallback(async (path: string) => {
     const existing = findRepoTab(tabsRef.current, path);
@@ -622,7 +648,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
   const runMutation = useCallback(
     async (
       label: string,
-      action: (repoPath: string) => Promise<WorkspaceSnapshot>,
+      action: (repoPath: string, activityId: string) => Promise<WorkspaceSnapshot>,
       success?: string,
     ) => {
       const repoPath = activeRepoPath();
@@ -631,8 +657,8 @@ export function GitProvider({ children }: { children: ReactNode }) {
       const current = sessionsRef.current[tabId];
       const changeSelection = current?.changeSelection ?? null;
       try {
-        const next = await runActivity(label, current?.snapshot?.repo.name, async () => {
-          const snapshot = await action(repoPath);
+        const next = await runActivity(label, current?.snapshot?.repo.name, async (activityId) => {
+          const snapshot = await action(repoPath, activityId);
           let changeDiff = current?.changeDiff ?? null;
           let nextSelection = changeSelection;
           if (changeSelection) {
@@ -740,15 +766,27 @@ export function GitProvider({ children }: { children: ReactNode }) {
   );
 
   const fetchRemote = useCallback(async () => {
-    await runMutation("Fetching", (repoPath) => gitApi.fetchRemote(repoPath), "Fetched");
+    await runMutation(
+      "Fetching",
+      (repoPath, activityId) => gitApi.fetchRemote(repoPath, activityId),
+      "Fetched",
+    );
   }, [runMutation]);
 
   const pullRemote = useCallback(async () => {
-    await runMutation("Pulling", (repoPath) => gitApi.pullRemote(repoPath), "Pulled");
+    await runMutation(
+      "Pulling",
+      (repoPath, activityId) => gitApi.pullRemote(repoPath, activityId),
+      "Pulled",
+    );
   }, [runMutation]);
 
   const pushRemote = useCallback(async () => {
-    await runMutation("Pushing", (repoPath) => gitApi.pushRemote(repoPath), "Pushed");
+    await runMutation(
+      "Pushing",
+      (repoPath, activityId) => gitApi.pushRemote(repoPath, activityId),
+      "Pushed",
+    );
   }, [runMutation]);
 
   const createBranch = useCallback(

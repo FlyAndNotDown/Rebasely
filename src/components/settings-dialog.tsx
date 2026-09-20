@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { CheckIcon, ChevronDownIcon } from "lucide-react";
+import { useTheme } from "next-themes";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -22,7 +23,8 @@ import { errorMessage, gitApi } from "@/lib/git";
 import { cn } from "@/lib/utils";
 import type { TerminalOption } from "@/types/git";
 
-type SettingsSection = "git" | "terminal";
+type SettingsSection = "git" | "terminal" | "appearance";
+type ThemeChoice = "dark" | "light";
 
 export function SettingsDialog({
   open,
@@ -31,11 +33,13 @@ export function SettingsDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const { theme, setTheme } = useTheme();
   const [section, setSection] = useState<SettingsSection>("git");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [terminalId, setTerminalId] = useState("auto");
   const [terminals, setTerminals] = useState<TerminalOption[]>([]);
+  const [themeChoice, setThemeChoice] = useState<ThemeChoice>("dark");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -51,6 +55,11 @@ export function SettingsDialog({
       .catch((error) => toast.error(errorMessage(error)));
   }, [open]);
 
+  useEffect(() => {
+    if (!open) return;
+    if (theme === "light" || theme === "dark") setThemeChoice(theme);
+  }, [open, theme]);
+
   async function save() {
     setSaving(true);
     try {
@@ -58,6 +67,7 @@ export function SettingsDialog({
         gitApi.setGitIdentity({ name: name.trim(), email: email.trim() }),
         gitApi.setPrefs({ terminalId }),
       ]);
+      setTheme(themeChoice);
       toast.success("Saved settings");
       onOpenChange(false);
     } catch (error) {
@@ -83,6 +93,12 @@ export function SettingsDialog({
               onClick={() => setSection("terminal")}
             >
               Terminal
+            </NavButton>
+            <NavButton
+              active={section === "appearance"}
+              onClick={() => setSection("appearance")}
+            >
+              Appearance
             </NavButton>
           </aside>
           <div className="min-w-0 flex-1 overflow-auto p-6">
@@ -116,7 +132,7 @@ export function SettingsDialog({
                   </div>
                 </div>
               </>
-            ) : (
+            ) : section === "terminal" ? (
               <>
                 <DialogHeader>
                   <DialogTitle>Terminal</DialogTitle>
@@ -154,6 +170,41 @@ export function SettingsDialog({
                           {!option.available ? (
                             <span className="ml-auto text-xs text-muted-foreground">Not found</span>
                           ) : null}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+              </>
+            ) : (
+              <>
+                <DialogHeader>
+                  <DialogTitle>Appearance</DialogTitle>
+                  <DialogDescription>
+                    Light and dark themes. Dark is the default.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="mt-6 grid gap-2">
+                  <Label htmlFor="theme-choice">Theme</Label>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        id="theme-choice"
+                        type="button"
+                        variant="outline"
+                        className="w-full justify-between font-normal"
+                      >
+                        <span>{themeChoice === "light" ? "Light" : "Dark"}</span>
+                        <ChevronDownIcon />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start" className="w-(--radix-dropdown-menu-trigger-width)">
+                      {(["dark", "light"] as const).map((option) => (
+                        <DropdownMenuItem key={option} onClick={() => setThemeChoice(option)}>
+                          <span className="min-w-4">
+                            {option === themeChoice ? <CheckIcon className="size-3.5" /> : null}
+                          </span>
+                          {option === "light" ? "Light" : "Dark"}
                         </DropdownMenuItem>
                       ))}
                     </DropdownMenuContent>

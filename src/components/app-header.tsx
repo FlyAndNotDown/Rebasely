@@ -62,7 +62,17 @@ export function AppHeader() {
   const remoteGroups = useMemo(() => groupRemoteBranches(remote), [remote]);
   const filteredRemote = useMemo(() => {
     if (!query) return [];
-    return remote.filter((branch) => branch.name.toLowerCase().includes(query)).slice(0, 80);
+    return remote
+      .filter((branch) => branch.name.toLowerCase().includes(query))
+      .sort((left, right) => {
+        const leftRemote = left.name.split("/")[0] ?? left.name;
+        const rightRemote = right.name.split("/")[0] ?? right.name;
+        const remoteRank = remoteGroupRank(leftRemote) - remoteGroupRank(rightRemote);
+        if (remoteRank !== 0) return remoteRank;
+        const nameRank = defaultBranchRank(left.name) - defaultBranchRank(right.name);
+        return nameRank !== 0 ? nameRank : left.name.localeCompare(right.name);
+      })
+      .slice(0, 80);
   }, [query, remote]);
   const current = repo?.isDetached
     ? (repo.headId?.slice(0, 7) ?? "detached")
@@ -168,13 +178,6 @@ export function AppHeader() {
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-          {repo.ahead || repo.behind ? (
-            <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
-              {repo.ahead ? `↑${repo.ahead}` : null}
-              {repo.ahead && repo.behind ? " " : null}
-              {repo.behind ? `↓${repo.behind}` : null}
-            </span>
-          ) : null}
         </>
       ) : null}
 
@@ -459,6 +462,19 @@ function TabButton({
   );
 }
 
+function remoteGroupRank(name: string) {
+  if (name === "origin") return 0;
+  return 1;
+}
+
+function defaultBranchRank(shortName: string) {
+  const base = shortName.split("/").pop() ?? shortName;
+  if (base === "main") return 0;
+  if (base === "master") return 1;
+  if (base === "develop") return 2;
+  return 3;
+}
+
 function groupRemoteBranches(branches: BranchInfo[]) {
   const groups = new Map<string, BranchInfo[]>();
   for (const branch of branches) {
@@ -468,7 +484,18 @@ function groupRemoteBranches(branches: BranchInfo[]) {
     list.push(branch);
     groups.set(remote, list);
   }
-  return [...groups.entries()].sort(([left], [right]) => left.localeCompare(right));
+  for (const [remote, list] of groups) {
+    list.sort((left, right) => {
+      const leftName = shortRemoteName(left.name, remote);
+      const rightName = shortRemoteName(right.name, remote);
+      const rank = defaultBranchRank(leftName) - defaultBranchRank(rightName);
+      return rank !== 0 ? rank : leftName.localeCompare(rightName);
+    });
+  }
+  return [...groups.entries()].sort(([left], [right]) => {
+    const rank = remoteGroupRank(left) - remoteGroupRank(right);
+    return rank !== 0 ? rank : left.localeCompare(right);
+  });
 }
 
 function shortRemoteName(fullName: string, remoteName: string) {

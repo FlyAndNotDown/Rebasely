@@ -8,7 +8,8 @@ mod watch;
 
 use std::path::Path;
 
-use tauri::{AppHandle, State};
+use serde::Serialize;
+use tauri::{AppHandle, Emitter, State};
 
 use error::{AppError, AppResult};
 use git::{BranchList, CommitDetails, CommitSummary, FileDiff, GitIdentity, WorkspaceSnapshot};
@@ -153,18 +154,60 @@ async fn checkout_branch(repo_path: String, name: String) -> AppResult<Workspace
 }
 
 #[tauri::command]
-async fn fetch_remote(repo_path: String) -> AppResult<WorkspaceSnapshot> {
-    with_repo_async(repo_path, git::fetch_remote).await
+async fn fetch_remote(
+    repo_path: String,
+    activity_id: Option<String>,
+    app: AppHandle,
+) -> AppResult<WorkspaceSnapshot> {
+    with_repo_async(repo_path, move |repo| {
+        git::fetch_remote(repo, progress_sink(&app, activity_id.as_deref()))
+    })
+    .await
 }
 
 #[tauri::command]
-async fn pull_remote(repo_path: String) -> AppResult<WorkspaceSnapshot> {
-    with_repo_async(repo_path, git::pull_remote).await
+async fn pull_remote(
+    repo_path: String,
+    activity_id: Option<String>,
+    app: AppHandle,
+) -> AppResult<WorkspaceSnapshot> {
+    with_repo_async(repo_path, move |repo| {
+        git::pull_remote(repo, progress_sink(&app, activity_id.as_deref()))
+    })
+    .await
 }
 
 #[tauri::command]
-async fn push_remote(repo_path: String) -> AppResult<WorkspaceSnapshot> {
-    with_repo_async(repo_path, git::push_remote).await
+async fn push_remote(
+    repo_path: String,
+    activity_id: Option<String>,
+    app: AppHandle,
+) -> AppResult<WorkspaceSnapshot> {
+    with_repo_async(repo_path, move |repo| {
+        git::push_remote(repo, progress_sink(&app, activity_id.as_deref()))
+    })
+    .await
+}
+
+#[derive(Clone, Serialize)]
+struct GitProgressEvent {
+    id: String,
+    line: String,
+}
+
+fn progress_sink(app: &AppHandle, activity_id: Option<&str>) -> impl FnMut(&str) + Send + 'static {
+    let app = app.clone();
+    let activity_id = activity_id.map(str::to_string);
+    move |line: &str| {
+        let Some(id) = activity_id.clone() else { return };
+        let _ = app.emit(
+            "git-progress",
+            GitProgressEvent {
+                id,
+                line: line.to_string(),
+            },
+        );
+    }
 }
 
 #[tauri::command]

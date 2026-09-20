@@ -56,9 +56,12 @@ export const gitApi = {
     invoke<WorkspaceSnapshot>("commit_changes", { repoPath, message, amend }),
   checkoutBranch: (repoPath: string, name: string) =>
     invoke<WorkspaceSnapshot>("checkout_branch", { repoPath, name }),
-  fetchRemote: (repoPath: string) => invoke<WorkspaceSnapshot>("fetch_remote", { repoPath }),
-  pullRemote: (repoPath: string) => invoke<WorkspaceSnapshot>("pull_remote", { repoPath }),
-  pushRemote: (repoPath: string) => invoke<WorkspaceSnapshot>("push_remote", { repoPath }),
+  fetchRemote: (repoPath: string, activityId?: string) =>
+    invoke<WorkspaceSnapshot>("fetch_remote", { repoPath, activityId }),
+  pullRemote: (repoPath: string, activityId?: string) =>
+    invoke<WorkspaceSnapshot>("pull_remote", { repoPath, activityId }),
+  pushRemote: (repoPath: string, activityId?: string) =>
+    invoke<WorkspaceSnapshot>("push_remote", { repoPath, activityId }),
   createBranch: (repoPath: string, name: string, switchTo: boolean) =>
     invoke<WorkspaceSnapshot>("create_branch", {
       repoPath,
