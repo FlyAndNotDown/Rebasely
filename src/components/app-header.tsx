@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type UIEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type UIEvent } from "react";
 import {
   CheckIcon,
   ChevronDownIcon,
@@ -155,7 +155,7 @@ export function AppHeader() {
                           <DropdownMenuSubTrigger>
                             <span className="truncate font-mono">{remoteName}</span>
                           </DropdownMenuSubTrigger>
-                          <DropdownMenuSubContent className="w-72 p-0">
+                          <DropdownMenuSubContent className="w-80 p-0">
                             <VirtualBranchList
                               items={branches}
                               remoteName={remoteName}
@@ -525,31 +525,64 @@ function VirtualBranchList({
   remoteName: string;
   onPick: (name: string) => void;
 }) {
+  const [query, setQuery] = useState("");
   const [scrollTop, setScrollTop] = useState(0);
-  const row = 28;
-  const height = Math.min(320, Math.max(row, items.length * row));
+  const listRef = useRef<HTMLDivElement>(null);
+  const row = 36;
+  const filtered = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return items;
+    return items.filter((branch) => {
+      const short = shortRemoteName(branch.name, remoteName).toLowerCase();
+      return short.includes(needle) || branch.name.toLowerCase().includes(needle);
+    });
+  }, [items, query, remoteName]);
+
+  useEffect(() => {
+    setScrollTop(0);
+    if (listRef.current) listRef.current.scrollTop = 0;
+  }, [query]);
+
+  const height = Math.min(320, Math.max(filtered.length === 0 ? 48 : row, filtered.length * row));
   const start = Math.max(0, Math.floor(scrollTop / row) - 6);
   const visible = Math.ceil(height / row) + 12;
-  const slice = items.slice(start, start + visible);
+  const slice = filtered.slice(start, start + visible);
 
   function onScroll(event: UIEvent<HTMLDivElement>) {
     setScrollTop(event.currentTarget.scrollTop);
   }
 
   return (
-    <div className="overflow-y-auto" style={{ height }} onScroll={onScroll}>
-      <div className="relative" style={{ height: items.length * row }}>
-        {slice.map((branch, index) => (
-          <button
-            key={branch.name}
-            type="button"
-            className="absolute right-0 left-0 truncate px-2 text-left font-mono text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-            style={{ top: (start + index) * row, height: row }}
-            onClick={() => onPick(branch.name)}
-          >
-            {shortRemoteName(branch.name, remoteName)}
-          </button>
-        ))}
+    <div className="flex flex-col">
+      <div className="border-b px-2 py-2" onPointerDown={(event) => event.stopPropagation()}>
+        <Input
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          onKeyDown={(event) => event.stopPropagation()}
+          placeholder="Filter branches"
+          className="h-7"
+        />
+      </div>
+      <div ref={listRef} className="overflow-y-auto" style={{ height }} onScroll={onScroll}>
+        {filtered.length === 0 ? (
+          <div className="flex h-full items-center justify-center px-3 text-xs text-muted-foreground">
+            No matching branches
+          </div>
+        ) : (
+          <div className="relative" style={{ height: filtered.length * row }}>
+            {slice.map((branch, index) => (
+              <button
+                key={branch.name}
+                type="button"
+                className="absolute right-0 left-0 flex items-center truncate px-3 text-left font-mono text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                style={{ top: (start + index) * row, height: row }}
+                onClick={() => onPick(branch.name)}
+              >
+                {shortRemoteName(branch.name, remoteName)}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
