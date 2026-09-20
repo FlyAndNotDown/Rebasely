@@ -80,10 +80,6 @@ export const gitApi = {
     invoke<GitIdentity>("get_local_git_identity", { repoPath }),
   setLocalGitIdentity: (repoPath: string, identity: GitIdentity) =>
     invoke<GitIdentity>("set_local_git_identity", { repoPath, identity }),
-  getLocalGitconfig: (repoPath: string) =>
-    invoke<string>("get_local_gitconfig", { repoPath }),
-  setLocalGitconfig: (repoPath: string, contents: string) =>
-    invoke<string>("set_local_gitconfig", { repoPath, contents }),
   openInFileManager: (path: string) => invoke<void>("open_in_file_manager", { path }),
   openInTerminal: (path: string) => invoke<void>("open_in_terminal", { path }),
   listTerminals: () => invoke<TerminalOption[]>("list_terminals"),

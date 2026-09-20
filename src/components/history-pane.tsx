@@ -3,6 +3,7 @@ import { formatRelativeTime } from "@/lib/format";
 import { graphWidth, laneColor, layoutCommitGraph, type GraphRow } from "@/lib/commit-graph";
 import { cn } from "@/lib/utils";
 import { useGit } from "@/state/git-context";
+import type { CommitRef } from "@/types/git";
 
 const ROW_HEIGHT = 32;
 const LANE_GAP = 12;
@@ -58,8 +59,11 @@ export function HistoryPane() {
             row={graph[index]}
             previous={graph[index - 1]}
           />
-          <span className="min-w-0 flex-1 truncate text-sm">
-            {commit.summary || "(no message)"}
+          <span className="flex min-w-0 flex-1 items-center gap-1.5">
+            <CommitRefs refs={commit.refs ?? []} />
+            <span className="min-w-0 truncate text-sm">
+              {commit.summary || "(no message)"}
+            </span>
           </span>
           <span className="w-24 shrink-0 truncate text-[11px] text-muted-foreground">
             {commit.authorName}
@@ -80,6 +84,29 @@ export function HistoryPane() {
             : null}
       </div>
     </div>
+  );
+}
+
+function CommitRefs({ refs }: { refs: CommitRef[] }) {
+  if (refs.length === 0) return null;
+
+  return (
+    <span className="flex shrink-0 items-center gap-1">
+      {refs.map((ref) => (
+        <span
+          key={`${ref.kind}:${ref.name}`}
+          className={cn(
+            "inline-flex h-4 items-center rounded px-1.5 font-sans text-[10px] leading-none font-medium whitespace-nowrap",
+            ref.kind === "head" && "bg-yellow-400 text-zinc-950",
+            ref.kind === "branch" && "bg-sky-500 text-white",
+            ref.kind === "tag" && "bg-orange-500 text-white",
+            ref.kind !== "head" && ref.kind !== "branch" && ref.kind !== "tag" && "bg-muted text-muted-foreground",
+          )}
+        >
+          {ref.name}
+        </span>
+      ))}
+    </span>
   );
 }
 

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -51,6 +52,14 @@ pub struct CommitSummary {
     pub author_email: String,
     pub timestamp: i64,
     pub parents: Vec<String>,
+    pub refs: Vec<CommitRefLabel>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitRefLabel {
+    pub name: String,
+    pub kind: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -802,6 +811,7 @@ fn summarize_oid(repo: &Repository, oid: Oid) -> AppResult<CommitSummary> {
         author_email,
         timestamp: commit.time().seconds(),
         parents: commit.parent_ids().map(|id| id.to_string()).collect(),
+        refs: Vec::new(),
     })
 }
 
@@ -820,10 +830,14 @@ pub fn commits(repo: &Repository, limit: usize, skip: usize) -> AppResult<Vec<Co
                 "--pretty=format:%H%x00%h%x00%s%x00%an%x00%ae%x00%at%x00%P",
             ],
         ) {
-            return parse_git_log(&stdout);
+            let mut items = parse_git_log(&stdout)?;
+            decorate_commits(repo, &mut items);
+            return Ok(items);
         }
     }
-    commits_from_revwalk(repo, limit, skip)
+    let mut items = commits_from_revwalk(repo, limit, skip)?;
+    decorate_commits(repo, &mut items);
+    Ok(items)
 }
 
 fn commits_from_revwalk(
@@ -880,9 +894,88 @@ fn parse_git_log(bytes: &[u8]) -> AppResult<Vec<CommitSummary>> {
             } else {
                 parents.split_whitespace().map(str::to_string).collect()
             },
+            refs: Vec::new(),
         });
     }
     Ok(items)
+}
+
+fn decorate_commits(repo: &Repository, commits: &mut [CommitSummary]) {
+    let labels = collect_ref_labels(repo);
+    for commit in commits {
+        if let Some(mut refs) = labels.get(&commit.id).cloned() {
+            refs.sort_by(|left, right| {
+                ref_kind_rank(&left.kind)
+                    .cmp(&ref_kind_rank(&right.kind))
+                    .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
+            });
+            commit.refs = refs;
+        }
+    }
+}
+
+fn ref_kind_rank(kind: &str) -> u8 {
+    match kind {
+        "head" => 0,
+        "branch" => 1,
+        "tag" => 2,
+        _ => 3,
+    }
+}
+
+fn collect_ref_labels(repo: &Repository) -> HashMap<String, Vec<CommitRefLabel>> {
+    let mut labels: HashMap<String, Vec<CommitRefLabel>> = HashMap::new();
+    if let Ok(root) = workdir(repo) {
+        if let Ok(stdout) = run_git_stdout(
+            root,
+            &[
+                "for-each-ref",
+                "--format=%(if)%(*objectname)%(then)%(*objectname)%(else)%(objectname)%(end)%00%(refname)%00%(HEAD)",
+                "refs/heads",
+                "refs/tags",
+            ],
+        ) {
+            let text = String::from_utf8_lossy(&stdout);
+            for line in text.split('\n') {
+                if line.is_empty() {
+                    continue;
+                }
+                let mut fields = line.split('\0');
+                let Some(oid) = fields.next() else { continue };
+                let Some(refname) = fields.next() else { continue };
+                let (kind, name) = if let Some(name) = refname.strip_prefix("refs/heads/") {
+                    ("branch", name)
+                } else if let Some(name) = refname.strip_prefix("refs/tags/") {
+                    ("tag", name)
+                } else {
+                    continue;
+                };
+                if name.is_empty() {
+                    continue;
+                }
+                labels.entry(oid.to_string()).or_default().push(CommitRefLabel {
+                    name: name.to_string(),
+                    kind: kind.to_string(),
+                });
+            }
+        }
+    }
+
+    if let Ok(head) = repo.head() {
+        if let Some(oid) = head.target() {
+            let entry = labels.entry(oid.to_string()).or_default();
+            if !entry.iter().any(|label| label.kind == "head") {
+                entry.insert(
+                    0,
+                    CommitRefLabel {
+                        name: "HEAD".to_string(),
+                        kind: "head".to_string(),
+                    },
+                );
+            }
+        }
+    }
+    labels
 }
 
 fn collect_patch(diff: git2::Diff<'_>, fallback_path: &str) -> AppResult<FileDiff> {
@@ -1437,18 +1530,6 @@ pub fn read_local_git_identity(repo: &Repository) -> AppResult<GitIdentity> {
 
 pub fn write_local_git_identity(repo: &Repository, name: &str, email: &str) -> AppResult<()> {
     write_identity_to_config(&local_gitconfig_path(repo), name, email)
-}
-
-pub fn read_local_gitconfig(repo: &Repository) -> AppResult<String> {
-    let path = local_gitconfig_path(repo);
-    if !path.exists() {
-        return Ok(String::new());
-    }
-    fs::read_to_string(path).map_err(|err| AppError::msg(err.to_string()))
-}
-
-pub fn write_local_gitconfig(repo: &Repository, contents: &str) -> AppResult<()> {
-    fs::write(local_gitconfig_path(repo), contents).map_err(|err| AppError::msg(err.to_string()))
 }
 
 fn write_identity_to_config(path: &Path, name: &str, email: &str) -> AppResult<()> {

@@ -31,6 +31,11 @@ export interface StatusSnapshot {
   unstaged: FileStatus[];
 }
 
+export interface CommitRef {
+  name: string;
+  kind: "head" | "branch" | "tag" | string;
+}
+
 export interface CommitSummary {
   id: string;
   shortId: string;
@@ -40,6 +45,7 @@ export interface CommitSummary {
   authorEmail: string;
   timestamp: number;
   parents: string[];
+  refs: CommitRef[];
 }
 
 export interface DiffLine {

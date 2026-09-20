@@ -269,20 +269,6 @@ async fn set_local_git_identity(repo_path: String, identity: GitIdentity) -> App
 }
 
 #[tauri::command]
-async fn get_local_gitconfig(repo_path: String) -> AppResult<String> {
-    with_repo_async(repo_path, |repo| git::read_local_gitconfig(repo)).await
-}
-
-#[tauri::command]
-async fn set_local_gitconfig(repo_path: String, contents: String) -> AppResult<String> {
-    with_repo_async(repo_path, move |repo| {
-        git::write_local_gitconfig(repo, &contents)?;
-        git::read_local_gitconfig(repo)
-    })
-    .await
-}
-
-#[tauri::command]
 fn open_in_file_manager(path: String) -> AppResult<()> {
     git::open_in_file_manager(&path)
 }
@@ -351,8 +337,6 @@ pub fn run() {
             set_git_identity,
             get_local_git_identity,
             set_local_git_identity,
-            get_local_gitconfig,
-            set_local_gitconfig,
             open_in_file_manager,
             list_terminals,
             get_prefs,

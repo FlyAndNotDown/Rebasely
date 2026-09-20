@@ -23,44 +23,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
+import { fileKindClass, fileKindLabel } from "@/lib/file-kind";
 import { fileName, parentPath } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useGit } from "@/state/git-context";
 import type { FileStatus, WorkspaceSnapshot } from "@/types/git";
-
-function kindLabel(kind: string): string {
-  switch (kind) {
-    case "added":
-      return "A";
-    case "deleted":
-      return "D";
-    case "renamed":
-      return "R";
-    case "untracked":
-      return "U";
-    case "conflicted":
-      return "C";
-    case "typechange":
-      return "T";
-    default:
-      return "M";
-  }
-}
-
-function kindClass(kind: string): string {
-  switch (kind) {
-    case "added":
-    case "untracked":
-      return "text-diff-add";
-    case "deleted":
-    case "conflicted":
-      return "text-diff-del";
-    case "renamed":
-      return "text-diff-hunk";
-    default:
-      return "text-amber-600 dark:text-amber-400";
-  }
-}
 
 function FileRow({
   file,
@@ -93,10 +60,10 @@ function FileRow({
               <span
                 className={cn(
                   "w-3 shrink-0 font-mono text-[11px] font-medium",
-                  kindClass(file.kind),
+                  fileKindClass(file.kind),
                 )}
               >
-                {kindLabel(file.kind)}
+                {fileKindLabel(file.kind)}
               </span>
               <span className="truncate">{fileName(file.path)}</span>
             </div>
@@ -151,6 +118,8 @@ export function ChangesPane() {
   const unstaged = snapshot?.status.unstaged ?? [];
   const selectedChange = changeSelection;
   const canAmend = Boolean(snapshot?.headCommit);
+  const hasChanges = staged.length > 0 || unstaged.length > 0;
+  const canOpenCommitMenu = canAmend && (hasChanges || amend);
   const canCommit = message.trim().length > 0 && (amend ? canAmend : staged.length > 0);
 
   const counts = useMemo(
@@ -269,16 +238,17 @@ export function ChangesPane() {
               <DropdownMenuTrigger asChild>
                 <Button
                   type="button"
-                  disabled={!canAmend}
+                  disabled={!canOpenCommitMenu}
                   aria-label="Commit options"
                   className="rounded-none border-l border-primary-foreground/20 px-1.5"
                 >
                   <ChevronDownIcon />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
+              <DropdownMenuContent align="end" className="min-w-max">
                 <DropdownMenuCheckboxItem
                   checked={amend}
+                  className="whitespace-nowrap"
                   onCheckedChange={(checked) => toggleAmend(checked === true)}
                 >
                   Amend last commit

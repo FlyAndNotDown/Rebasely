@@ -1,6 +1,7 @@
-import { useMemo, useState, type MouseEvent, type UIEvent } from "react";
+import { useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type UIEvent } from "react";
 import {
   CheckIcon,
+  ChevronDownIcon,
   FolderOpenIcon,
   GitBranchIcon,
   PlusIcon,
@@ -68,36 +69,16 @@ export function AppHeader() {
     : (repo?.currentBranch ?? "unknown");
 
   return (
-    <header className="flex h-11 shrink-0 items-center gap-2 border-b bg-background px-2">
-      <nav className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
-        {tabs.map((tab) => (
-          <TabButton
-            key={tab.id}
-            tab={tab}
-            active={tab.id === activeTabId}
-            onSelect={() => setActiveTab(tab.id)}
-            onClose={() => closeTab(tab.id)}
-          />
-        ))}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              className="shrink-0"
-              onClick={() => void openFolder()}
-              aria-label="Open repository"
-            >
-              <PlusIcon />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>
-            Open repository
-            <Kbd>Ctrl+O</Kbd>
-          </TooltipContent>
-        </Tooltip>
-      </nav>
+    <header className="flex h-11 shrink-0 items-center gap-2 overflow-hidden border-b bg-background px-2">
+      <TabStrip
+        tabs={tabs}
+        activeTabId={activeTabId}
+        setActiveTab={setActiveTab}
+        closeTab={closeTab}
+        openFolder={openFolder}
+      />
 
+      <div className="flex shrink-0 items-center gap-2">
       <ActivityMeter />
 
       {repo ? <AppToolbar /> : null}
@@ -217,6 +198,7 @@ export function AppHeader() {
           </Tooltip>
         </>
       ) : null}
+      </div>
 
       <Dialog open={branchOpen} onOpenChange={setBranchOpen}>
         <DialogContent>
@@ -255,6 +237,163 @@ export function AppHeader() {
         </DialogContent>
       </Dialog>
     </header>
+  );
+}
+
+function TabStrip({
+  tabs,
+  activeTabId,
+  setActiveTab,
+  closeTab,
+  openFolder,
+}: {
+  tabs: AppTab[];
+  activeTabId: string;
+  setActiveTab: (id: string) => void;
+  closeTab: (id: string) => void;
+  openFolder: () => void | Promise<void>;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const measureRef = useRef<HTMLDivElement>(null);
+  const [hiddenIds, setHiddenIds] = useState<string[]>([]);
+
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    const measure = measureRef.current;
+    if (!container || !measure) return;
+    const containerNode = container;
+    const measureNode = measure;
+
+    function update() {
+      const nodes = Array.from(measureNode.children) as HTMLElement[];
+      if (nodes.length === 0) return;
+      const plus = nodes[nodes.length - 1];
+      const tabEls = nodes.slice(0, -1);
+      const gap = 4;
+      const plusWidth = plus.offsetWidth;
+      const moreWidth = 56;
+      const available = containerNode.clientWidth;
+      const widths = tabEls.map((node) => node.offsetWidth);
+
+      let used = plusWidth;
+      let count = 0;
+      for (let index = 0; index < widths.length; index += 1) {
+        const remaining = widths.length - index - 1;
+        const overflowSpace = remaining > 0 ? gap + moreWidth : 0;
+        if (count > 0 && used + gap + widths[index] + overflowSpace > available) break;
+        used += (count > 0 ? gap : 0) + widths[index];
+        count += 1;
+      }
+      count = Math.max(1, Math.min(count, tabs.length));
+
+      let visible = tabs.slice(0, count);
+      if (!visible.some((tab) => tab.id === activeTabId)) {
+        const active = tabs.find((tab) => tab.id === activeTabId);
+        if (active) {
+          visible = [...visible.slice(0, Math.max(visible.length - 1, 0)), active];
+        }
+      }
+      const visibleSet = new Set(visible.map((tab) => tab.id));
+      setHiddenIds(tabs.filter((tab) => !visibleSet.has(tab.id)).map((tab) => tab.id));
+    }
+
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(container);
+    observer.observe(measure);
+    return () => observer.disconnect();
+  }, [activeTabId, tabs]);
+
+  const hidden = tabs.filter((tab) => hiddenIds.includes(tab.id));
+  const visible = tabs.filter((tab) => !hiddenIds.includes(tab.id));
+
+  return (
+    <div ref={containerRef} className="relative min-w-0 flex-1">
+      <div
+        ref={measureRef}
+        className="pointer-events-none invisible absolute flex items-center gap-1"
+        aria-hidden
+      >
+        {tabs.map((tab) => (
+          <TabButton
+            key={`measure:${tab.id}`}
+            tab={tab}
+            active={tab.id === activeTabId}
+            onSelect={() => undefined}
+            onClose={() => undefined}
+          />
+        ))}
+        <Button variant="ghost" size="icon-xs">
+          <PlusIcon />
+        </Button>
+      </div>
+      <div className="flex min-w-0 items-center gap-1">
+        {visible.map((tab) => (
+          <TabButton
+            key={tab.id}
+            tab={tab}
+            active={tab.id === activeTabId}
+            onSelect={() => setActiveTab(tab.id)}
+            onClose={() => closeTab(tab.id)}
+          />
+        ))}
+        {hidden.length > 0 ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="sm" className="shrink-0 px-1.5">
+                {hidden.length}
+                <ChevronDownIcon />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="min-w-52">
+              {hidden.map((tab) => {
+                const label = tab.kind === "welcome" ? "Rebasely" : tab.name;
+                return (
+                  <DropdownMenuItem
+                    key={tab.id}
+                    className="gap-2"
+                    onClick={() => setActiveTab(tab.id)}
+                  >
+                    <span className="min-w-0 flex-1 truncate">{label}</span>
+                    {tab.kind === "repo" ? (
+                      <button
+                        type="button"
+                        className="flex size-4 items-center justify-center rounded-sm hover:bg-muted"
+                        aria-label={`Close ${label}`}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          closeTab(tab.id);
+                        }}
+                      >
+                        <XIcon className="size-3" />
+                      </button>
+                    ) : null}
+                  </DropdownMenuItem>
+                );
+              })}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : null}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              className="shrink-0"
+              onClick={() => void openFolder()}
+              aria-label="Open repository"
+            >
+              <PlusIcon />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            Open repository
+            <Kbd>Ctrl+O</Kbd>
+          </TooltipContent>
+        </Tooltip>
+      </div>
+    </div>
   );
 }
 

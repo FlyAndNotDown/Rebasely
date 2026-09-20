@@ -11,12 +11,9 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { errorMessage, gitApi } from "@/lib/git";
 import { cn } from "@/lib/utils";
 import { useGit } from "@/state/git-context";
-
-type RepoSettingsSection = "gitconfig";
 
 export function RepoSettingsDialog({
   open,
@@ -27,28 +24,20 @@ export function RepoSettingsDialog({
 }) {
   const { snapshot } = useGit();
   const repoPath = snapshot?.repo.path;
-  const [section, setSection] = useState<RepoSettingsSection>("gitconfig");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [globalName, setGlobalName] = useState("");
   const [globalEmail, setGlobalEmail] = useState("");
-  const [gitconfig, setGitconfig] = useState("");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!open || !repoPath) return;
-    setSection("gitconfig");
-    void Promise.all([
-      gitApi.getGitIdentity(),
-      gitApi.getLocalGitIdentity(repoPath),
-      gitApi.getLocalGitconfig(repoPath),
-    ])
-      .then(([globalIdentity, localIdentity, contents]) => {
+    void Promise.all([gitApi.getGitIdentity(), gitApi.getLocalGitIdentity(repoPath)])
+      .then(([globalIdentity, localIdentity]) => {
         setGlobalName(globalIdentity.name);
         setGlobalEmail(globalIdentity.email);
         setName(localIdentity.name);
         setEmail(localIdentity.email);
-        setGitconfig(contents);
       })
       .catch((error) => toast.error(errorMessage(error)));
   }, [open, repoPath]);
@@ -57,7 +46,6 @@ export function RepoSettingsDialog({
     if (!repoPath) return;
     setSaving(true);
     try {
-      await gitApi.setLocalGitconfig(repoPath, gitconfig);
       await gitApi.setLocalGitIdentity(repoPath, { name: name.trim(), email: email.trim() });
       toast.success("Saved repository settings");
       onOpenChange(false);
@@ -75,13 +63,7 @@ export function RepoSettingsDialog({
           <aside className="flex w-44 shrink-0 flex-col gap-1 border-r p-4">
             <button
               type="button"
-              className={cn(
-                "w-full rounded-md px-2.5 py-1.5 text-left text-sm",
-                section === "gitconfig"
-                  ? "bg-muted text-foreground"
-                  : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
-              )}
-              onClick={() => setSection("gitconfig")}
+              className={cn("w-full rounded-md bg-muted px-2.5 py-1.5 text-left text-sm text-foreground")}
             >
               Git config
             </button>
@@ -90,8 +72,8 @@ export function RepoSettingsDialog({
             <DialogHeader>
               <DialogTitle>Git config</DialogTitle>
               <DialogDescription>
-                Local overrides for this repository, written to <span className="font-mono">.git/config</span>.
-                Blank identity fields inherit the global Git config.
+                Local identity for this repository, written to <span className="font-mono">.git/config</span>.
+                Blank fields inherit the global Git config.
               </DialogDescription>
             </DialogHeader>
             <div className="mt-6 grid gap-5">
@@ -112,16 +94,6 @@ export function RepoSettingsDialog({
                   value={email}
                   onChange={(event) => setEmail(event.target.value)}
                   placeholder={globalEmail || "Use global email"}
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="repo-gitconfig">Local gitconfig</Label>
-                <Textarea
-                  id="repo-gitconfig"
-                  value={gitconfig}
-                  onChange={(event) => setGitconfig(event.target.value)}
-                  spellCheck={false}
-                  className="min-h-64 resize-y font-mono text-xs leading-5"
                 />
               </div>
             </div>

@@ -1,3 +1,4 @@
+import { fileKindClass, fileKindLabel } from "@/lib/file-kind";
 import { fileName } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useGit } from "@/state/git-context";
@@ -46,8 +47,8 @@ export function CommitFiles() {
                 )}
                 onClick={() => void selectCommitFile(commitDetails.commit.id, file.path)}
               >
-                <span className="font-mono text-[11px] text-muted-foreground">
-                  {file.kind[0]?.toUpperCase()}
+                <span className={cn("w-3 shrink-0 font-mono text-[11px] font-medium", fileKindClass(file.kind))}>
+                  {fileKindLabel(file.kind)}
                 </span>
                 <span className="truncate font-mono">{file.path}</span>
                 <span className="ml-auto truncate text-muted-foreground">
