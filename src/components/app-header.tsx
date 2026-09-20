@@ -4,6 +4,7 @@ import {
   FolderOpenIcon,
   GitBranchIcon,
   PlusIcon,
+  SquareTerminalIcon,
   XIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -39,6 +40,8 @@ export function AppHeader() {
     closeTab,
     openFolder,
     revealRepo,
+    openTerminal,
+    ensureBranches,
     checkoutBranch,
     createBranch,
   } = useGit();
@@ -86,7 +89,7 @@ export function AppHeader() {
 
       {repo ? (
         <>
-          <DropdownMenu>
+          <DropdownMenu onOpenChange={(open) => { if (open) void ensureBranches(); }}>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="sm" className="max-w-44 shrink-0 font-mono">
                 <GitBranchIcon data-icon="inline-start" />
@@ -142,14 +145,24 @@ export function AppHeader() {
       ) : null}
 
       {repo ? (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon-sm" onClick={() => void revealRepo()}>
-              <FolderOpenIcon />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Open folder</TooltipContent>
-        </Tooltip>
+        <>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon-sm" onClick={() => void openTerminal()}>
+                <SquareTerminalIcon />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Open terminal</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon-sm" onClick={() => void revealRepo()}>
+                <FolderOpenIcon />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Open folder</TooltipContent>
+          </Tooltip>
+        </>
       ) : null}
 
       <Dialog open={branchOpen} onOpenChange={setBranchOpen}>

@@ -1,11 +1,14 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  AppPrefs,
   AppSession,
+  BranchList,
   CommitDetails,
   CommitSummary,
   FileDiff,
   GitIdentity,
   RecentRepo,
+  TerminalOption,
   WorkspaceSnapshot,
 } from "@/types/git";
 
@@ -34,8 +37,9 @@ export const gitApi = {
     invoke<WorkspaceSnapshot>("open_repository", { path }),
   refreshWorkspace: (repoPath: string) =>
     invoke<WorkspaceSnapshot>("refresh_workspace", { repoPath }),
-  getCommits: (repoPath: string, limit = 100) =>
-    invoke<CommitSummary[]>("get_commits", { repoPath, limit }),
+  getCommits: (repoPath: string, limit = 80, skip = 0) =>
+    invoke<CommitSummary[]>("get_commits", { repoPath, limit, skip }),
+  getBranches: (repoPath: string) => invoke<BranchList>("get_branches", { repoPath }),
   getWorkdirDiff: (repoPath: string, path: string, staged: boolean) =>
     invoke<FileDiff>("get_workdir_diff", { repoPath, path, staged }),
   getCommitDetails: (repoPath: string, oid: string) =>
@@ -70,5 +74,9 @@ export const gitApi = {
   setGitIdentity: (identity: GitIdentity) =>
     invoke<GitIdentity>("set_git_identity", { identity }),
   openInFileManager: (path: string) => invoke<void>("open_in_file_manager", { path }),
+  openInTerminal: (path: string) => invoke<void>("open_in_terminal", { path }),
+  listTerminals: () => invoke<TerminalOption[]>("list_terminals"),
+  getPrefs: () => invoke<AppPrefs>("get_prefs"),
+  setPrefs: (prefs: AppPrefs) => invoke<AppPrefs>("set_prefs", { prefs }),
   syncWatches: (paths: string[]) => invoke<void>("sync_watches", { paths }),
 };

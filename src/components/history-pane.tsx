@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, type UIEvent } from "react";
 import { formatRelativeTime } from "@/lib/format";
 import { graphWidth, laneColor, layoutCommitGraph, type GraphRow } from "@/lib/commit-graph";
 import { cn } from "@/lib/utils";
@@ -8,22 +8,41 @@ const ROW_HEIGHT = 32;
 const LANE_GAP = 12;
 
 export function HistoryPane() {
-  const { commits, historySelection, selectCommit } = useGit();
+  const {
+    commits,
+    commitsHasMore,
+    commitsLoading,
+    historySelection,
+    selectCommit,
+    ensureHistory,
+    loadMoreCommits,
+  } = useGit();
   const selectedId = historySelection?.id ?? null;
   const graph = useMemo(() => layoutCommitGraph(commits), [commits]);
   const lanes = Math.max(1, ...graph.map((row) => row.laneCount));
   const gutter = graphWidth(lanes, LANE_GAP) + 8;
 
+  useEffect(() => {
+    void ensureHistory();
+  }, [ensureHistory]);
+
+  function onScroll(event: UIEvent<HTMLDivElement>) {
+    const node = event.currentTarget;
+    if (node.scrollHeight - node.scrollTop - node.clientHeight < 240) {
+      void loadMoreCommits();
+    }
+  }
+
   if (commits.length === 0) {
     return (
       <div className="flex h-full items-center justify-center p-4 text-sm text-muted-foreground">
-        No commits yet
+        {commitsLoading ? "Loading history…" : "No commits yet"}
       </div>
     );
   }
 
   return (
-    <div className="h-full overflow-auto">
+    <div className="h-full overflow-auto" onScroll={onScroll}>
       {commits.map((commit, index) => (
         <button
           key={commit.id}
@@ -53,6 +72,13 @@ export function HistoryPane() {
           </span>
         </button>
       ))}
+      <div className="px-3 py-2 text-center text-[11px] text-muted-foreground">
+        {commitsLoading
+          ? "Loading history…"
+          : commitsHasMore
+            ? "Scroll for earlier commits"
+            : null}
+      </div>
     </div>
   );
 }

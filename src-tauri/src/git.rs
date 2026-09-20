@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use git2::build::CheckoutBuilder;
 use git2::{
@@ -364,12 +365,170 @@ fn kind_from_status(status: Status, staged: bool) -> &'static str {
 }
 
 pub fn status_snapshot(repo: &Repository) -> AppResult<StatusSnapshot> {
+    let root = workdir(repo)?;
+    if let Ok(snapshot) = status_from_git(root) {
+        return Ok(snapshot);
+    }
+    status_from_libgit2(repo)
+}
+
+fn status_from_git(root: &Path) -> AppResult<StatusSnapshot> {
+    let git = find_git().ok_or_else(|| AppError::msg("git executable not found"))?;
+    let output = Command::new(git)
+        .args([
+            "-C",
+            &root.to_string_lossy(),
+            "--no-optional-locks",
+            "status",
+            "--porcelain=v1",
+            "-z",
+            "--untracked-files=all",
+            "--ignored=no",
+        ])
+        .output()
+        .map_err(|err| AppError::msg(err.to_string()))?;
+    if !output.status.success() {
+        return Err(AppError::msg(
+            String::from_utf8_lossy(&output.stderr).trim().to_string(),
+        ));
+    }
+    parse_porcelain(&output.stdout)
+}
+
+fn find_git() -> Option<PathBuf> {
+    if let Some(path) = which("git") {
+        return Some(path);
+    }
+    const CANDIDATES: &[&str] = &[
+        r"C:\Program Files\Git\cmd\git.exe",
+        r"C:\Program Files\Git\bin\git.exe",
+        r"C:\Program Files (x86)\Git\cmd\git.exe",
+        "/usr/bin/git",
+        "/usr/local/bin/git",
+        "/opt/homebrew/bin/git",
+    ];
+    CANDIDATES
+        .iter()
+        .map(PathBuf::from)
+        .find(|path| path.is_file())
+}
+
+fn which(name: &str) -> Option<PathBuf> {
+    let paths = std::env::var_os("PATH")?;
+    let mut names = vec![name.to_string()];
+    if let Ok(pathext) = std::env::var("PATHEXT") {
+        for ext in pathext.split(';').filter(|ext| !ext.is_empty()) {
+            names.push(format!("{name}{ext}"));
+        }
+    }
+    for dir in std::env::split_paths(&paths) {
+        for candidate_name in &names {
+            let candidate = dir.join(candidate_name);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
+fn parse_porcelain(bytes: &[u8]) -> AppResult<StatusSnapshot> {
+    let mut staged = Vec::new();
+    let mut unstaged = Vec::new();
+    let mut rest = bytes;
+
+    while !rest.is_empty() {
+        if rest[0] == 0 {
+            rest = &rest[1..];
+            continue;
+        }
+        if rest.len() < 3 {
+            break;
+        }
+        let x = rest[0] as char;
+        let y = rest[1] as char;
+        rest = &rest[3..];
+        let (first, next) = split_z(rest);
+        let first = String::from_utf8_lossy(first).replace('\\', "/");
+        let (path, old_path, next) = if matches!(x, 'R' | 'C') {
+            let (second, next) = split_z(next);
+            (
+                String::from_utf8_lossy(second).replace('\\', "/"),
+                Some(first),
+                next,
+            )
+        } else {
+            (first, None, next)
+        };
+        rest = next;
+
+        if x == '?' || y == '?' {
+            unstaged.push(FileStatus {
+                path,
+                old_path: None,
+                kind: "untracked".to_string(),
+                staged: false,
+            });
+            continue;
+        }
+
+        if x == 'U' || y == 'U' || (x == 'A' && y == 'A') || (x == 'D' && y == 'D') {
+            unstaged.push(FileStatus {
+                path,
+                old_path,
+                kind: "conflicted".to_string(),
+                staged: false,
+            });
+            continue;
+        }
+
+        if x != ' ' {
+            staged.push(FileStatus {
+                path: path.clone(),
+                old_path: old_path.clone(),
+                kind: kind_from_xy(x).to_string(),
+                staged: true,
+            });
+        }
+        if y != ' ' {
+            unstaged.push(FileStatus {
+                path,
+                old_path,
+                kind: kind_from_xy(y).to_string(),
+                staged: false,
+            });
+        }
+    }
+
+    Ok(StatusSnapshot { staged, unstaged })
+}
+
+fn split_z(bytes: &[u8]) -> (&[u8], &[u8]) {
+    match bytes.iter().position(|&byte| byte == 0) {
+        Some(index) => (&bytes[..index], &bytes[index + 1..]),
+        None => (bytes, &[]),
+    }
+}
+
+fn kind_from_xy(code: char) -> &'static str {
+    match code {
+        'A' => "added",
+        'D' => "deleted",
+        'R' => "renamed",
+        'C' => "copied",
+        'T' => "typechange",
+        'U' => "conflicted",
+        _ => "modified",
+    }
+}
+
+fn status_from_libgit2(repo: &Repository) -> AppResult<StatusSnapshot> {
     let mut opts = StatusOptions::new();
-    opts.include_untracked(true)
-        .recurse_untracked_dirs(true)
+    opts.include_untracked(false)
         .include_ignored(false)
-        .renames_head_to_index(true)
-        .renames_index_to_workdir(true);
+        .exclude_submodules(true)
+        .renames_head_to_index(false)
+        .renames_index_to_workdir(false);
 
     let statuses = repo.statuses(Some(&mut opts))?;
     let mut staged = Vec::new();
@@ -381,10 +540,7 @@ pub fn status_snapshot(repo: &Repository) -> AppResult<StatusSnapshot> {
             continue;
         }
 
-        let path = entry
-            .path()
-            .unwrap_or_default()
-            .replace('\\', "/");
+        let path = entry.path().unwrap_or_default().replace('\\', "/");
         let old_path = entry
             .head_to_index()
             .and_then(|delta| delta.old_file().path())
@@ -405,8 +561,7 @@ pub fn status_snapshot(repo: &Repository) -> AppResult<StatusSnapshot> {
             });
         }
 
-        let wt_flags = Status::WT_NEW
-            | Status::WT_MODIFIED
+        let wt_flags = Status::WT_MODIFIED
             | Status::WT_DELETED
             | Status::WT_RENAMED
             | Status::WT_TYPECHANGE
@@ -579,7 +734,7 @@ fn summarize_oid(repo: &Repository, oid: Oid) -> AppResult<CommitSummary> {
     })
 }
 
-pub fn commits(repo: &Repository, limit: usize) -> AppResult<Vec<CommitSummary>> {
+pub fn commits(repo: &Repository, limit: usize, skip: usize) -> AppResult<Vec<CommitSummary>> {
     let mut revwalk = repo.revwalk()?;
     match repo.head() {
         Ok(head) => {
@@ -595,7 +750,7 @@ pub fn commits(repo: &Repository, limit: usize) -> AppResult<Vec<CommitSummary>>
     revwalk.set_sorting(Sort::TIME)?;
 
     let mut items = Vec::new();
-    for oid in revwalk.take(limit) {
+    for oid in revwalk.skip(skip).take(limit) {
         items.push(summarize_oid(repo, oid?)?);
     }
     Ok(items)
@@ -813,7 +968,7 @@ pub fn commit_file_diff(repo: &Repository, oid: &str, path: &str) -> AppResult<F
     collect_patch(diff, &rel)
 }
 
-pub fn branches(repo: &Repository) -> AppResult<BranchList> {
+pub fn branches(repo: &Repository, include_remote: bool) -> AppResult<BranchList> {
     let info = repo_info(repo)?;
     let mut local = Vec::new();
     for item in repo.branches(Some(BranchType::Local))? {
@@ -836,20 +991,22 @@ pub fn branches(repo: &Repository) -> AppResult<BranchList> {
     local.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
 
     let mut remote = Vec::new();
-    for item in repo.branches(Some(BranchType::Remote))? {
-        let (branch, _) = item?;
-        let name = branch.name()?.unwrap_or_default().to_string();
-        if name.is_empty() || name.ends_with("/HEAD") {
-            continue;
+    if include_remote {
+        for item in repo.branches(Some(BranchType::Remote))? {
+            let (branch, _) = item?;
+            let name = branch.name()?.unwrap_or_default().to_string();
+            if name.is_empty() || name.ends_with("/HEAD") {
+                continue;
+            }
+            remote.push(BranchInfo {
+                is_head: false,
+                is_remote: true,
+                name,
+                upstream: None,
+            });
         }
-        remote.push(BranchInfo {
-            is_head: false,
-            is_remote: true,
-            name,
-            upstream: None,
-        });
+        remote.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
     }
-    remote.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
 
     Ok(BranchList {
         current: info.current_branch,
@@ -912,7 +1069,7 @@ pub fn snapshot(repo: &mut Repository) -> AppResult<WorkspaceSnapshot> {
     Ok(WorkspaceSnapshot {
         repo: repo_info(repo)?,
         status: status_snapshot(repo)?,
-        branches: branches(repo)?,
+        branches: branches(repo, false)?,
         remotes: list_remotes(repo)?,
         stashes: list_stashes(repo)?,
     })
@@ -1049,8 +1206,20 @@ pub fn write_git_identity(name: &str, email: &str) -> AppResult<()> {
 
 pub fn open_in_file_manager(path: &str) -> AppResult<()> {
     let path = strip_verbatim_prefix(path);
-    std::process::Command::new("explorer")
-        .arg(&path)
+    let mut command = if cfg!(windows) {
+        let mut command = Command::new("explorer");
+        command.arg(&path);
+        command
+    } else if cfg!(target_os = "macos") {
+        let mut command = Command::new("open");
+        command.arg(&path);
+        command
+    } else {
+        let mut command = Command::new("xdg-open");
+        command.arg(&path);
+        command
+    };
+    command
         .spawn()
         .map_err(|err| AppError::msg(format!("Could not open folder: {err}")))?;
     Ok(())

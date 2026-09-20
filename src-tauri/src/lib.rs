@@ -1,7 +1,9 @@
 mod error;
 mod git;
+mod prefs;
 mod recents;
 mod session;
+mod terminal;
 mod watch;
 
 use std::path::Path;
@@ -9,9 +11,11 @@ use std::path::Path;
 use tauri::{AppHandle, State};
 
 use error::{AppError, AppResult};
-use git::{CommitDetails, CommitSummary, FileDiff, GitIdentity, WorkspaceSnapshot};
+use git::{BranchList, CommitDetails, CommitSummary, FileDiff, GitIdentity, WorkspaceSnapshot};
+use prefs::AppPrefs;
 use recents::RecentRepo;
 use session::AppSession;
+use terminal::TerminalOption;
 use watch::WatchState;
 
 fn with_repo<T>(path: &str, f: impl FnOnce(&mut git2::Repository) -> AppResult<T>) -> AppResult<T> {
@@ -68,8 +72,20 @@ async fn refresh_workspace(repo_path: String) -> AppResult<WorkspaceSnapshot> {
 }
 
 #[tauri::command]
-async fn get_commits(repo_path: String, limit: Option<usize>) -> AppResult<Vec<CommitSummary>> {
-    with_repo_async(repo_path, move |repo| git::commits(repo, limit.unwrap_or(100))).await
+async fn get_commits(
+    repo_path: String,
+    limit: Option<usize>,
+    skip: Option<usize>,
+) -> AppResult<Vec<CommitSummary>> {
+    with_repo_async(repo_path, move |repo| {
+        git::commits(repo, limit.unwrap_or(80), skip.unwrap_or(0))
+    })
+    .await
+}
+
+#[tauri::command]
+async fn get_branches(repo_path: String) -> AppResult<BranchList> {
+    with_repo_async(repo_path, move |repo| git::branches(repo, true)).await
 }
 
 #[tauri::command]
@@ -225,6 +241,27 @@ fn open_in_file_manager(path: String) -> AppResult<()> {
 }
 
 #[tauri::command]
+fn list_terminals() -> Vec<TerminalOption> {
+    terminal::list_terminals()
+}
+
+#[tauri::command]
+fn get_prefs(app: AppHandle) -> AppResult<AppPrefs> {
+    prefs::load_prefs(&app)
+}
+
+#[tauri::command]
+fn set_prefs(prefs: AppPrefs, app: AppHandle) -> AppResult<AppPrefs> {
+    prefs::save_prefs(&app, prefs)
+}
+
+#[tauri::command]
+fn open_in_terminal(path: String, app: AppHandle) -> AppResult<()> {
+    let prefs = prefs::load_prefs(&app)?;
+    terminal::open_in_terminal(&path, &prefs.terminal_id)
+}
+
+#[tauri::command]
 fn sync_watches(paths: Vec<String>, app: AppHandle, state: State<WatchState>) -> AppResult<()> {
     watch::sync_watches(&app, &state, paths)
 }
@@ -243,6 +280,7 @@ pub fn run() {
             open_repository,
             refresh_workspace,
             get_commits,
+            get_branches,
             get_workdir_diff,
             get_commit_details,
             get_commit_diff,
@@ -262,6 +300,10 @@ pub fn run() {
             get_git_identity,
             set_git_identity,
             open_in_file_manager,
+            list_terminals,
+            get_prefs,
+            set_prefs,
+            open_in_terminal,
             sync_watches
         ])
         .run(tauri::generate_context!())

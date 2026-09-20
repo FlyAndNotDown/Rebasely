@@ -88,6 +88,16 @@ export interface GitIdentity {
   email: string;
 }
 
+export interface TerminalOption {
+  id: string;
+  name: string;
+  available: boolean;
+}
+
+export interface AppPrefs {
+  terminalId: string;
+}
+
 export interface RemoteInfo {
   name: string;
   url: string | null;

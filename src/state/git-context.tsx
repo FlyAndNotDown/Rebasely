@@ -27,6 +27,7 @@ import type {
 
 export type View = "changes" | "history" | "stash";
 export const WELCOME_TAB_ID = "welcome";
+export const COMMIT_PAGE = 80;
 
 export type WelcomeTab = { id: typeof WELCOME_TAB_ID; kind: "welcome" };
 export type RepoTab = {
@@ -46,6 +47,9 @@ interface RepoSession {
   path: string;
   snapshot: WorkspaceSnapshot | null;
   commits: CommitSummary[];
+  commitsLoaded: boolean;
+  commitsHasMore: boolean;
+  commitsLoading: boolean;
   view: View;
   changeSelection: ChangeSelection | null;
   historySelection: HistorySelection | null;
@@ -63,6 +67,9 @@ function emptySession(path: string): RepoSession {
     path,
     snapshot: null,
     commits: [],
+    commitsLoaded: false,
+    commitsHasMore: true,
+    commitsLoading: false,
     view: "changes",
     changeSelection: null,
     historySelection: null,
@@ -96,6 +103,8 @@ interface GitContextValue {
   activeTab: AppTab;
   snapshot: WorkspaceSnapshot | null;
   commits: CommitSummary[];
+  commitsHasMore: boolean;
+  commitsLoading: boolean;
   view: View;
   changeSelection: ChangeSelection | null;
   historySelection: HistorySelection | null;
@@ -112,6 +121,10 @@ interface GitContextValue {
   openFolder: () => Promise<void>;
   openPath: (path: string) => Promise<void>;
   revealRepo: () => Promise<void>;
+  openTerminal: () => Promise<void>;
+  ensureBranches: () => Promise<void>;
+  ensureHistory: () => Promise<void>;
+  loadMoreCommits: () => Promise<void>;
   forgetRecent: (path: string) => Promise<void>;
   closeRepo: () => void;
   selectChange: (path: string, staged: boolean) => Promise<void>;
@@ -173,7 +186,9 @@ export function GitProvider({ children }: { children: ReactNode }) {
       setSessions((current) => {
         const existing = current[tabId];
         if (!existing) return current;
-        return { ...current, [tabId]: { ...existing, ...patch } };
+        const next = { ...current, [tabId]: { ...existing, ...patch } };
+        sessionsRef.current = next;
+        return next;
       });
       if (patch.snapshot) syncTabMeta(tabId, patch.snapshot);
     },
@@ -204,9 +219,8 @@ export function GitProvider({ children }: { children: ReactNode }) {
         const snapshot = await gitApi.openRepository(path);
         const tab = tabFromSnapshot(snapshot);
         if (nextTabs.some((item) => item.id === tab.id)) continue;
-        const commits = await gitApi.getCommits(snapshot.repo.path, 120);
         nextTabs.push(tab);
-        nextSessions[tab.id] = { ...emptySession(snapshot.repo.path), snapshot, commits };
+        nextSessions[tab.id] = { ...emptySession(snapshot.repo.path), snapshot };
         if (session.active !== "welcome" && sameRepoPath(session.active, snapshot.repo.path)) {
           activeId = tab.id;
         }
@@ -270,11 +284,9 @@ export function GitProvider({ children }: { children: ReactNode }) {
     openingPathsRef.current.add(pendingKey);
     setOpening(true);
     try {
-      const { snapshot, commits } = await runActivity("Opening repository", path, async () => {
-        const snapshot = await gitApi.openRepository(path);
-        const commits = await gitApi.getCommits(snapshot.repo.path, 120);
-        return { snapshot, commits };
-      });
+      const snapshot = await runActivity("Opening repository", path, () =>
+        gitApi.openRepository(path),
+      );
       const opened = findRepoTab(tabsRef.current, snapshot.repo.path);
       if (opened) {
         setActiveTabId(opened.id);
@@ -285,7 +297,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       const tab = tabFromSnapshot(snapshot);
       setSessions((current) => ({
         ...current,
-        [tab.id]: { ...emptySession(snapshot.repo.path), snapshot, commits },
+        [tab.id]: { ...emptySession(snapshot.repo.path), snapshot },
       }));
       setTabs((current) => (current.some((item) => item.id === tab.id) ? current : [...current, tab]));
       setActiveTabId(tab.id);
@@ -349,16 +361,85 @@ export function GitProvider({ children }: { children: ReactNode }) {
     }
   }, [activeRepoPath]);
 
+  const openTerminal = useCallback(async () => {
+    const path = activeRepoPath();
+    if (!path) return;
+    try {
+      await gitApi.openInTerminal(path);
+    } catch (error) {
+      toast.error(errorMessage(error));
+    }
+  }, [activeRepoPath]);
+
+  const ensureBranches = useCallback(async () => {
+    const repoPath = activeRepoPath();
+    const tabId = activeTabIdRef.current;
+    const current = sessionsRef.current[tabId];
+    if (!repoPath || !current?.snapshot) return;
+    if (current.snapshot.branches.remote.length > 0) return;
+    try {
+      const branches = await gitApi.getBranches(repoPath);
+      const snapshot = sessionsRef.current[tabId]?.snapshot;
+      if (!snapshot) return;
+      patchSession(tabId, { snapshot: { ...snapshot, branches } });
+    } catch (error) {
+      toast.error(errorMessage(error));
+    }
+  }, [activeRepoPath, patchSession]);
+
+  const ensureHistory = useCallback(async () => {
+    const repoPath = activeRepoPath();
+    const tabId = activeTabIdRef.current;
+    const current = sessionsRef.current[tabId];
+    if (!repoPath || !current || current.commitsLoaded || current.commitsLoading) return;
+    patchSession(tabId, { commitsLoading: true });
+    try {
+      const commits = await runActivity("Loading history", current.snapshot?.repo.name, () =>
+        gitApi.getCommits(repoPath, COMMIT_PAGE, 0),
+      );
+      patchSession(tabId, {
+        commits,
+        commitsLoaded: true,
+        commitsHasMore: commits.length === COMMIT_PAGE,
+        commitsLoading: false,
+      });
+    } catch (error) {
+      patchSession(tabId, { commitsLoading: false });
+      toast.error(errorMessage(error));
+    }
+  }, [activeRepoPath, patchSession, runActivity]);
+
+  const loadMoreCommits = useCallback(async () => {
+    const repoPath = activeRepoPath();
+    const tabId = activeTabIdRef.current;
+    const current = sessionsRef.current[tabId];
+    if (!repoPath || !current || !current.commitsLoaded || current.commitsLoading || !current.commitsHasMore) {
+      return;
+    }
+    patchSession(tabId, { commitsLoading: true });
+    try {
+      const more = await runActivity("Loading earlier history", current.snapshot?.repo.name, () =>
+        gitApi.getCommits(repoPath, COMMIT_PAGE, current.commits.length),
+      );
+      patchSession(tabId, {
+        commits: [...current.commits, ...more],
+        commitsHasMore: more.length === COMMIT_PAGE,
+        commitsLoading: false,
+      });
+    } catch (error) {
+      patchSession(tabId, { commitsLoading: false });
+      toast.error(errorMessage(error));
+    }
+  }, [activeRepoPath, patchSession, runActivity]);
+
   const refreshRepo = useCallback(
     async (path: string) => {
       const tab = findRepoTab(tabsRef.current, path);
       if (!tab) return;
       const current = sessionsRef.current[tab.id];
       try {
-        const [snapshot, commits] = await Promise.all([
-          gitApi.refreshWorkspace(path),
-          gitApi.getCommits(path, 120),
-        ]);
+        const snapshot = await gitApi.refreshWorkspace(path);
+        const headChanged = current?.snapshot?.repo.headId !== snapshot.repo.headId;
         let changeDiff = current?.changeDiff ?? null;
         let historyDiff = current?.historyDiff ?? null;
         if (current?.changeSelection) {
@@ -383,7 +464,29 @@ export function GitProvider({ children }: { children: ReactNode }) {
             historyDiff = null;
           }
         }
-        patchSession(tab.id, { snapshot, commits, changeDiff, historyDiff });
+        patchSession(tab.id, {
+          snapshot,
+          changeDiff,
+          historyDiff,
+          ...(headChanged
+            ? {
+                commits: [],
+                commitsLoaded: false,
+                commitsHasMore: true,
+                historySelection: null,
+                historyDiff: null,
+                commitDetails: null,
+              }
+            : {}),
+        });
+        if (headChanged && current?.view === "history") {
+          const commits = await gitApi.getCommits(path, COMMIT_PAGE, 0);
+          patchSession(tab.id, {
+            commits,
+            commitsLoaded: true,
+            commitsHasMore: commits.length === COMMIT_PAGE,
+          });
+        }
       } catch {
         // Watch refreshes stay quiet when a repo is mid-write.
       }
@@ -431,8 +534,13 @@ export function GitProvider({ children }: { children: ReactNode }) {
   const setView = useCallback(
     (view: View) => {
       patchSession(activeTabIdRef.current, { view });
+      if (view === "history") {
+        queueMicrotask(() => {
+          void ensureHistory();
+        });
+      }
     },
-    [patchSession],
+    [ensureHistory, patchSession],
   );
 
   const selectChange = useCallback(
@@ -518,7 +626,6 @@ export function GitProvider({ children }: { children: ReactNode }) {
       try {
         const next = await runActivity(label, current?.snapshot?.repo.name, async () => {
           const snapshot = await action(repoPath);
-          const commits = await gitApi.getCommits(repoPath, 120);
           let changeDiff = current?.changeDiff ?? null;
           let nextSelection = changeSelection;
           if (changeSelection) {
@@ -533,15 +640,30 @@ export function GitProvider({ children }: { children: ReactNode }) {
               nextSelection = null;
             }
           }
-          return { snapshot, commits, changeDiff, changeSelection: nextSelection };
+          const headChanged = current?.snapshot?.repo.headId !== snapshot.repo.headId;
+          return { snapshot, changeDiff, changeSelection: nextSelection, headChanged };
         });
-        patchSession(tabId, next);
+        patchSession(tabId, {
+          snapshot: next.snapshot,
+          changeDiff: next.changeDiff,
+          changeSelection: next.changeSelection,
+          ...(next.headChanged
+            ? {
+                commits: [],
+                commitsLoaded: false,
+                commitsHasMore: true,
+              }
+            : {}),
+        });
+        if (next.headChanged && sessionsRef.current[tabId]?.view === "history") {
+          void ensureHistory();
+        }
         if (success) toast.success(success);
       } catch (error) {
         toast.error(errorMessage(error));
       }
     },
-    [activeRepoPath, patchSession, runActivity],
+    [activeRepoPath, ensureHistory, patchSession, runActivity],
   );
 
   const stage = useCallback(
@@ -599,9 +721,15 @@ export function GitProvider({ children }: { children: ReactNode }) {
         changeDiff: null,
         historyDiff: null,
         commitDetails: null,
+        commits: [],
+        commitsLoaded: false,
+        commitsHasMore: true,
       });
+      if (sessionsRef.current[activeTabIdRef.current]?.view === "history") {
+        void ensureHistory();
+      }
     },
-    [patchSession, runMutation],
+    [ensureHistory, patchSession, runMutation],
   );
 
   const createBranch = useCallback(
@@ -659,6 +787,8 @@ export function GitProvider({ children }: { children: ReactNode }) {
       activeTab,
       snapshot: session?.snapshot ?? null,
       commits: session?.commits ?? [],
+      commitsHasMore: session?.commitsHasMore ?? true,
+      commitsLoading: session?.commitsLoading ?? false,
       view: session?.view ?? "changes",
       changeSelection: session?.changeSelection ?? null,
       historySelection: session?.historySelection ?? null,
@@ -675,6 +805,10 @@ export function GitProvider({ children }: { children: ReactNode }) {
       openFolder,
       openPath,
       revealRepo,
+      openTerminal,
+      ensureBranches,
+      ensureHistory,
+      loadMoreCommits,
       forgetRecent,
       closeRepo,
       selectChange,
@@ -705,6 +839,10 @@ export function GitProvider({ children }: { children: ReactNode }) {
       openFolder,
       openPath,
       revealRepo,
+      openTerminal,
+      ensureBranches,
+      ensureHistory,
+      loadMoreCommits,
       forgetRecent,
       closeRepo,
       selectChange,
