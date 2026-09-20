@@ -9,7 +9,7 @@ mod watch;
 use std::path::Path;
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use error::{AppError, AppResult};
 use git::{BranchList, CommitDetails, CommitSummary, FileDiff, GitIdentity, WorkspaceSnapshot};
@@ -342,12 +342,72 @@ fn sync_watches(paths: Vec<String>, app: AppHandle, state: State<WatchState>) ->
     watch::sync_watches(&app, &state, paths)
 }
 
+#[tauri::command]
+fn sync_window_chrome(theme: String, app: AppHandle) -> AppResult<()> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| AppError::msg("main window missing"))?;
+    apply_window_chrome(&window, theme != "light");
+    Ok(())
+}
+
+fn apply_window_chrome(window: &tauri::WebviewWindow, dark: bool) {
+    let _ = window.set_theme(Some(if dark {
+        tauri::Theme::Dark
+    } else {
+        tauri::Theme::Light
+    }));
+    #[cfg(windows)]
+    apply_caption_color(window, dark);
+}
+
+#[cfg(windows)]
+fn apply_caption_color(window: &tauri::WebviewWindow, dark: bool) {
+    let Ok(hwnd) = window.hwnd() else {
+        return;
+    };
+    // COLORREF 0x00BBGGRR matching --background in index.css
+    let caption: u32 = if dark { 0x0017_17_17 } else { 0x00FB_FB_FB };
+    let text: u32 = if dark { 0x00FF_FF_FF } else { 0x0000_00_00 };
+    const DWMWA_BORDER_COLOR: u32 = 34;
+    const DWMWA_CAPTION_COLOR: u32 = 35;
+    const DWMWA_TEXT_COLOR: u32 = 36;
+    unsafe {
+        let handle = hwnd.0 as *mut std::ffi::c_void;
+        dwm_set_color(handle, DWMWA_CAPTION_COLOR, caption);
+        dwm_set_color(handle, DWMWA_BORDER_COLOR, caption);
+        dwm_set_color(handle, DWMWA_TEXT_COLOR, text);
+    }
+}
+
+#[cfg(windows)]
+unsafe fn dwm_set_color(hwnd: *mut std::ffi::c_void, attr: u32, color: u32) {
+    #[link(name = "dwmapi")]
+    unsafe extern "system" {
+        fn DwmSetWindowAttribute(
+            hwnd: *mut std::ffi::c_void,
+            dw_attribute: u32,
+            pv_attribute: *const std::ffi::c_void,
+            cb_attribute: u32,
+        ) -> i32;
+    }
+    unsafe {
+        DwmSetWindowAttribute(hwnd, attr, (&color as *const u32).cast(), 4);
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(WatchState::default())
+        .setup(|app| {
+            if let Some(window) = app.get_webview_window("main") {
+                apply_window_chrome(&window, true);
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             list_recents,
             forget_recent,
@@ -385,7 +445,8 @@ pub fn run() {
             get_prefs,
             set_prefs,
             open_in_terminal,
-            sync_watches
+            sync_watches,
+            sync_window_chrome
         ])
         .run(tauri::generate_context!())
         .expect("error while running Rebasely");

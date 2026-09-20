@@ -33,6 +33,7 @@ import { Kbd } from "@/components/ui/kbd";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ActivityMeter } from "@/components/activity-meter";
 import { AppToolbar } from "@/components/app-toolbar";
+import { disambiguateRepoLabels } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useGit, type AppTab } from "@/state/git-context";
 import type { BranchInfo } from "@/types/git";
@@ -153,9 +154,6 @@ export function AppHeader() {
                         <DropdownMenuSub key={remoteName}>
                           <DropdownMenuSubTrigger>
                             <span className="truncate font-mono">{remoteName}</span>
-                            <span className="ml-auto text-[11px] text-muted-foreground">
-                              {branches.length}
-                            </span>
                           </DropdownMenuSubTrigger>
                           <DropdownMenuSubContent className="w-72 p-0">
                             <VirtualBranchList
@@ -309,6 +307,18 @@ function TabStrip({
 
   const hidden = tabs.filter((tab) => hiddenIds.includes(tab.id));
   const visible = tabs.filter((tab) => !hiddenIds.includes(tab.id));
+  const labels = useMemo(
+    () =>
+      disambiguateRepoLabels(
+        tabs.flatMap((tab) => (tab.kind === "repo" ? [{ path: tab.path, name: tab.name }] : [])),
+      ),
+    [tabs],
+  );
+
+  function tabLabel(tab: AppTab) {
+    if (tab.kind === "welcome") return "Rebasely";
+    return labels.get(tab.path) ?? tab.name;
+  }
 
   return (
     <div ref={containerRef} className="relative min-w-0 flex-1">
@@ -321,6 +331,7 @@ function TabStrip({
           <TabButton
             key={`measure:${tab.id}`}
             tab={tab}
+            label={tabLabel(tab)}
             active={tab.id === activeTabId}
             onSelect={() => undefined}
             onClose={() => undefined}
@@ -335,6 +346,7 @@ function TabStrip({
           <TabButton
             key={tab.id}
             tab={tab}
+            label={tabLabel(tab)}
             active={tab.id === activeTabId}
             onSelect={() => setActiveTab(tab.id)}
             onClose={() => closeTab(tab.id)}
@@ -350,7 +362,7 @@ function TabStrip({
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="min-w-52">
               {hidden.map((tab) => {
-                const label = tab.kind === "welcome" ? "Rebasely" : tab.name;
+                const label = tabLabel(tab);
                 return (
                   <DropdownMenuItem
                     key={tab.id}
@@ -402,17 +414,18 @@ function TabStrip({
 
 function TabButton({
   tab,
+  label,
   active,
   onSelect,
   onClose,
 }: {
   tab: AppTab;
+  label: string;
   active: boolean;
   onSelect: () => void;
   onClose: () => void;
 }) {
   const closable = tab.kind === "repo";
-  const label = tab.kind === "welcome" ? "Rebasely" : tab.name;
   const hint = tab.kind === "welcome" ? "Welcome" : tab.path;
 
   function handleAuxClick(event: MouseEvent<HTMLButtonElement>) {

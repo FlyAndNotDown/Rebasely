@@ -1,10 +1,11 @@
 import { FolderOpenIcon, GitBranchIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { displayPath, formatRelativeTime } from "@/lib/format";
+import { disambiguateRepoLabels, displayPath, formatRelativeTime } from "@/lib/format";
 import { useGit } from "@/state/git-context";
 
 export function WelcomeScreen() {
   const { recents, openFolder, openPath, forgetRecent } = useGit();
+  const labels = disambiguateRepoLabels(recents);
 
   return (
     <div className="flex h-full items-center justify-center bg-background p-8">
@@ -37,7 +38,9 @@ export function WelcomeScreen() {
                     className="min-w-0 flex-1 px-3 py-2.5 text-left hover:bg-muted/60"
                     onClick={() => void openPath(repo.path)}
                   >
-                    <div className="truncate text-sm font-medium">{repo.name}</div>
+                    <div className="truncate text-sm font-medium">
+                      {labels.get(repo.path) ?? repo.name}
+                    </div>
                     <div className="truncate font-mono text-[11px] text-muted-foreground">
                       {displayPath(repo.path)}
                     </div>
