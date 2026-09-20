@@ -19,11 +19,11 @@ export function Workspace() {
         <StashPane />
       ) : view === "history" ? (
         <ResizablePanelGroup orientation="vertical" className="min-h-0 flex-1">
-          <ResizablePanel defaultSize="40%" minSize="22%">
+          <ResizablePanel defaultSize="67%" minSize="28%">
             <HistoryPane />
           </ResizablePanel>
           <ResizableHandle withHandle />
-          <ResizablePanel defaultSize="60%" minSize="28%">
+          <ResizablePanel defaultSize="33%" minSize="18%">
             <ResizablePanelGroup orientation="horizontal" className="min-h-0">
               <ResizablePanel defaultSize="34%" minSize="20%" maxSize="55%">
                 <CommitFiles />

@@ -224,7 +224,7 @@ export function AppHeader() {
             <Input
               className="mt-3 font-mono"
               autoFocus
-              placeholder="feature/name"
+              placeholder="foo"
               value={newBranch}
               onChange={(event) => setNewBranch(event.target.value)}
             />

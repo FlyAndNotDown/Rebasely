@@ -68,9 +68,6 @@ export function HistoryPane() {
           <span className="w-24 shrink-0 truncate text-[11px] text-muted-foreground">
             {commit.authorName}
           </span>
-          <span className="w-14 shrink-0 font-mono text-[11px] text-muted-foreground">
-            {commit.shortId}
-          </span>
           <span className="min-w-[4.5rem] shrink-0 text-right text-[11px] tabular-nums text-muted-foreground">
             {formatRelativeTime(commit.timestamp)}
           </span>

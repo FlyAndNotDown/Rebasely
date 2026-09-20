@@ -24,7 +24,13 @@ import { cn } from "@/lib/utils";
 import type { TerminalOption } from "@/types/git";
 
 type SettingsSection = "git" | "terminal" | "appearance";
-type ThemeChoice = "dark" | "light";
+type ThemeChoice = "dark" | "light" | "system";
+
+const themeOptions: { id: ThemeChoice; label: string }[] = [
+  { id: "dark", label: "Dark" },
+  { id: "light", label: "Light" },
+  { id: "system", label: "System" },
+];
 
 export function SettingsDialog({
   open,
@@ -57,7 +63,7 @@ export function SettingsDialog({
 
   useEffect(() => {
     if (!open) return;
-    if (theme === "light" || theme === "dark") setThemeChoice(theme);
+    if (theme === "light" || theme === "dark" || theme === "system") setThemeChoice(theme);
   }, [open, theme]);
 
   async function save() {
@@ -181,7 +187,7 @@ export function SettingsDialog({
                 <DialogHeader>
                   <DialogTitle>Appearance</DialogTitle>
                   <DialogDescription>
-                    Light and dark themes. Dark is the default.
+                    Light, dark, or follow the system. Dark is the default.
                   </DialogDescription>
                 </DialogHeader>
                 <div className="mt-6 grid gap-2">
@@ -194,17 +200,19 @@ export function SettingsDialog({
                         variant="outline"
                         className="w-full justify-between font-normal"
                       >
-                        <span>{themeChoice === "light" ? "Light" : "Dark"}</span>
+                        <span>
+                          {themeOptions.find((option) => option.id === themeChoice)?.label ?? "Dark"}
+                        </span>
                         <ChevronDownIcon />
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="start" className="w-(--radix-dropdown-menu-trigger-width)">
-                      {(["dark", "light"] as const).map((option) => (
-                        <DropdownMenuItem key={option} onClick={() => setThemeChoice(option)}>
+                      {themeOptions.map((option) => (
+                        <DropdownMenuItem key={option.id} onClick={() => setThemeChoice(option.id)}>
                           <span className="min-w-4">
-                            {option === themeChoice ? <CheckIcon className="size-3.5" /> : null}
+                            {option.id === themeChoice ? <CheckIcon className="size-3.5" /> : null}
                           </span>
-                          {option === "light" ? "Light" : "Dark"}
+                          {option.label}
                         </DropdownMenuItem>
                       ))}
                     </DropdownMenuContent>
