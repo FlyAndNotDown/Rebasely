@@ -1,10 +1,11 @@
 import { toast } from "sonner";
+import { AuthorAvatar } from "@/components/author-avatar";
 import { fileKindClass, fileKindLabel } from "@/lib/file-kind";
 import { cn } from "@/lib/utils";
 import { useGit } from "@/state/git-context";
 
 export function CommitFiles() {
-  const { commitDetails, historySelection, selectCommitFile } = useGit();
+  const { commitDetails, historySelection, selectCommitFile, prefs } = useGit();
   if (!commitDetails) {
     return (
       <div className="flex h-full items-center justify-center p-4 text-sm text-muted-foreground">
@@ -32,9 +33,14 @@ export function CommitFiles() {
           <button
             type="button"
             title="Copy author"
-            className="rounded-md px-1 py-0.5 hover:bg-muted hover:text-foreground"
+            className="inline-flex items-center gap-1.5 rounded-md px-1 py-0.5 hover:bg-muted hover:text-foreground"
             onClick={() => void copyText(commit.authorName, "Copied author")}
           >
+            <AuthorAvatar
+              name={commit.authorName}
+              email={commit.authorEmail}
+              provider={prefs.avatarProvider}
+            />
             {commit.authorName}
           </button>
           <button

@@ -10,16 +10,23 @@ use crate::error::AppResult;
 pub struct AppPrefs {
     #[serde(default = "default_terminal_id")]
     pub terminal_id: String,
+    #[serde(default = "default_avatar_provider")]
+    pub avatar_provider: String,
 }
 
 fn default_terminal_id() -> String {
     "auto".to_string()
 }
 
+fn default_avatar_provider() -> String {
+    "dicebear".to_string()
+}
+
 impl Default for AppPrefs {
     fn default() -> Self {
         Self {
             terminal_id: default_terminal_id(),
+            avatar_provider: default_avatar_provider(),
         }
     }
 }

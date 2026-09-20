@@ -1,4 +1,5 @@
 import { useEffect, useMemo, type UIEvent } from "react";
+import { AuthorAvatar } from "@/components/author-avatar";
 import { formatRelativeTime } from "@/lib/format";
 import { graphWidth, laneColor, layoutCommitGraph, type GraphRow } from "@/lib/commit-graph";
 import { cn } from "@/lib/utils";
@@ -17,6 +18,7 @@ export function HistoryPane() {
     selectCommit,
     ensureHistory,
     loadMoreCommits,
+    prefs,
   } = useGit();
   const selectedId = historySelection?.id ?? null;
   const graph = useMemo(() => layoutCommitGraph(commits), [commits]);
@@ -65,8 +67,13 @@ export function HistoryPane() {
               {commit.summary || "(no message)"}
             </span>
           </span>
-          <span className="w-24 shrink-0 truncate text-[11px] text-muted-foreground">
-            {commit.authorName}
+          <span className="flex w-28 shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground">
+            <AuthorAvatar
+              name={commit.authorName}
+              email={commit.authorEmail}
+              provider={prefs.avatarProvider}
+            />
+            <span className="truncate">{commit.authorName}</span>
           </span>
           <span className="min-w-[4.5rem] shrink-0 text-right text-[11px] tabular-nums text-muted-foreground">
             {formatRelativeTime(commit.timestamp)}

@@ -13,8 +13,10 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { toast } from "sonner";
 import { emptyBinaryDiff, errorMessage, gitApi } from "@/lib/git";
 import { sameRepoPath } from "@/lib/format";
+import { defaultPrefs, normalizePrefs } from "@/lib/prefs";
 import type {
   Activity,
+  AppPrefs,
   AppSession,
   CommitDetails,
   CommitSummary,
@@ -113,6 +115,7 @@ interface GitContextValue {
   commitDetails: CommitDetails | null;
   stashes: StashInfo[];
   activities: Activity[];
+  prefs: AppPrefs;
   loading: boolean;
   busy: boolean;
   setView: (view: View) => void;
@@ -143,6 +146,7 @@ interface GitContextValue {
   stashApply: (index: number) => Promise<void>;
   stashPop: (index: number) => Promise<void>;
   stashDrop: (index: number) => Promise<void>;
+  updatePrefs: (prefs: AppPrefs) => Promise<AppPrefs>;
 }
 
 const GitContext = createContext<GitContextValue | null>(null);
@@ -155,6 +159,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [opening, setOpening] = useState(false);
   const [activities, setActivities] = useState<Activity[]>([]);
+  const [prefs, setPrefs] = useState<AppPrefs>(defaultPrefs);
   const restoredRef = useRef(false);
 
   const tabsRef = useRef(tabs);
@@ -246,8 +251,14 @@ export function GitProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     void (async () => {
       try {
-        setRecents(await gitApi.listRecents());
-        await restoreSession(await gitApi.loadSession());
+        const [recentsList, session, loadedPrefs] = await Promise.all([
+          gitApi.listRecents(),
+          gitApi.loadSession(),
+          gitApi.getPrefs().catch(() => defaultPrefs),
+        ]);
+        setPrefs(normalizePrefs(loadedPrefs));
+        setRecents(recentsList);
+        await restoreSession(session);
       } catch (error) {
         toast.error(errorMessage(error));
       } finally {
@@ -836,6 +847,12 @@ export function GitProvider({ children }: { children: ReactNode }) {
     [runMutation],
   );
 
+  const updatePrefs = useCallback(async (next: AppPrefs) => {
+    const saved = normalizePrefs(await gitApi.setPrefs(next));
+    setPrefs(saved);
+    return saved;
+  }, []);
+
   const value = useMemo<GitContextValue>(
     () => ({
       recents,
@@ -854,6 +871,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       commitDetails: session?.commitDetails ?? null,
       stashes: session?.snapshot?.stashes ?? [],
       activities,
+      prefs,
       loading,
       busy: opening || activities.length > 0,
       setView,
@@ -884,6 +902,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       stashApply,
       stashPop,
       stashDrop,
+      updatePrefs,
     }),
     [
       recents,
@@ -892,6 +911,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       activeTab,
       session,
       activities,
+      prefs,
       loading,
       opening,
       setView,
@@ -921,6 +941,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       stashApply,
       stashPop,
       stashDrop,
+      updatePrefs,
     ],
   );
 

@@ -100,8 +100,11 @@ export interface TerminalOption {
   available: boolean;
 }
 
+export type AvatarProvider = "dicebear";
+
 export interface AppPrefs {
   terminalId: string;
+  avatarProvider: AvatarProvider;
 }
 
 export interface RemoteInfo {

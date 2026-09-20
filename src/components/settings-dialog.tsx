@@ -20,11 +20,17 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { errorMessage, gitApi } from "@/lib/git";
+import { normalizePrefs } from "@/lib/prefs";
 import { cn } from "@/lib/utils";
-import type { TerminalOption } from "@/types/git";
+import { useGit } from "@/state/git-context";
+import type { AvatarProvider, TerminalOption } from "@/types/git";
 
-type SettingsSection = "git" | "terminal" | "appearance";
+type SettingsSection = "git" | "terminal" | "avatars" | "appearance";
 type ThemeChoice = "dark" | "light" | "system";
+
+const avatarProviders: { id: AvatarProvider; label: string }[] = [
+  { id: "dicebear", label: "DiceBear" },
+];
 
 const themeOptions: { id: ThemeChoice; label: string }[] = [
   { id: "dark", label: "Dark" },
@@ -40,10 +46,12 @@ export function SettingsDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const { theme, setTheme } = useTheme();
+  const { updatePrefs } = useGit();
   const [section, setSection] = useState<SettingsSection>("git");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [terminalId, setTerminalId] = useState("auto");
+  const [avatarProvider, setAvatarProvider] = useState<AvatarProvider>("dicebear");
   const [terminals, setTerminals] = useState<TerminalOption[]>([]);
   const [themeChoice, setThemeChoice] = useState<ThemeChoice>("dark");
   const [saving, setSaving] = useState(false);
@@ -52,10 +60,12 @@ export function SettingsDialog({
     if (!open) return;
     setSection("git");
     void Promise.all([gitApi.getGitIdentity(), gitApi.getPrefs(), gitApi.listTerminals()])
-      .then(([identity, prefs, options]) => {
+      .then(([identity, loadedPrefs, options]) => {
+        const prefs = normalizePrefs(loadedPrefs);
         setName(identity.name);
         setEmail(identity.email);
-        setTerminalId(prefs.terminalId || "auto");
+        setTerminalId(prefs.terminalId);
+        setAvatarProvider(prefs.avatarProvider);
         setTerminals(options);
       })
       .catch((error) => toast.error(errorMessage(error)));
@@ -71,7 +81,10 @@ export function SettingsDialog({
     try {
       await Promise.all([
         gitApi.setGitIdentity({ name: name.trim(), email: email.trim() }),
-        gitApi.setPrefs({ terminalId }),
+        updatePrefs({
+          terminalId,
+          avatarProvider,
+        }),
       ]);
       setTheme(themeChoice);
       toast.success("Saved settings");
@@ -99,6 +112,12 @@ export function SettingsDialog({
               onClick={() => setSection("terminal")}
             >
               Terminal
+            </NavButton>
+            <NavButton
+              active={section === "avatars"}
+              onClick={() => setSection("avatars")}
+            >
+              Avatars
             </NavButton>
             <NavButton
               active={section === "appearance"}
@@ -182,6 +201,23 @@ export function SettingsDialog({
                   </DropdownMenu>
                 </div>
               </>
+            ) : section === "avatars" ? (
+              <>
+                <DialogHeader>
+                  <DialogTitle>Avatars</DialogTitle>
+                  <DialogDescription>
+                    Used for commit authors in History. More providers can be added later.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="mt-6 grid gap-5">
+                  <ProviderField
+                    id="avatar-provider"
+                    label="Provider"
+                    value={avatarProvider}
+                    onChange={setAvatarProvider}
+                  />
+                </div>
+              </>
             ) : (
               <>
                 <DialogHeader>
@@ -232,6 +268,47 @@ export function SettingsDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function ProviderField({
+  id,
+  label,
+  value,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  value: AvatarProvider;
+  onChange: (value: AvatarProvider) => void;
+}) {
+  return (
+    <div className="grid gap-2">
+      <Label htmlFor={id}>{label}</Label>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            id={id}
+            type="button"
+            variant="outline"
+            className="w-full justify-between font-normal"
+          >
+            <span>{avatarProviders.find((option) => option.id === value)?.label ?? "DiceBear"}</span>
+            <ChevronDownIcon />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="w-(--radix-dropdown-menu-trigger-width)">
+          {avatarProviders.map((option) => (
+            <DropdownMenuItem key={option.id} onClick={() => onChange(option.id)}>
+              <span className="min-w-4">
+                {option.id === value ? <CheckIcon className="size-3.5" /> : null}
+              </span>
+              {option.label}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
   );
 }
 
