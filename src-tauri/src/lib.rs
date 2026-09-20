@@ -77,9 +77,15 @@ async fn get_commits(
     repo_path: String,
     limit: Option<usize>,
     skip: Option<usize>,
+    query: Option<String>,
 ) -> AppResult<Vec<CommitSummary>> {
     with_repo_async(repo_path, move |repo| {
-        git::commits(repo, limit.unwrap_or(80), skip.unwrap_or(0))
+        git::commits(
+            repo,
+            limit.unwrap_or(80),
+            skip.unwrap_or(0),
+            query.as_deref(),
+        )
     })
     .await
 }

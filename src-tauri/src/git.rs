@@ -950,7 +950,16 @@ fn summarize_oid(repo: &Repository, oid: Oid) -> AppResult<CommitSummary> {
     })
 }
 
-pub fn commits(repo: &Repository, limit: usize, skip: usize) -> AppResult<Vec<CommitSummary>> {
+pub fn commits(
+    repo: &Repository,
+    limit: usize,
+    skip: usize,
+    query: Option<&str>,
+) -> AppResult<Vec<CommitSummary>> {
+    let query = query.map(str::trim).filter(|value| !value.is_empty());
+    if let Some(query) = query {
+        return search_commits(repo, limit, skip, query);
+    }
     if let Ok(root) = workdir(repo) {
         let n = format!("-n{limit}");
         let s = format!("--skip={skip}");
@@ -973,6 +982,155 @@ pub fn commits(repo: &Repository, limit: usize, skip: usize) -> AppResult<Vec<Co
     let mut items = commits_from_revwalk(repo, limit, skip)?;
     decorate_commits(repo, &mut items);
     Ok(items)
+}
+
+fn search_commits(
+    repo: &Repository,
+    limit: usize,
+    skip: usize,
+    query: &str,
+) -> AppResult<Vec<CommitSummary>> {
+    let needle = query.to_lowercase();
+    let labels = collect_ref_labels(repo);
+    let mut items = Vec::new();
+    let mut skipped = 0usize;
+
+    if let Ok(root) = workdir(repo) {
+        let mut child = spawn_git_stdout(
+            root,
+            &[
+                "-c",
+                "log.showSignature=false",
+                "-c",
+                "i18n.logOutputEncoding=utf-8",
+                "log",
+                "--pretty=format:%H%x00%h%x00%s%x00%an%x00%ae%x00%at%x00%P",
+            ],
+        )?;
+        if let Some(stdout) = child.stdout.take() {
+            let mut reader = BufReader::new(stdout);
+            let mut record = Vec::new();
+            while read_git_line(&mut reader, &mut record)? {
+                let Some(commit) = parse_search_record(&record) else {
+                    continue;
+                };
+                if !commit_matches(&commit, &needle, &labels) {
+                    continue;
+                }
+                if skipped < skip {
+                    skipped += 1;
+                    continue;
+                }
+                items.push(commit);
+                if items.len() >= limit {
+                    break;
+                }
+            }
+        }
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+
+    apply_ref_labels(&mut items, &labels);
+    Ok(items)
+}
+
+fn spawn_git_stdout(root: &Path, args: &[&str]) -> AppResult<std::process::Child> {
+    let git = find_git().ok_or_else(|| AppError::msg("Git executable was not found"))?;
+    let mut command = Command::new(git);
+    command.arg("-C").arg(root).args(args);
+    command.env("GIT_TERMINAL_PROMPT", "0");
+    command.stdout(Stdio::piped()).stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    command
+        .spawn()
+        .map_err(|err| AppError::msg(err.to_string()))
+}
+
+fn read_git_line(reader: &mut impl BufRead, buf: &mut Vec<u8>) -> AppResult<bool> {
+    buf.clear();
+    let read = reader
+        .read_until(b'\n', buf)
+        .map_err(|err| AppError::msg(err.to_string()))?;
+    if read == 0 {
+        return Ok(false);
+    }
+    while matches!(buf.last(), Some(b'\n' | b'\r')) {
+        buf.pop();
+    }
+    if buf.is_empty() {
+        return read_git_line(reader, buf);
+    }
+    Ok(true)
+}
+
+fn parse_search_record(bytes: &[u8]) -> Option<CommitSummary> {
+    let text = String::from_utf8_lossy(bytes);
+    let mut fields = text.split('\0');
+    let id = normalize_oid(fields.next()?)?;
+    let short_id = fields.next()?.trim().to_string();
+    let summary = fields.next()?.to_string();
+    let author_name = fields.next()?.trim().to_string();
+    let author_email = fields.next()?.trim().to_string();
+    let timestamp = fields.next()?.trim().parse().unwrap_or(0);
+    let parents = fields.next().unwrap_or("");
+    if short_id.is_empty() {
+        return None;
+    }
+    Some(CommitSummary {
+        id,
+        short_id,
+        summary,
+        body: String::new(),
+        author_name,
+        author_email,
+        timestamp,
+        parents: parents
+            .split_whitespace()
+            .filter_map(normalize_oid)
+            .collect(),
+        refs: Vec::new(),
+    })
+}
+
+fn normalize_oid(value: &str) -> Option<String> {
+    let value = value.trim();
+    let len = value.len();
+    if (4..=40).contains(&len) && value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        Some(value.to_string())
+    } else {
+        None
+    }
+}
+
+fn commit_matches(
+    commit: &CommitSummary,
+    needle: &str,
+    labels: &HashMap<String, Vec<CommitRefLabel>>,
+) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+    let hash = commit.id.to_lowercase();
+    if hash.starts_with(needle) || commit.short_id.to_lowercase().starts_with(needle) {
+        return true;
+    }
+    if commit.summary.to_lowercase().contains(needle)
+        || commit.body.to_lowercase().contains(needle)
+        || commit.author_name.to_lowercase().contains(needle)
+        || commit.author_email.to_lowercase().contains(needle)
+    {
+        return true;
+    }
+    labels.get(&commit.id).is_some_and(|refs| {
+        refs.iter()
+            .any(|label| label.name.to_lowercase().contains(needle))
+    })
 }
 
 fn commits_from_revwalk(
@@ -1037,6 +1195,13 @@ fn parse_git_log(bytes: &[u8]) -> AppResult<Vec<CommitSummary>> {
 
 fn decorate_commits(repo: &Repository, commits: &mut [CommitSummary]) {
     let labels = collect_ref_labels(repo);
+    apply_ref_labels(commits, &labels);
+}
+
+fn apply_ref_labels(
+    commits: &mut [CommitSummary],
+    labels: &HashMap<String, Vec<CommitRefLabel>>,
+) {
     for commit in commits {
         if let Some(mut refs) = labels.get(&commit.id).cloned() {
             refs.sort_by(|left, right| {
@@ -1265,6 +1430,7 @@ fn delta_kind(delta: git2::Delta) -> &'static str {
 }
 
 pub fn commit_details(repo: &Repository, oid: &str) -> AppResult<CommitDetails> {
+    let oid = oid.trim();
     let parsed = Oid::from_str(oid)?;
     let files = if let Ok(root) = workdir(repo) {
         match commit_files_from_git(root, oid) {
@@ -1379,7 +1545,7 @@ fn commit_files_from_git2(repo: &Repository, oid: Oid) -> AppResult<Vec<CommitFi
 }
 
 pub fn commit_file_diff(repo: &Repository, oid: &str, path: &str) -> AppResult<FileDiff> {
-    let oid = Oid::from_str(oid)?;
+    let oid = Oid::from_str(oid.trim())?;
     let commit = repo.find_commit(oid)?;
     let tree = commit.tree()?;
     let parent_tree = if commit.parent_count() > 0 {

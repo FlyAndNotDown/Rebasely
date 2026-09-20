@@ -37,8 +37,8 @@ export const gitApi = {
     invoke<WorkspaceSnapshot>("open_repository", { path }),
   refreshWorkspace: (repoPath: string) =>
     invoke<WorkspaceSnapshot>("refresh_workspace", { repoPath }),
-  getCommits: (repoPath: string, limit = 80, skip = 0) =>
-    invoke<CommitSummary[]>("get_commits", { repoPath, limit, skip }),
+  getCommits: (repoPath: string, limit = 80, skip = 0, query?: string) =>
+    invoke<CommitSummary[]>("get_commits", { repoPath, limit, skip, query: query || null }),
   getBranches: (repoPath: string) => invoke<BranchList>("get_branches", { repoPath }),
   getWorkdirDiff: (repoPath: string, path: string, staged: boolean) =>
     invoke<FileDiff>("get_workdir_diff", { repoPath, path, staged }),
