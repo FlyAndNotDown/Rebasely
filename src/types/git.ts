@@ -116,6 +116,7 @@ export interface WorkspaceSnapshot {
   branches: BranchList;
   remotes: RemoteInfo[];
   stashes: StashInfo[];
+  headCommit: CommitSummary | null;
 }
 
 export interface Activity {

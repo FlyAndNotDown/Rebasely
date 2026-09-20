@@ -52,8 +52,8 @@ export const gitApi = {
     invoke<WorkspaceSnapshot>("unstage_paths", { repoPath, paths }),
   discardPaths: (repoPath: string, paths: string[]) =>
     invoke<WorkspaceSnapshot>("discard_paths", { repoPath, paths }),
-  commit: (repoPath: string, message: string) =>
-    invoke<WorkspaceSnapshot>("commit_changes", { repoPath, message }),
+  commit: (repoPath: string, message: string, amend = false) =>
+    invoke<WorkspaceSnapshot>("commit_changes", { repoPath, message, amend }),
   checkoutBranch: (repoPath: string, name: string) =>
     invoke<WorkspaceSnapshot>("checkout_branch", { repoPath, name }),
   fetchRemote: (repoPath: string) => invoke<WorkspaceSnapshot>("fetch_remote", { repoPath }),
@@ -76,6 +76,14 @@ export const gitApi = {
   getGitIdentity: () => invoke<GitIdentity>("get_git_identity"),
   setGitIdentity: (identity: GitIdentity) =>
     invoke<GitIdentity>("set_git_identity", { identity }),
+  getLocalGitIdentity: (repoPath: string) =>
+    invoke<GitIdentity>("get_local_git_identity", { repoPath }),
+  setLocalGitIdentity: (repoPath: string, identity: GitIdentity) =>
+    invoke<GitIdentity>("set_local_git_identity", { repoPath, identity }),
+  getLocalGitconfig: (repoPath: string) =>
+    invoke<string>("get_local_gitconfig", { repoPath }),
+  setLocalGitconfig: (repoPath: string, contents: string) =>
+    invoke<string>("set_local_gitconfig", { repoPath, contents }),
   openInFileManager: (path: string) => invoke<void>("open_in_file_manager", { path }),
   openInTerminal: (path: string) => invoke<void>("open_in_terminal", { path }),
   listTerminals: () => invoke<TerminalOption[]>("list_terminals"),

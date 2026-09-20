@@ -2,6 +2,12 @@ import { useMemo, useState, type ReactNode } from "react";
 import { ChevronDownIcon, MinusIcon, PlusIcon, Undo2Icon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
@@ -20,7 +26,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { fileName, parentPath } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useGit } from "@/state/git-context";
-import type { FileStatus } from "@/types/git";
+import type { FileStatus, WorkspaceSnapshot } from "@/types/git";
 
 function kindLabel(kind: string): string {
   switch (kind) {
@@ -128,17 +134,24 @@ function FileRow({
   );
 }
 
+function headCommitMessage(snapshot: WorkspaceSnapshot) {
+  const head = snapshot.headCommit;
+  if (!head) return "";
+  return head.body ? `${head.summary}\n\n${head.body}` : head.summary;
+}
+
 export function ChangesPane() {
   const { snapshot, changeSelection, selectChange, stage, unstage, discard, commit } = useGit();
   const [message, setMessage] = useState("");
+  const [amend, setAmend] = useState(false);
   const [discardTarget, setDiscardTarget] = useState<string[] | null>(null);
   const [stagedOpen, setStagedOpen] = useState(true);
   const [changesOpen, setChangesOpen] = useState(true);
   const staged = snapshot?.status.staged ?? [];
   const unstaged = snapshot?.status.unstaged ?? [];
-  const branch = snapshot?.repo.currentBranch ?? "HEAD";
   const selectedChange = changeSelection;
-  const canCommit = staged.length > 0 && message.trim().length > 0;
+  const canAmend = Boolean(snapshot?.headCommit);
+  const canCommit = message.trim().length > 0 && (amend ? canAmend : staged.length > 0);
 
   const counts = useMemo(
     () => ({ staged: staged.length, unstaged: unstaged.length }),
@@ -148,8 +161,17 @@ export function ChangesPane() {
   function submitCommit() {
     if (!canCommit) return;
     const next = message;
+    const nextAmend = amend;
     setMessage("");
-    void commit(next);
+    setAmend(false);
+    void commit(next, nextAmend);
+  }
+
+  function toggleAmend(next: boolean) {
+    setAmend(next);
+    if (next && snapshot && !message.trim()) {
+      setMessage(headCommitMessage(snapshot));
+    }
   }
 
   return (
@@ -239,9 +261,31 @@ export function ChangesPane() {
             <Undo2Icon data-icon="inline-start" />
             Discard all
           </Button>
-          <Button type="submit" disabled={!canCommit}>
-            Commit to {branch}
-          </Button>
+          <div className="inline-flex overflow-hidden rounded-lg">
+            <Button type="submit" disabled={!canCommit} className="rounded-none">
+              {amend ? "Amend" : "Commit"}
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  disabled={!canAmend}
+                  aria-label="Commit options"
+                  className="rounded-none border-l border-primary-foreground/20 px-1.5"
+                >
+                  <ChevronDownIcon />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuCheckboxItem
+                  checked={amend}
+                  onCheckedChange={(checked) => toggleAmend(checked === true)}
+                >
+                  Amend last commit
+                </DropdownMenuCheckboxItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </div>
       </form>
 

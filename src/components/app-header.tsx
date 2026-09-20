@@ -31,6 +31,7 @@ import { Input } from "@/components/ui/input";
 import { Kbd } from "@/components/ui/kbd";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ActivityMeter } from "@/components/activity-meter";
+import { AppToolbar } from "@/components/app-toolbar";
 import { cn } from "@/lib/utils";
 import { useGit, type AppTab } from "@/state/git-context";
 import type { BranchInfo } from "@/types/git";
@@ -98,6 +99,8 @@ export function AppHeader() {
       </nav>
 
       <ActivityMeter />
+
+      {repo ? <AppToolbar /> : null}
 
       {repo ? (
         <>

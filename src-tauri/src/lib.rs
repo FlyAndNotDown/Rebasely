@@ -131,9 +131,13 @@ async fn discard_paths(repo_path: String, paths: Vec<String>) -> AppResult<Works
 }
 
 #[tauri::command]
-async fn commit_changes(repo_path: String, message: String) -> AppResult<WorkspaceSnapshot> {
+async fn commit_changes(
+    repo_path: String,
+    message: String,
+    amend: Option<bool>,
+) -> AppResult<WorkspaceSnapshot> {
     with_repo_async(repo_path, move |repo| {
-        git::commit(repo, &message)?;
+        git::commit(repo, &message, amend.unwrap_or(false))?;
         git::snapshot(repo)
     })
     .await
@@ -251,6 +255,34 @@ fn set_git_identity(identity: GitIdentity) -> AppResult<GitIdentity> {
 }
 
 #[tauri::command]
+async fn get_local_git_identity(repo_path: String) -> AppResult<GitIdentity> {
+    with_repo_async(repo_path, |repo| git::read_local_git_identity(repo)).await
+}
+
+#[tauri::command]
+async fn set_local_git_identity(repo_path: String, identity: GitIdentity) -> AppResult<GitIdentity> {
+    with_repo_async(repo_path, move |repo| {
+        git::write_local_git_identity(repo, &identity.name, &identity.email)?;
+        git::read_local_git_identity(repo)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn get_local_gitconfig(repo_path: String) -> AppResult<String> {
+    with_repo_async(repo_path, |repo| git::read_local_gitconfig(repo)).await
+}
+
+#[tauri::command]
+async fn set_local_gitconfig(repo_path: String, contents: String) -> AppResult<String> {
+    with_repo_async(repo_path, move |repo| {
+        git::write_local_gitconfig(repo, &contents)?;
+        git::read_local_gitconfig(repo)
+    })
+    .await
+}
+
+#[tauri::command]
 fn open_in_file_manager(path: String) -> AppResult<()> {
     git::open_in_file_manager(&path)
 }
@@ -317,6 +349,10 @@ pub fn run() {
             stash_drop,
             get_git_identity,
             set_git_identity,
+            get_local_git_identity,
+            set_local_git_identity,
+            get_local_gitconfig,
+            set_local_gitconfig,
             open_in_file_manager,
             list_terminals,
             get_prefs,

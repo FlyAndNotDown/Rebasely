@@ -1,6 +1,5 @@
 import { AppHeader } from "@/components/app-header";
 import { AppSidebar } from "@/components/app-sidebar";
-import { AppToolbar } from "@/components/app-toolbar";
 import { WelcomeScreen } from "@/components/welcome-screen";
 import { Workspace } from "@/components/workspace";
 import { useGit } from "@/state/git-context";
@@ -11,7 +10,6 @@ export default function App() {
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
       <AppHeader />
-      {activeTab.kind === "repo" ? <AppToolbar /> : null}
       <div className="flex min-h-0 flex-1">
         <AppSidebar />
         <div className="min-h-0 min-w-0 flex-1">

@@ -121,6 +121,7 @@ pub struct WorkspaceSnapshot {
     pub branches: BranchList,
     pub remotes: Vec<RemoteInfo>,
     pub stashes: Vec<StashInfo>,
+    pub head_commit: Option<CommitSummary>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -726,7 +727,7 @@ pub fn discard_paths(repo: &Repository, paths: &[String]) -> AppResult<()> {
     Ok(())
 }
 
-pub fn commit(repo: &Repository, message: &str) -> AppResult<CommitSummary> {
+pub fn commit(repo: &Repository, message: &str, amend: bool) -> AppResult<CommitSummary> {
     let message = message.trim();
     if message.is_empty() {
         return Err(AppError::msg("Commit message cannot be empty"));
@@ -739,6 +740,25 @@ pub fn commit(repo: &Repository, message: &str) -> AppResult<CommitSummary> {
     let mut index = repo.index()?;
     let tree_id = index.write_tree()?;
     let tree = repo.find_tree(tree_id)?;
+
+    if amend {
+        let head = match repo.head() {
+            Ok(head) => head.peel_to_commit()?,
+            Err(err) if err.code() == ErrorCode::UnbornBranch => {
+                return Err(AppError::msg("Nothing to amend"));
+            }
+            Err(err) => return Err(err.into()),
+        };
+        let oid = head.amend(
+            Some("HEAD"),
+            Some(&signature),
+            Some(&signature),
+            None,
+            Some(message),
+            Some(&tree),
+        )?;
+        return summarize_oid(repo, oid);
+    }
 
     let parent_commit = match repo.head() {
         Ok(head) => Some(head.peel_to_commit()?),
@@ -1278,7 +1298,13 @@ pub fn snapshot(repo: &mut Repository) -> AppResult<WorkspaceSnapshot> {
         branches: branches(repo, false)?,
         remotes: list_remotes(repo)?,
         stashes: list_stashes(repo)?,
+        head_commit: head_commit(repo),
     })
+}
+
+fn head_commit(repo: &Repository) -> Option<CommitSummary> {
+    let oid = repo.head().ok()?.target()?;
+    summarize_oid(repo, oid).ok()
 }
 
 pub fn list_remotes(repo: &Repository) -> AppResult<Vec<RemoteInfo>> {
@@ -1387,14 +1413,52 @@ fn global_gitconfig_path() -> AppResult<PathBuf> {
 }
 
 pub fn write_git_identity(name: &str, email: &str) -> AppResult<()> {
-    let path = global_gitconfig_path()?;
+    write_identity_to_config(&global_gitconfig_path()?, name, email)
+}
+
+fn local_gitconfig_path(repo: &Repository) -> PathBuf {
+    repo.path().join("config")
+}
+
+pub fn read_local_git_identity(repo: &Repository) -> AppResult<GitIdentity> {
+    let path = local_gitconfig_path(repo);
+    let cfg = git2::Config::open(&path).ok();
+    Ok(GitIdentity {
+        name: cfg
+            .as_ref()
+            .and_then(|cfg| cfg.get_string("user.name").ok())
+            .unwrap_or_default(),
+        email: cfg
+            .as_ref()
+            .and_then(|cfg| cfg.get_string("user.email").ok())
+            .unwrap_or_default(),
+    })
+}
+
+pub fn write_local_git_identity(repo: &Repository, name: &str, email: &str) -> AppResult<()> {
+    write_identity_to_config(&local_gitconfig_path(repo), name, email)
+}
+
+pub fn read_local_gitconfig(repo: &Repository) -> AppResult<String> {
+    let path = local_gitconfig_path(repo);
+    if !path.exists() {
+        return Ok(String::new());
+    }
+    fs::read_to_string(path).map_err(|err| AppError::msg(err.to_string()))
+}
+
+pub fn write_local_gitconfig(repo: &Repository, contents: &str) -> AppResult<()> {
+    fs::write(local_gitconfig_path(repo), contents).map_err(|err| AppError::msg(err.to_string()))
+}
+
+fn write_identity_to_config(path: &Path, name: &str, email: &str) -> AppResult<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
     if !path.exists() {
-        fs::write(&path, "")?;
+        fs::write(path, "")?;
     }
-    let mut cfg = git2::Config::open(&path)?;
+    let mut cfg = git2::Config::open(path)?;
     let name = name.trim();
     let email = email.trim();
     if name.is_empty() {

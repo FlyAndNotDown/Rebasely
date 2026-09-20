@@ -133,7 +133,7 @@ interface GitContextValue {
   stage: (paths: string[]) => Promise<void>;
   unstage: (paths: string[]) => Promise<void>;
   discard: (paths: string[]) => Promise<void>;
-  commit: (message: string) => Promise<void>;
+  commit: (message: string, amend?: boolean) => Promise<void>;
   checkoutBranch: (name: string) => Promise<void>;
   fetchRemote: () => Promise<void>;
   pullRemote: () => Promise<void>;
@@ -704,11 +704,11 @@ export function GitProvider({ children }: { children: ReactNode }) {
   );
 
   const commit = useCallback(
-    async (message: string) => {
+    async (message: string, amend = false) => {
       await runMutation(
-        "Creating commit",
-        (repoPath) => gitApi.commit(repoPath, message),
-        "Created commit",
+        amend ? "Amending commit" : "Creating commit",
+        (repoPath) => gitApi.commit(repoPath, message, amend),
+        amend ? "Amended commit" : "Created commit",
       );
       patchSession(activeTabIdRef.current, { changeSelection: null, changeDiff: null });
     },
