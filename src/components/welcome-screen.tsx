@@ -8,9 +8,9 @@ export function WelcomeScreen() {
   const labels = disambiguateRepoLabels(recents);
 
   return (
-    <div className="flex h-full items-center justify-center bg-background p-8">
-      <div className="w-full max-w-md">
-        <div className="mb-8 flex items-start gap-3">
+    <div className="flex h-full min-h-0 items-center justify-center overflow-hidden bg-background p-8">
+      <div className="flex max-h-full w-full max-w-md flex-col overflow-hidden">
+        <div className="mb-8 flex shrink-0 items-start gap-3">
           <div className="mt-0.5 flex size-10 items-center justify-center rounded-lg bg-foreground text-background">
             <GitBranchIcon className="size-5" />
           </div>
@@ -22,15 +22,15 @@ export function WelcomeScreen() {
           </div>
         </div>
 
-        <Button onClick={() => void openFolder()} className="w-full">
+        <Button onClick={() => void openFolder()} className="w-full shrink-0">
           <FolderOpenIcon data-icon="inline-start" />
           Open repository
         </Button>
 
         {recents.length > 0 ? (
-          <div className="mt-8">
-            <p className="mb-2 text-xs text-muted-foreground">Recent</p>
-            <ul className="divide-y divide-border rounded-lg border">
+          <div className="mt-8 flex min-h-0 flex-col overflow-hidden">
+            <p className="mb-2 shrink-0 text-xs text-muted-foreground">Recent</p>
+            <ul className="min-h-0 flex-1 overflow-y-auto divide-y divide-border rounded-lg border">
               {recents.map((repo) => (
                 <li key={repo.path} className="flex items-center gap-2 pr-1">
                   <button

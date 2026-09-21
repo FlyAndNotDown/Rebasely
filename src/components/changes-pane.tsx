@@ -87,7 +87,6 @@ function FileRow({
       </ContextMenuTrigger>
       <ContextMenuContent>
         <ContextMenuItem onClick={onPrimary}>{primaryLabel}</ContextMenuItem>
-        <ContextMenuItem onClick={onSelect}>View diff</ContextMenuItem>
         {onDiscard ? (
           <>
             <ContextMenuSeparator />

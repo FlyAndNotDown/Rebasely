@@ -1,4 +1,13 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type UIEvent } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent,
+  type PointerEvent,
+  type UIEvent,
+} from "react";
 import {
   CheckIcon,
   ChevronDownIcon,
@@ -45,6 +54,7 @@ export function AppHeader() {
     activeTabId,
     setActiveTab,
     closeTab,
+    reorderTabs,
     openFolder,
     revealRepo,
     openTerminal,
@@ -86,6 +96,7 @@ export function AppHeader() {
         activeTabId={activeTabId}
         setActiveTab={setActiveTab}
         closeTab={closeTab}
+        reorderTabs={reorderTabs}
         openFolder={openFolder}
       />
 
@@ -246,17 +257,24 @@ function TabStrip({
   activeTabId,
   setActiveTab,
   closeTab,
+  reorderTabs,
   openFolder,
 }: {
   tabs: AppTab[];
   activeTabId: string;
   setActiveTab: (id: string) => void;
   closeTab: (id: string) => void;
+  reorderTabs: (fromId: string, toId: string, place: "before" | "after") => void;
   openFolder: () => void | Promise<void>;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const measureRef = useRef<HTMLDivElement>(null);
+  const stripRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<{ id: string; startX: number; active: boolean } | null>(null);
+  const reorderTabsRef = useRef(reorderTabs);
   const [hiddenIds, setHiddenIds] = useState<string[]>([]);
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  reorderTabsRef.current = reorderTabs;
 
   useLayoutEffect(() => {
     const container = containerRef.current;
@@ -305,6 +323,57 @@ function TabStrip({
     return () => observer.disconnect();
   }, [activeTabId, tabs]);
 
+  useEffect(() => {
+    function dropTargetAt(clientX: number): { id: string; place: "before" | "after" } | null {
+      const nodes = stripRef.current
+        ? Array.from(stripRef.current.querySelectorAll<HTMLElement>("[data-tab-id]"))
+        : [];
+      if (nodes.length === 0) return null;
+      for (const node of nodes) {
+        const id = node.dataset.tabId;
+        if (!id) continue;
+        const rect = node.getBoundingClientRect();
+        if (clientX < rect.left + rect.width / 2) {
+          return { id, place: "before" };
+        }
+      }
+      const lastId = nodes[nodes.length - 1]?.dataset.tabId;
+      return lastId ? { id: lastId, place: "after" } : null;
+    }
+
+    function onPointerMove(event: globalThis.PointerEvent) {
+      const drag = dragRef.current;
+      if (!drag) return;
+      if (!drag.active && Math.abs(event.clientX - drag.startX) < 6) return;
+      if (!drag.active) {
+        drag.active = true;
+        setDraggingId(drag.id);
+      }
+      const target = dropTargetAt(event.clientX);
+      if (target && target.id !== drag.id) {
+        reorderTabsRef.current(drag.id, target.id, target.place);
+      }
+    }
+
+    function endDrag() {
+      if (!dragRef.current) {
+        setDraggingId((current) => (current == null ? current : null));
+        return;
+      }
+      dragRef.current = null;
+      setDraggingId(null);
+    }
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", endDrag);
+    window.addEventListener("pointercancel", endDrag);
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", endDrag);
+      window.removeEventListener("pointercancel", endDrag);
+    };
+  }, []);
+
   const hidden = tabs.filter((tab) => hiddenIds.includes(tab.id));
   const visible = tabs.filter((tab) => !hiddenIds.includes(tab.id));
   const labels = useMemo(
@@ -318,6 +387,12 @@ function TabStrip({
   function tabLabel(tab: AppTab) {
     if (tab.kind === "welcome") return "Rebasely";
     return labels.get(tab.path) ?? tab.name;
+  }
+
+  function handleTabPointerDown(tabId: string, event: PointerEvent<HTMLDivElement>) {
+    if (event.button !== 0) return;
+    dragRef.current = { id: tabId, startX: event.clientX, active: false };
+    setActiveTab(tabId);
   }
 
   return (
@@ -341,15 +416,20 @@ function TabStrip({
           <PlusIcon />
         </Button>
       </div>
-      <div className="flex min-w-0 items-center gap-1">
+      <div
+        ref={stripRef}
+        className={cn("flex min-w-0 items-center gap-1", draggingId && "select-none")}
+      >
         {visible.map((tab) => (
           <TabButton
             key={tab.id}
             tab={tab}
             label={tabLabel(tab)}
             active={tab.id === activeTabId}
+            dragging={tab.id === draggingId}
             onSelect={() => setActiveTab(tab.id)}
             onClose={() => closeTab(tab.id)}
+            onPointerDown={(event) => handleTabPointerDown(tab.id, event)}
           />
         ))}
         {hidden.length > 0 ? (
@@ -416,17 +496,22 @@ function TabButton({
   tab,
   label,
   active,
+  dragging = false,
   onSelect,
   onClose,
+  onPointerDown,
 }: {
   tab: AppTab;
   label: string;
   active: boolean;
+  dragging?: boolean;
   onSelect: () => void;
   onClose: () => void;
+  onPointerDown?: (event: PointerEvent<HTMLDivElement>) => void;
 }) {
   const closable = tab.kind === "repo";
   const hint = tab.kind === "welcome" ? "Welcome" : tab.path;
+  const interactive = Boolean(onPointerDown);
 
   function handleAuxClick(event: MouseEvent<HTMLButtonElement>) {
     if (event.button === 1 && closable) {
@@ -439,8 +524,12 @@ function TabButton({
     <Tooltip>
       <TooltipTrigger asChild>
         <div
+          data-tab-id={interactive ? tab.id : undefined}
+          onPointerDown={onPointerDown}
           className={cn(
             "group flex h-8 max-w-52 shrink-0 items-center rounded-md pr-1 text-sm",
+            interactive && "cursor-grab touch-none",
+            dragging && "cursor-grabbing opacity-60",
             active
               ? "bg-muted text-foreground"
               : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
@@ -462,6 +551,7 @@ function TabButton({
                 "flex size-4 items-center justify-center rounded-sm hover:bg-background/80",
                 active ? "opacity-100" : "opacity-0 group-hover:opacity-100",
               )}
+              onPointerDown={(event) => event.stopPropagation()}
               onClick={onClose}
               aria-label={`Close ${label}`}
             >

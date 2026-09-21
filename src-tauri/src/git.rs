@@ -1395,7 +1395,8 @@ fn diff_options_for(path: &str, include_untracked: bool) -> DiffOptions {
     opts.pathspec(path).minimal(true);
     if include_untracked {
         opts.include_untracked(true)
-            .recurse_untracked_dirs(true);
+            .recurse_untracked_dirs(true)
+            .show_untracked_content(true);
     }
     opts
 }
@@ -1413,7 +1414,74 @@ pub fn workdir_diff(repo: &Repository, path: &str, staged: bool) -> AppResult<Fi
     } else {
         repo.diff_index_to_workdir(None, Some(&mut opts))?
     };
-    collect_patch(diff, &rel)
+    let file_diff = collect_patch(diff, &rel)?;
+    if !staged && !file_diff.binary && file_diff.lines.is_empty() {
+        if let Some(fallback) = untracked_workdir_diff(repo, &rel)? {
+            return Ok(fallback);
+        }
+    }
+    Ok(file_diff)
+}
+
+fn untracked_workdir_diff(repo: &Repository, path: &str) -> AppResult<Option<FileDiff>> {
+    let status = match repo.status_file(Path::new(path)) {
+        Ok(status) => status,
+        Err(_) => return Ok(None),
+    };
+    if !is_untracked(status) {
+        return Ok(None);
+    }
+    if looks_binary_path(path) {
+        return Ok(Some(FileDiff {
+            path: path.to_string(),
+            old_path: None,
+            binary: true,
+            truncated: false,
+            lines: Vec::new(),
+        }));
+    }
+
+    let abs = ensure_inside_workdir(repo, path)?;
+    if !abs.is_file() {
+        return Ok(None);
+    }
+    let bytes = fs::read(&abs)?;
+    if bytes.contains(&0) {
+        return Ok(Some(FileDiff {
+            path: path.to_string(),
+            old_path: None,
+            binary: true,
+            truncated: false,
+            lines: Vec::new(),
+        }));
+    }
+
+    let text = String::from_utf8_lossy(&bytes);
+    let mut lines = Vec::new();
+    let mut truncated = false;
+    for (index, line) in text.split('\n').enumerate() {
+        if lines.len() >= 4000 {
+            truncated = true;
+            break;
+        }
+        let mut content = line.to_string();
+        if content.ends_with('\r') {
+            content.pop();
+        }
+        lines.push(DiffLine {
+            kind: "add".to_string(),
+            content,
+            old_lineno: None,
+            new_lineno: Some((index + 1) as u32),
+        });
+    }
+    Ok(Some(FileDiff {
+        path: path.to_string(),
+        old_path: None,
+        binary: false,
+        truncated,
+        lines,
+    }))
 }
 
 fn delta_kind(delta: git2::Delta) -> &'static str {

@@ -1,13 +1,22 @@
 import { useEffect, useMemo, useState, type UIEvent } from "react";
-import { SearchIcon } from "lucide-react";
+import { CopyIcon, HashIcon, MailIcon, MessageSquareTextIcon, SearchIcon, UserIcon } from "lucide-react";
 import { AuthorAvatar } from "@/components/author-avatar";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
 import { Input } from "@/components/ui/input";
 import { formatRelativeTime } from "@/lib/format";
 import { errorMessage, gitApi } from "@/lib/git";
 import { graphWidth, laneColor, layoutCommitGraph, type GraphRow } from "@/lib/commit-graph";
 import { cn } from "@/lib/utils";
 import { COMMIT_PAGE, useGit } from "@/state/git-context";
-import type { CommitRef, CommitSummary } from "@/types/git";
+import type { AvatarProvider, CommitRef, CommitSummary } from "@/types/git";
 import { toast } from "sonner";
 
 const ROW_HEIGHT = 32;
@@ -129,40 +138,18 @@ export function HistoryPane() {
         ) : (
           <>
             {visible.map((commit, index) => (
-              <button
+              <CommitRow
                 key={commit.id}
-                type="button"
-                className={cn(
-                  "flex h-8 w-full items-center gap-3 px-2 text-left hover:bg-muted/70",
-                  selectedId === commit.id && "bg-muted",
-                )}
-                onClick={() => void selectCommit(commit.id)}
-              >
-                {!searchingMode && graph[index] ? (
-                  <GraphCell
-                    width={gutter}
-                    row={graph[index]}
-                    previous={graph[index - 1]}
-                  />
-                ) : null}
-                <span className="flex min-w-0 flex-1 items-center gap-1.5">
-                  <CommitRefs refs={commit.refs ?? []} />
-                  <span className="min-w-0 truncate text-sm">
-                    {commit.summary || "(no message)"}
-                  </span>
-                </span>
-                <span className="flex w-28 shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground">
-                  <AuthorAvatar
-                    name={commit.authorName}
-                    email={commit.authorEmail}
-                    provider={prefs.avatarProvider}
-                  />
-                  <span className="truncate">{commit.authorName}</span>
-                </span>
-                <span className="min-w-[4.5rem] shrink-0 text-right text-[11px] tabular-nums text-muted-foreground">
-                  {formatRelativeTime(commit.timestamp)}
-                </span>
-              </button>
+                commit={commit}
+                selected={selectedId === commit.id}
+                avatarProvider={prefs.avatarProvider}
+                graph={
+                  !searchingMode && graph[index]
+                    ? { width: gutter, row: graph[index], previous: graph[index - 1] }
+                    : null
+                }
+                onSelect={() => void selectCommit(commit.id)}
+              />
             ))}
             <div className="px-3 py-2 text-center text-[11px] text-muted-foreground">
               {loading
@@ -177,6 +164,103 @@ export function HistoryPane() {
         )}
       </div>
     </div>
+  );
+}
+
+function CommitRow({
+  commit,
+  selected,
+  avatarProvider,
+  graph,
+  onSelect,
+}: {
+  commit: CommitSummary;
+  selected: boolean;
+  avatarProvider: AvatarProvider;
+  graph: { width: number; row: GraphRow; previous?: GraphRow } | null;
+  onSelect: () => void;
+}) {
+  const message = [commit.summary, commit.body].filter(Boolean).join("\n\n");
+
+  async function copyText(value: string, success: string) {
+    if (!value) {
+      toast.error("Nothing to copy");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(value);
+      toast.success(success);
+    } catch {
+      toast.error("Could not copy");
+    }
+  }
+
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <button
+          type="button"
+          className={cn(
+            "flex h-8 w-full items-center gap-3 px-2 text-left hover:bg-muted/70",
+            selected && "bg-muted",
+          )}
+          onClick={onSelect}
+        >
+          {graph ? (
+            <GraphCell width={graph.width} row={graph.row} previous={graph.previous} />
+          ) : null}
+          <span className="flex min-w-0 flex-1 items-center gap-1.5">
+            <CommitRefs refs={commit.refs ?? []} />
+            <span className="min-w-0 truncate text-sm">
+              {commit.summary || "(no message)"}
+            </span>
+          </span>
+          <span className="flex w-28 shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground">
+            <AuthorAvatar
+              name={commit.authorName}
+              email={commit.authorEmail}
+              provider={avatarProvider}
+            />
+            <span className="truncate">{commit.authorName}</span>
+          </span>
+          <span className="min-w-[4.5rem] shrink-0 text-right text-[11px] tabular-nums text-muted-foreground">
+            {formatRelativeTime(commit.timestamp)}
+          </span>
+        </button>
+      </ContextMenuTrigger>
+      <ContextMenuContent className="w-44">
+        <ContextMenuSub>
+          <ContextMenuSubTrigger>
+            <CopyIcon />
+            Copy
+          </ContextMenuSubTrigger>
+          <ContextMenuSubContent className="w-44">
+            <ContextMenuItem onClick={() => void copyText(commit.authorName, "Copied author")}>
+              <UserIcon />
+              Author
+            </ContextMenuItem>
+            <ContextMenuItem
+              disabled={!commit.authorEmail}
+              onClick={() => void copyText(commit.authorEmail, "Copied email")}
+            >
+              <MailIcon />
+              Email
+            </ContextMenuItem>
+            <ContextMenuItem onClick={() => void copyText(commit.id, "Copied commit hash")}>
+              <HashIcon />
+              Hash
+            </ContextMenuItem>
+            <ContextMenuItem
+              disabled={!message}
+              onClick={() => void copyText(message, "Copied message")}
+            >
+              <MessageSquareTextIcon />
+              Message
+            </ContextMenuItem>
+          </ContextMenuSubContent>
+        </ContextMenuSub>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 

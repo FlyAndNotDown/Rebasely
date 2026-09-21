@@ -98,6 +98,25 @@ function findRepoTab(tabs: AppTab[], path: string): RepoTab | undefined {
   );
 }
 
+function reorderAppTabs(
+  tabs: AppTab[],
+  fromId: string,
+  toId: string,
+  place: "before" | "after",
+): AppTab[] {
+  const from = tabs.findIndex((tab) => tab.id === fromId);
+  if (from < 0) return tabs;
+  const next = [...tabs];
+  const [item] = next.splice(from, 1);
+  let insert = next.findIndex((tab) => tab.id === toId);
+  if (insert < 0) return tabs;
+  if (place === "after") insert += 1;
+  next.splice(insert, 0, item);
+  const unchanged =
+    next.length === tabs.length && next.every((tab, index) => tab.id === tabs[index].id);
+  return unchanged ? tabs : next;
+}
+
 interface GitContextValue {
   recents: RecentRepo[];
   tabs: AppTab[];
@@ -121,6 +140,7 @@ interface GitContextValue {
   setView: (view: View) => void;
   setActiveTab: (id: string) => void;
   closeTab: (id: string) => void;
+  reorderTabs: (fromId: string, toId: string, place: "before" | "after") => void;
   openFolder: () => Promise<void>;
   openPath: (path: string) => Promise<void>;
   revealRepo: () => Promise<void>;
@@ -367,6 +387,10 @@ export function GitProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       toast.error(errorMessage(error));
     }
+  }, []);
+
+  const reorderTabs = useCallback((fromId: string, toId: string, place: "before" | "after") => {
+    setTabs((current) => reorderAppTabs(current, fromId, toId, place));
   }, []);
 
   const closeTab = useCallback((id: string) => {
@@ -877,6 +901,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       setView,
       setActiveTab: setActiveTabId,
       closeTab,
+      reorderTabs,
       openFolder,
       openPath,
       revealRepo,
@@ -916,6 +941,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       opening,
       setView,
       closeTab,
+      reorderTabs,
       openFolder,
       openPath,
       revealRepo,
