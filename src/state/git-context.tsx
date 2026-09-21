@@ -172,7 +172,7 @@ interface GitContextValue {
   stage: (paths: string[]) => Promise<void>;
   unstage: (paths: string[]) => Promise<void>;
   discard: (paths: string[]) => Promise<void>;
-  commit: (message: string, amend?: boolean) => Promise<void>;
+  commit: (message: string, amend?: boolean) => Promise<boolean>;
   checkoutBranch: (name: string) => Promise<void>;
   fetchRemote: () => Promise<void>;
   pullRemote: () => Promise<void>;
@@ -754,7 +754,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
     ) => {
       const repoPath = activeRepoPath();
       const tabId = activeTabIdRef.current;
-      if (!repoPath) return;
+      if (!repoPath) return false;
       const current = sessionsRef.current[tabId];
       const changeSelection = current?.changeSelection ?? null;
       try {
@@ -793,8 +793,10 @@ export function GitProvider({ children }: { children: ReactNode }) {
           void ensureHistory();
         }
         if (success) toast.success(success);
+        return true;
       } catch (error) {
         toast.error(errorMessage(error));
+        return false;
       }
     },
     [activeRepoPath, ensureHistory, patchSession, runActivity],
@@ -832,12 +834,15 @@ export function GitProvider({ children }: { children: ReactNode }) {
 
   const commit = useCallback(
     async (message: string, amend = false) => {
-      await runMutation(
+      const ok = await runMutation(
         amend ? "Amending commit" : "Creating commit",
         (repoPath) => gitApi.commit(repoPath, message, amend),
         amend ? "Amended commit" : "Created commit",
       );
-      patchSession(activeTabIdRef.current, { changeSelection: null, changeDiff: null });
+      if (ok) {
+        patchSession(activeTabIdRef.current, { changeSelection: null, changeDiff: null });
+      }
+      return ok;
     },
     [patchSession, runMutation],
   );

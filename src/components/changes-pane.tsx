@@ -5,6 +5,7 @@ import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -107,7 +108,8 @@ function headCommitMessage(snapshot: WorkspaceSnapshot) {
 }
 
 export function ChangesPane() {
-  const { snapshot, changeSelection, selectChange, stage, unstage, discard, commit } = useGit();
+  const { snapshot, changeSelection, selectChange, stage, unstage, discard, commit, pushRemote } =
+    useGit();
   const [message, setMessage] = useState("");
   const [amend, setAmend] = useState(false);
   const [discardTarget, setDiscardTarget] = useState<string[] | null>(null);
@@ -117,8 +119,8 @@ export function ChangesPane() {
   const unstaged = snapshot?.status.unstaged ?? [];
   const selectedChange = changeSelection;
   const canAmend = Boolean(snapshot?.headCommit);
-  const hasChanges = staged.length > 0 || unstaged.length > 0;
-  const canOpenCommitMenu = canAmend && (hasChanges || amend);
+  const canCommitAndPush = message.trim().length > 0 && staged.length > 0;
+  const canOpenCommitMenu = canCommitAndPush || canAmend;
   const canCommit = message.trim().length > 0 && (amend ? canAmend : staged.length > 0);
 
   const counts = useMemo(
@@ -133,6 +135,18 @@ export function ChangesPane() {
     setMessage("");
     setAmend(false);
     void commit(next, nextAmend);
+  }
+
+  function submitCommitAndPush() {
+    if (!canCommitAndPush) return;
+    const next = message;
+    setMessage("");
+    setAmend(false);
+    void (async () => {
+      if (await commit(next, false)) {
+        await pushRemote();
+      }
+    })();
   }
 
   function toggleAmend(next: boolean) {
@@ -245,8 +259,16 @@ export function ChangesPane() {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="min-w-max">
+                <DropdownMenuItem
+                  className="whitespace-nowrap"
+                  disabled={!canCommitAndPush}
+                  onClick={submitCommitAndPush}
+                >
+                  Commit and push
+                </DropdownMenuItem>
                 <DropdownMenuCheckboxItem
                   checked={amend}
+                  disabled={!canAmend}
                   className="whitespace-nowrap"
                   onCheckedChange={(checked) => toggleAmend(checked === true)}
                 >
