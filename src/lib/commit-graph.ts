@@ -108,8 +108,10 @@ function firstEmpty(lanes: (string | null)[]): number {
   return lanes.findIndex((id) => id === null);
 }
 
+const GRAPH_LANE_COLORS = 12;
+
 export function laneColor(lane: number): string {
-  return `var(--graph-${(lane % 6) + 1})`;
+  return `var(--graph-${(lane % GRAPH_LANE_COLORS) + 1})`;
 }
 
 export function graphWidth(laneCount: number, gap = 12): number {
