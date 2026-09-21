@@ -14,36 +14,43 @@ type BranchTreeNode = {
   children: BranchTreeNode[];
 };
 
+const DEFAULT_EXPANDED = ["section:local", "section:remotes", "remote:origin"];
+
 export function HistoryBranches() {
-  const { snapshot, historyRevs, setHistoryRevs, ensureBranches, addRemote } = useGit();
+  const {
+    snapshot,
+    historyRevs,
+    setHistoryRevs,
+    historyExpanded,
+    setHistoryExpanded,
+    ensureBranches,
+    addRemote,
+  } = useGit();
   const [query, setQuery] = useState("");
   const [addOpen, setAddOpen] = useState(false);
-  const [expanded, setExpanded] = useState<Set<string>>(
-    () => new Set(["section:local", "section:remotes", "remote:origin"]),
-  );
   const branches = snapshot?.branches;
   const needle = query.trim().toLowerCase();
   const watched = useMemo(() => new Set(historyRevs), [historyRevs]);
+  const expanded = useMemo(
+    () => new Set(historyExpanded ?? DEFAULT_EXPANDED),
+    [historyExpanded],
+  );
 
   useEffect(() => {
     void ensureBranches();
   }, [ensureBranches, branches?.remote.length]);
 
   useEffect(() => {
+    if (historyExpanded !== null) return;
+    const ids = new Set(DEFAULT_EXPANDED);
     const current = branches?.current;
-    if (!current) return;
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      next.add("section:local");
-      for (const id of folderIdsForPath("local", current.split("/"))) next.add(id);
+    if (current) {
+      for (const id of folderIdsForPath("local", current.split("/"))) ids.add(id);
       const upstream = branches?.local.find((branch) => branch.name === current)?.upstream;
-      if (upstream) {
-        next.add("section:remotes");
-        next.add(`remote:${upstream.split("/")[0]}`);
-      }
-      return next;
-    });
-  }, [branches?.current, branches?.local]);
+      if (upstream) ids.add(`remote:${upstream.split("/")[0]}`);
+    }
+    setHistoryExpanded([...ids]);
+  }, [branches?.current, historyExpanded, setHistoryExpanded]);
 
   const localTree = useMemo(() => {
     const items = branches?.local ?? [];
@@ -72,12 +79,10 @@ export function HistoryBranches() {
   }, [branches?.remote, needle, snapshot?.remotes]);
 
   function toggleFolder(id: string) {
-    setExpanded((current) => {
-      const next = new Set(current);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+    const next = new Set(expanded);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setHistoryExpanded([...next]);
   }
 
   function toggleWatch(name: string) {
@@ -91,12 +96,10 @@ export function HistoryBranches() {
   async function handleAddRemote(name: string, url: string) {
     const ok = await addRemote(name, url);
     if (ok) {
-      setExpanded((current) => {
-        const next = new Set(current);
-        next.add("section:remotes");
-        next.add(`remote:${name}`);
-        return next;
-      });
+      const next = new Set(expanded);
+      next.add("section:remotes");
+      next.add(`remote:${name}`);
+      setHistoryExpanded([...next]);
     }
     return ok;
   }

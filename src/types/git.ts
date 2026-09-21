@@ -151,6 +151,7 @@ export interface AppSession {
   openPaths: string[];
   active: string;
   historyRevs?: Record<string, string[]>;
+  historyExpanded?: Record<string, string[]>;
 }
 
 export type Selection =

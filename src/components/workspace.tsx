@@ -1,4 +1,4 @@
-import { useLayoutEffect } from "react";
+import { useEffect, useLayoutEffect, useState } from "react";
 import { useGroupRef, type Layout } from "react-resizable-panels";
 import { ChangesPane } from "@/components/changes-pane";
 import { CommitFiles } from "@/components/commit-files";
@@ -11,6 +11,7 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
+import { cn } from "@/lib/utils";
 import { useGit } from "@/state/git-context";
 
 const HISTORY_LAYOUT: Layout = { "history-commits": 67, "history-details": 33 };
@@ -79,6 +80,18 @@ function HistoryWorkspace() {
 
 export function Workspace() {
   const { view, snapshot } = useGit();
+  const [visited, setVisited] = useState({
+    history: view === "history",
+    stash: view === "stash",
+  });
+
+  useEffect(() => {
+    setVisited((current) => {
+      if (view === "history" && !current.history) return { ...current, history: true };
+      if (view === "stash" && !current.stash) return { ...current, stash: true };
+      return current;
+    });
+  }, [view]);
 
   if (!snapshot) {
     return (
@@ -90,11 +103,17 @@ export function Workspace() {
 
   return (
     <div className="flex h-full min-h-0">
-      {view === "stash" ? (
-        <StashPane />
-      ) : view === "history" ? (
-        <HistoryWorkspace />
-      ) : (
+      {visited.stash ? (
+        <div className={cn("min-h-0 flex-1", view === "stash" ? "flex" : "hidden")}>
+          <StashPane />
+        </div>
+      ) : null}
+      {visited.history ? (
+        <div className={cn("min-h-0 flex-1", view === "history" ? "flex" : "hidden")}>
+          <HistoryWorkspace />
+        </div>
+      ) : null}
+      <div className={cn("min-h-0 flex-1", view === "changes" ? "flex" : "hidden")}>
         <ResizablePanelGroup orientation="horizontal" className="min-h-0 flex-1">
           <ResizablePanel defaultSize="36%" minSize="24%" maxSize="52%">
             <ChangesPane />
@@ -104,7 +123,7 @@ export function Workspace() {
             <DiffViewer />
           </ResizablePanel>
         </ResizablePanelGroup>
-      )}
+      </div>
     </div>
   );
 }

@@ -14,6 +14,8 @@ pub struct AppSession {
     pub active: String,
     #[serde(default)]
     pub history_revs: HashMap<String, Vec<String>>,
+    #[serde(default)]
+    pub history_expanded: HashMap<String, Vec<String>>,
 }
 
 impl Default for AppSession {
@@ -22,6 +24,7 @@ impl Default for AppSession {
             open_paths: Vec::new(),
             active: "welcome".to_string(),
             history_revs: HashMap::new(),
+            history_expanded: HashMap::new(),
         }
     }
 }
@@ -51,11 +54,12 @@ pub fn load_session(app: &AppHandle) -> AppResult<AppSession> {
     if session.active.is_empty() {
         session.active = "welcome".to_string();
     }
-    session.history_revs = normalize_history_revs(session.history_revs);
+    session.history_revs = normalize_path_lists(session.history_revs);
+    session.history_expanded = normalize_path_lists(session.history_expanded);
     Ok(session)
 }
 
-fn normalize_history_revs(map: HashMap<String, Vec<String>>) -> HashMap<String, Vec<String>> {
+fn normalize_path_lists(map: HashMap<String, Vec<String>>) -> HashMap<String, Vec<String>> {
     map.into_iter()
         .filter_map(|(path, revs)| {
             let path = strip_verbatim_prefix(&path);
@@ -83,7 +87,8 @@ pub fn save_session(app: &AppHandle, mut session: AppSession) -> AppResult<AppSe
     if session.active.is_empty() {
         session.active = "welcome".to_string();
     }
-    session.history_revs = normalize_history_revs(session.history_revs);
+    session.history_revs = normalize_path_lists(session.history_revs);
+    session.history_expanded = normalize_path_lists(session.history_expanded);
     let path = session_path(app)?;
     fs::write(
         path,
