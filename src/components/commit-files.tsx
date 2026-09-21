@@ -1,5 +1,6 @@
 import { toast } from "sonner";
 import { AuthorAvatar } from "@/components/author-avatar";
+import { formatAbsoluteTime } from "@/lib/format";
 import { fileKindClass, fileKindLabel } from "@/lib/file-kind";
 import { cn } from "@/lib/utils";
 import { useGit } from "@/state/git-context";
@@ -51,6 +52,7 @@ export function CommitFiles() {
           >
             {commit.shortId}
           </button>
+          <span className="tabular-nums">{formatAbsoluteTime(commit.timestamp)}</span>
         </div>
         {commit.body ? (
           <p className="mt-2 max-h-24 overflow-auto whitespace-pre-wrap text-xs text-muted-foreground">

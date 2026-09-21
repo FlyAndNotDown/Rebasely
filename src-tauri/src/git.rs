@@ -841,6 +841,48 @@ fn remove_worktree_path(full: &Path) -> AppResult<()> {
     Ok(())
 }
 
+fn write_worktree_bytes(full: &Path, bytes: &[u8]) -> AppResult<()> {
+    if full.is_dir() {
+        fs::remove_dir_all(full)?;
+    } else if full.exists() {
+        let mut perms = fs::metadata(full)?.permissions();
+        if perms.readonly() {
+            perms.set_readonly(false);
+            fs::set_permissions(full, perms)?;
+        }
+    }
+    if let Some(parent) = full.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(full, bytes)?;
+    Ok(())
+}
+
+fn restore_worktree_from_head(repo: &Repository, rel: &str, full: &Path) -> AppResult<()> {
+    let tree = repo.head()?.peel_to_tree()?;
+    match tree.get_path(Path::new(rel)) {
+        Ok(entry) => match entry.kind() {
+            Some(ObjectType::Blob) => {
+                let blob = repo.find_blob(entry.id())?;
+                // Write the HEAD blob as-is. Checkout filters (autocrlf / eol)
+                // would turn LF in HEAD back into CRLF on Windows.
+                write_worktree_bytes(full, blob.content())?;
+            }
+            Some(ObjectType::Tree) | Some(ObjectType::Commit) => {
+                let mut builder = CheckoutBuilder::new();
+                builder.force().disable_filters(true).path(rel);
+                repo.checkout_head(Some(&mut builder))?;
+            }
+            _ => {}
+        },
+        Err(err) if err.code() == ErrorCode::NotFound => {
+            remove_worktree_path(full)?;
+        }
+        Err(err) => return Err(err.into()),
+    }
+    Ok(())
+}
+
 pub fn discard_paths(repo: &Repository, paths: &[String]) -> AppResult<()> {
     for raw in paths {
         let rel = to_git_path(raw);
@@ -860,9 +902,7 @@ pub fn discard_paths(repo: &Repository, paths: &[String]) -> AppResult<()> {
             Ok(head) => {
                 let object = head.peel(ObjectType::Any)?;
                 repo.reset_default(Some(&object), [&rel])?;
-                let mut builder = CheckoutBuilder::new();
-                builder.force().path(&rel);
-                repo.checkout_head(Some(&mut builder))?;
+                restore_worktree_from_head(repo, &rel, &full)?;
             }
             Err(err) if err.code() == ErrorCode::UnbornBranch => {
                 let mut index = repo.index()?;

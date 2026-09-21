@@ -11,7 +11,7 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { Input } from "@/components/ui/input";
-import { formatRelativeTime } from "@/lib/format";
+import { formatAbsoluteTime } from "@/lib/format";
 import { errorMessage, gitApi } from "@/lib/git";
 import { graphWidth, laneColor, layoutCommitGraph, type GraphRow } from "@/lib/commit-graph";
 import { cn } from "@/lib/utils";
@@ -225,8 +225,11 @@ function CommitRow({
             />
             <span className="truncate">{commit.authorName}</span>
           </span>
-          <span className="min-w-[4.5rem] shrink-0 text-right text-[11px] tabular-nums text-muted-foreground">
-            {formatRelativeTime(commit.timestamp)}
+          <span
+            className="w-[7.25rem] shrink-0 text-right text-[11px] tabular-nums text-muted-foreground"
+            title={formatAbsoluteTime(commit.timestamp)}
+          >
+            {formatAbsoluteTime(commit.timestamp)}
           </span>
         </button>
       </ContextMenuTrigger>

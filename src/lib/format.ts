@@ -34,11 +34,12 @@ export function formatRelativeTime(timestamp: number): string {
 
 export function formatAbsoluteTime(timestamp: number): string {
   const date = new Date(timestamp * 1000);
-  const hours = date.getHours();
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hours = String(date.getHours()).padStart(2, "0");
   const minutes = String(date.getMinutes()).padStart(2, "0");
-  const hour12 = hours % 12 || 12;
-  const suffix = hours < 12 ? "AM" : "PM";
-  return `${formatEnglishDate(date, true)}, ${hour12}:${minutes} ${suffix}`;
+  return `${year}-${month}-${day} ${hours}:${minutes}`;
 }
 
 export function fileName(path: string): string {
