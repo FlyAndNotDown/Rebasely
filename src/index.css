@@ -50,6 +50,12 @@
   --graph-4: #e8590c;
   --graph-5: #845ef7;
   --graph-6: #e64980;
+  --ref-head: #e5cb90;
+  --ref-head-fg: #3a2a12;
+  --ref-branch: #2a8f8e;
+  --ref-branch-fg: #f4fffe;
+  --ref-tag: #a82020;
+  --ref-tag-fg: #fff7f7;
   --font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, monospace;
 }
@@ -97,6 +103,12 @@
   --graph-4: #ff8a4c;
   --graph-5: #c4a1ff;
   --graph-6: #ff6b9d;
+  --ref-head: #f8e0a4;
+  --ref-head-fg: #3a2a12;
+  --ref-branch: #31aaa9;
+  --ref-branch-fg: #062221;
+  --ref-tag: #c43333;
+  --ref-tag-fg: #fff7f7;
 }
 
 @theme inline {

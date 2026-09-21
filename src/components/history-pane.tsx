@@ -287,9 +287,9 @@ function CommitRefs({ refs }: { refs: CommitRef[] }) {
           key={`${ref.kind}:${ref.name}`}
           className={cn(
             "inline-flex h-4 items-center rounded px-1.5 font-sans text-[10px] leading-none font-medium whitespace-nowrap",
-            ref.kind === "head" && "bg-yellow-400 text-zinc-950",
-            ref.kind === "branch" && "bg-sky-500 text-white",
-            ref.kind === "tag" && "bg-orange-500 text-white",
+            ref.kind === "head" && "bg-[var(--ref-head)] text-[var(--ref-head-fg)]",
+            ref.kind === "branch" && "bg-[var(--ref-branch)] text-[var(--ref-branch-fg)]",
+            ref.kind === "tag" && "bg-[var(--ref-tag)] text-[var(--ref-tag-fg)]",
             ref.kind !== "head" && ref.kind !== "branch" && ref.kind !== "tag" && "bg-muted text-muted-foreground",
           )}
         >
