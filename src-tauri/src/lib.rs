@@ -5,6 +5,7 @@ mod recents;
 mod session;
 mod terminal;
 mod watch;
+mod window_state;
 
 use std::path::Path;
 
@@ -411,6 +412,10 @@ pub fn run() {
         .setup(|app| {
             if let Some(window) = app.get_webview_window("main") {
                 apply_window_chrome(&window, true);
+                window_state::restore(&window, app.handle());
+                window_state::watch(&window, app.handle());
+                let _ = window.show();
+                let _ = window.set_focus();
             }
             Ok(())
         })
