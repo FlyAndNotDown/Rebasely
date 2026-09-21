@@ -132,6 +132,7 @@ export interface Activity {
   id: string;
   label: string;
   detail?: string;
+  progress?: number;
 }
 
 export interface RecentRepo {

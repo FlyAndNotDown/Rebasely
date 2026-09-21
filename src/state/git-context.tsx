@@ -81,6 +81,14 @@ function emptySession(path: string): RepoSession {
   };
 }
 
+function progressFromGitLine(line: string): number | undefined {
+  const match = line.match(/(\d+(?:\.\d+)?)%/);
+  if (!match) return undefined;
+  const value = Number(match[1]);
+  if (!Number.isFinite(value)) return undefined;
+  return Math.min(100, Math.max(0, value));
+}
+
 function repoNameFromPath(path: string): string {
   const segments = pathSegments(path);
   return segments[segments.length - 1] || path;
@@ -326,9 +334,12 @@ export function GitProvider({ children }: { children: ReactNode }) {
     let disposed = false;
     let unlisten: (() => void) | undefined;
     void listen<{ id: string; line: string }>("git-progress", (event) => {
+      const progress = progressFromGitLine(event.payload.line);
       setActivities((current) =>
         current.map((item) =>
-          item.id === event.payload.id ? { ...item, detail: event.payload.line } : item,
+          item.id === event.payload.id
+            ? { ...item, detail: event.payload.line, progress: progress ?? item.progress }
+            : item,
         ),
       );
     }).then((fn) => {

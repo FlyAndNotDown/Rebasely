@@ -7,6 +7,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { useGit } from "@/state/git-context";
+import type { Activity } from "@/types/git";
 
 export function ActivityMeter() {
   const { activities } = useGit();
@@ -24,19 +25,22 @@ export function ActivityMeter() {
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          className="flex h-7 w-[4.5rem] shrink-0 flex-col justify-center rounded-md px-1.5 hover:bg-muted"
+          className="ml-2 flex h-7 w-40 shrink-0 items-center gap-1.5 rounded-md px-1.5 hover:bg-muted"
           aria-label={
             activities.length === 1
               ? latest.label
               : `${activities.length} operations running`
           }
         >
-          <span className="relative block h-1 w-full overflow-hidden rounded-full bg-muted">
-            <span className="activity-indeterminate absolute inset-y-0 left-0 rounded-full bg-foreground/75" />
-          </span>
+          <ActivityBar activity={latest} />
+          {latest.progress != null ? (
+            <span className="w-7 shrink-0 text-right text-[10px] tabular-nums text-muted-foreground">
+              {Math.round(latest.progress)}%
+            </span>
+          ) : null}
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-80">
+      <DropdownMenuContent align="end" className="w-96">
         <DropdownMenuLabel>
           {activities.length === 1 ? "Running" : `${activities.length} running`}
         </DropdownMenuLabel>
@@ -51,14 +55,24 @@ export function ActivityMeter() {
                 setExpandedId((current) => (current === activity.id ? null : activity.id))
               }
             >
-              <div className={cn("text-sm", expanded ? "whitespace-pre-wrap break-words" : "truncate")}>
-                {activity.label}
+              <div className="flex items-center gap-2">
+                <div className={cn("min-w-0 flex-1 text-sm", expanded ? "whitespace-pre-wrap break-words" : "truncate")}>
+                  {activity.label}
+                </div>
+                {activity.progress != null ? (
+                  <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
+                    {Math.round(activity.progress)}%
+                  </span>
+                ) : null}
+              </div>
+              <div className="mt-1.5">
+                <ActivityBar activity={activity} />
               </div>
               {activity.detail ? (
                 <div
                   className={cn(
-                    "font-mono text-[11px] text-muted-foreground",
-                    expanded ? "mt-0.5 whitespace-pre-wrap break-all" : "truncate",
+                    "mt-1 font-mono text-[11px] text-muted-foreground",
+                    expanded ? "whitespace-pre-wrap break-all" : "truncate",
                   )}
                 >
                   {activity.detail}
@@ -69,5 +83,21 @@ export function ActivityMeter() {
         })}
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+function ActivityBar({ activity }: { activity: Activity }) {
+  const progress = activity.progress;
+  return (
+    <span className="relative block h-1 min-w-0 flex-1 overflow-hidden rounded-full bg-muted">
+      {progress != null ? (
+        <span
+          className="absolute inset-y-0 left-0 rounded-full bg-foreground/75 transition-[width] duration-150"
+          style={{ width: `${progress}%` }}
+        />
+      ) : (
+        <span className="activity-indeterminate absolute inset-y-0 left-0 rounded-full bg-foreground/75" />
+      )}
+    </span>
   );
 }
