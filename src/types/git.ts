@@ -103,10 +103,22 @@ export interface TerminalOption {
 
 export type AvatarProvider = "dicebear";
 
+export type PanelLayout = Record<string, number>;
+
+export type PanelLayoutId = "historyShell" | "history" | "historyDetails" | "changes";
+
+export interface PanelLayouts {
+  historyShell: PanelLayout;
+  history: PanelLayout;
+  historyDetails: PanelLayout;
+  changes: PanelLayout;
+}
+
 export interface AppPrefs {
   terminalId: string;
   avatarProvider: AvatarProvider;
   sidebarOrder: string[];
+  panelLayouts: PanelLayouts;
 }
 
 export interface RemoteInfo {

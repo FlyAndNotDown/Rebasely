@@ -1,5 +1,5 @@
-import { useEffect, useLayoutEffect, useState } from "react";
-import { useGroupRef, type Layout } from "react-resizable-panels";
+import { useEffect, useRef, useState } from "react";
+import { type Layout } from "react-resizable-panels";
 import { ChangesPane } from "@/components/changes-pane";
 import { CommitFiles } from "@/components/commit-files";
 import { DiffViewer } from "@/components/diff-viewer";
@@ -13,66 +13,82 @@ import {
 } from "@/components/ui/resizable";
 import { cn } from "@/lib/utils";
 import { useGit } from "@/state/git-context";
-
-const HISTORY_LAYOUT: Layout = { "history-commits": 67, "history-details": 33 };
-const HISTORY_SHELL_LAYOUT: Layout = { "history-branches": 20, "history-main": 80 };
-let historyLayout: Layout = HISTORY_LAYOUT;
-let historyShellLayout: Layout = HISTORY_SHELL_LAYOUT;
+import type { PanelLayoutId } from "@/types/git";
 
 function HistoryWorkspace() {
-  const shellRef = useGroupRef();
-  const groupRef = useGroupRef();
-
-  useLayoutEffect(() => {
-    const frame = requestAnimationFrame(() => {
-      shellRef.current?.setLayout(historyShellLayout);
-      groupRef.current?.setLayout(historyLayout);
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [groupRef, shellRef]);
+  const { prefs, updatePanelLayout } = useGit();
+  const layouts = useRef(prefs.panelLayouts);
+  const persist = (id: PanelLayoutId) => (layout: Layout, meta: { isUserInteraction: boolean }) => {
+    if (meta.isUserInteraction) updatePanelLayout(id, layout);
+  };
 
   return (
     <ResizablePanelGroup
       id="history-shell"
-      groupRef={shellRef}
       orientation="horizontal"
       className="min-h-0 flex-1"
-      defaultLayout={HISTORY_SHELL_LAYOUT}
-      onLayoutChanged={(layout, meta) => {
-        if (meta.isUserInteraction) historyShellLayout = layout;
-      }}
+      defaultLayout={layouts.current.historyShell}
+      onLayoutChanged={persist("historyShell")}
     >
-      <ResizablePanel id="history-branches" defaultSize="20%" minSize="14%" maxSize="34%">
+      <ResizablePanel id="history-branches" defaultSize="15%" minSize="12%" maxSize="32%">
         <HistoryBranches />
       </ResizablePanel>
       <ResizableHandle />
-      <ResizablePanel id="history-main" defaultSize="80%" minSize="50%">
+      <ResizablePanel id="history-main" defaultSize="85%" minSize="50%">
         <ResizablePanelGroup
           id="history"
-          groupRef={groupRef}
           orientation="vertical"
           className="min-h-0"
-          defaultLayout={HISTORY_LAYOUT}
-          onLayoutChanged={(layout, meta) => {
-            if (meta.isUserInteraction) historyLayout = layout;
-          }}
+          defaultLayout={layouts.current.history}
+          onLayoutChanged={persist("history")}
         >
           <ResizablePanel id="history-commits" defaultSize="67%" minSize="28%">
             <HistoryPane />
           </ResizablePanel>
           <ResizableHandle withHandle />
           <ResizablePanel id="history-details" defaultSize="33%" minSize="18%">
-            <ResizablePanelGroup orientation="horizontal" className="min-h-0">
-              <ResizablePanel defaultSize="34%" minSize="20%" maxSize="55%">
+            <ResizablePanelGroup
+              id="history-details"
+              orientation="horizontal"
+              className="min-h-0"
+              defaultLayout={layouts.current.historyDetails}
+              onLayoutChanged={persist("historyDetails")}
+            >
+              <ResizablePanel id="history-files" defaultSize="34%" minSize="20%" maxSize="55%">
                 <CommitFiles />
               </ResizablePanel>
               <ResizableHandle />
-              <ResizablePanel defaultSize="66%" minSize="30%">
+              <ResizablePanel id="history-diff" defaultSize="66%" minSize="30%">
                 <DiffViewer />
               </ResizablePanel>
             </ResizablePanelGroup>
           </ResizablePanel>
         </ResizablePanelGroup>
+      </ResizablePanel>
+    </ResizablePanelGroup>
+  );
+}
+
+function ChangesWorkspace() {
+  const { prefs, updatePanelLayout } = useGit();
+  const layouts = useRef(prefs.panelLayouts);
+
+  return (
+    <ResizablePanelGroup
+      id="changes"
+      orientation="horizontal"
+      className="min-h-0 flex-1"
+      defaultLayout={layouts.current.changes}
+      onLayoutChanged={(layout, meta) => {
+        if (meta.isUserInteraction) updatePanelLayout("changes", layout);
+      }}
+    >
+      <ResizablePanel id="changes-files" defaultSize="36%" minSize="24%" maxSize="52%">
+        <ChangesPane />
+      </ResizablePanel>
+      <ResizableHandle />
+      <ResizablePanel id="changes-diff" defaultSize="64%" minSize="36%">
+        <DiffViewer />
       </ResizablePanel>
     </ResizablePanelGroup>
   );
@@ -114,15 +130,7 @@ export function Workspace() {
         </div>
       ) : null}
       <div className={cn("min-h-0 flex-1", view === "changes" ? "flex" : "hidden")}>
-        <ResizablePanelGroup orientation="horizontal" className="min-h-0 flex-1">
-          <ResizablePanel defaultSize="36%" minSize="24%" maxSize="52%">
-            <ChangesPane />
-          </ResizablePanel>
-          <ResizableHandle />
-          <ResizablePanel defaultSize="64%" minSize="36%">
-            <DiffViewer />
-          </ResizablePanel>
-        </ResizablePanelGroup>
+        <ChangesWorkspace />
       </div>
     </div>
   );

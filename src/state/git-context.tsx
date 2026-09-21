@@ -13,11 +13,13 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 import { toast } from "sonner";
 import { emptyBinaryDiff, errorMessage, expandHistoryRevs, gitApi } from "@/lib/git";
 import { pathSegments, sameRepoPath } from "@/lib/format";
-import { defaultPrefs, normalizePrefs } from "@/lib/prefs";
+import { defaultPrefs, normalizePrefs, sameLayout } from "@/lib/prefs";
 import type {
   Activity,
   AppPrefs,
   AppSession,
+  PanelLayout,
+  PanelLayoutId,
   CommitDetails,
   CommitSummary,
   FileDiff,
@@ -239,6 +241,7 @@ interface GitContextValue {
   stashPop: (index: number) => Promise<void>;
   stashDrop: (index: number) => Promise<void>;
   updatePrefs: (prefs: AppPrefs) => Promise<AppPrefs>;
+  updatePanelLayout: (id: PanelLayoutId, layout: PanelLayout) => void;
 }
 
 const GitContext = createContext<GitContextValue | null>(null);
@@ -253,6 +256,8 @@ export function GitProvider({ children }: { children: ReactNode }) {
   const [activities, setActivities] = useState<Activity[]>([]);
   const [prefs, setPrefs] = useState<AppPrefs>(defaultPrefs);
   const restoredRef = useRef(false);
+  const prefsRef = useRef(prefs);
+  const persistPrefsTimer = useRef<number | null>(null);
 
   const tabsRef = useRef(tabs);
   const sessionsRef = useRef(sessions);
@@ -363,7 +368,9 @@ export function GitProvider({ children }: { children: ReactNode }) {
           gitApi.loadSession(),
           gitApi.getPrefs().catch(() => defaultPrefs),
         ]);
-        setPrefs(normalizePrefs(loadedPrefs));
+        const nextPrefs = normalizePrefs(loadedPrefs);
+        prefsRef.current = nextPrefs;
+        setPrefs(nextPrefs);
         setRecents(recentsList);
         restoreSession(session, recentsList);
       } catch (error) {
@@ -374,6 +381,25 @@ export function GitProvider({ children }: { children: ReactNode }) {
       }
     })();
   }, [restoreSession]);
+
+  useEffect(() => {
+    const flushPendingPrefs = () => {
+      if (persistPrefsTimer.current === null) return;
+      window.clearTimeout(persistPrefsTimer.current);
+      persistPrefsTimer.current = null;
+      void gitApi.setPrefs(prefsRef.current).catch(() => undefined);
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") flushPendingPrefs();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("beforeunload", flushPendingPrefs);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("beforeunload", flushPendingPrefs);
+      flushPendingPrefs();
+    };
+  }, []);
 
   useEffect(() => {
     if (!restoredRef.current) return;
@@ -1237,10 +1263,43 @@ export function GitProvider({ children }: { children: ReactNode }) {
     [runMutation],
   );
 
-  const updatePrefs = useCallback(async (next: AppPrefs) => {
+  const flushPrefs = useCallback(async (next: AppPrefs) => {
+    if (persistPrefsTimer.current !== null) {
+      window.clearTimeout(persistPrefsTimer.current);
+      persistPrefsTimer.current = null;
+    }
     const saved = normalizePrefs(await gitApi.setPrefs(next));
+    prefsRef.current = saved;
     setPrefs(saved);
     return saved;
+  }, []);
+
+  const updatePrefs = useCallback(
+    async (next: AppPrefs) => {
+      return flushPrefs(
+        normalizePrefs({
+          ...prefsRef.current,
+          ...next,
+          panelLayouts: prefsRef.current.panelLayouts,
+        }),
+      );
+    },
+    [flushPrefs],
+  );
+
+  const updatePanelLayout = useCallback((id: PanelLayoutId, layout: PanelLayout) => {
+    const current = prefsRef.current;
+    if (sameLayout(current.panelLayouts[id], layout)) return;
+    prefsRef.current = normalizePrefs({
+      ...current,
+      panelLayouts: { ...current.panelLayouts, [id]: layout },
+    });
+    if (persistPrefsTimer.current !== null) window.clearTimeout(persistPrefsTimer.current);
+    persistPrefsTimer.current = window.setTimeout(() => {
+      persistPrefsTimer.current = null;
+      const next = prefsRef.current;
+      void gitApi.setPrefs(next).then(() => setPrefs(next)).catch(() => undefined);
+    }, 400);
   }, []);
 
   const value = useMemo<GitContextValue>(
@@ -1303,6 +1362,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       stashPop,
       stashDrop,
       updatePrefs,
+      updatePanelLayout,
     }),
     [
       recents,
@@ -1351,6 +1411,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       stashPop,
       stashDrop,
       updatePrefs,
+      updatePanelLayout,
     ],
   );
 

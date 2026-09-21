@@ -1,9 +1,23 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
 
 use crate::error::AppResult;
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PanelLayouts {
+    #[serde(default)]
+    pub history_shell: HashMap<String, f64>,
+    #[serde(default)]
+    pub history: HashMap<String, f64>,
+    #[serde(default)]
+    pub history_details: HashMap<String, f64>,
+    #[serde(default)]
+    pub changes: HashMap<String, f64>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -14,6 +28,8 @@ pub struct AppPrefs {
     pub avatar_provider: String,
     #[serde(default = "default_sidebar_order")]
     pub sidebar_order: Vec<String>,
+    #[serde(default)]
+    pub panel_layouts: PanelLayouts,
 }
 
 fn default_terminal_id() -> String {
@@ -38,6 +54,7 @@ impl Default for AppPrefs {
             terminal_id: default_terminal_id(),
             avatar_provider: default_avatar_provider(),
             sidebar_order: default_sidebar_order(),
+            panel_layouts: PanelLayouts::default(),
         }
     }
 }

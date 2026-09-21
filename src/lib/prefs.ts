@@ -1,11 +1,19 @@
-import type { AppPrefs } from "@/types/git";
+import type { AppPrefs, PanelLayout, PanelLayouts } from "@/types/git";
 
 export const SIDEBAR_VIEWS = ["changes", "history", "stash"] as const;
+
+export const DEFAULT_PANEL_LAYOUTS: PanelLayouts = {
+  historyShell: { "history-branches": 15, "history-main": 85 },
+  history: { "history-commits": 67, "history-details": 33 },
+  historyDetails: { "history-files": 34, "history-diff": 66 },
+  changes: { "changes-files": 36, "changes-diff": 64 },
+};
 
 export const defaultPrefs: AppPrefs = {
   terminalId: "auto",
   avatarProvider: "dicebear",
   sidebarOrder: [...SIDEBAR_VIEWS],
+  panelLayouts: { ...DEFAULT_PANEL_LAYOUTS },
 };
 
 export function normalizeSidebarOrder(order?: string[] | null): string[] {
@@ -20,10 +28,52 @@ export function normalizeSidebarOrder(order?: string[] | null): string[] {
   return next;
 }
 
+export function compactLayout(layout: PanelLayout): PanelLayout {
+  const next: PanelLayout = {};
+  for (const [key, value] of Object.entries(layout)) {
+    next[key] = Math.round(value * 100) / 100;
+  }
+  return next;
+}
+
+export function sameLayout(left?: PanelLayout | null, right?: PanelLayout | null): boolean {
+  const a = compactLayout(left ?? {});
+  const b = compactLayout(right ?? {});
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+  for (const key of keys) {
+    if (a[key] !== b[key]) return false;
+  }
+  return true;
+}
+
+export function normalizeLayout(value: PanelLayout | null | undefined, fallback: PanelLayout): PanelLayout {
+  if (!value) return { ...fallback };
+  const next: PanelLayout = {};
+  let total = 0;
+  for (const key of Object.keys(fallback)) {
+    const n = Number(value[key]);
+    if (!Number.isFinite(n) || n <= 0) return { ...fallback };
+    next[key] = n;
+    total += n;
+  }
+  if (Math.abs(total - 100) > 8) return { ...fallback };
+  return compactLayout(next);
+}
+
+export function normalizePanelLayouts(value?: Partial<PanelLayouts> | null): PanelLayouts {
+  return {
+    historyShell: normalizeLayout(value?.historyShell, DEFAULT_PANEL_LAYOUTS.historyShell),
+    history: normalizeLayout(value?.history, DEFAULT_PANEL_LAYOUTS.history),
+    historyDetails: normalizeLayout(value?.historyDetails, DEFAULT_PANEL_LAYOUTS.historyDetails),
+    changes: normalizeLayout(value?.changes, DEFAULT_PANEL_LAYOUTS.changes),
+  };
+}
+
 export function normalizePrefs(prefs: Partial<AppPrefs> | null | undefined): AppPrefs {
   return {
     terminalId: prefs?.terminalId || "auto",
     avatarProvider: "dicebear",
     sidebarOrder: normalizeSidebarOrder(prefs?.sidebarOrder),
+    panelLayouts: normalizePanelLayouts(prefs?.panelLayouts),
   };
 }
