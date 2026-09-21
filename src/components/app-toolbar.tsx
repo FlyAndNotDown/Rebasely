@@ -3,6 +3,7 @@ import {
   ArrowDownToLineIcon,
   ArrowUpFromLineIcon,
   ChevronDownIcon,
+  FileInputIcon,
   RefreshCwIcon,
   Settings2Icon,
 } from "lucide-react";
@@ -26,7 +27,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useGit } from "@/state/git-context";
 
 export function AppToolbar() {
-  const { snapshot, fetchRemote, pullRemote, pushRemote } = useGit();
+  const { snapshot, fetchRemote, pullRemote, pushRemote, applyPatch } = useGit();
   const [repoSettingsOpen, setRepoSettingsOpen] = useState(false);
   const [forcePushOpen, setForcePushOpen] = useState(false);
   if (!snapshot) return null;
@@ -74,6 +75,9 @@ export function AppToolbar() {
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
+        <ToolbarIcon label="Apply patch" onClick={() => void applyPatch()}>
+          <FileInputIcon />
+        </ToolbarIcon>
         <span className="mx-0.5 h-4 w-px bg-border" />
         <ToolbarIcon label="Repository settings" onClick={() => setRepoSettingsOpen(true)}>
           <Settings2Icon />

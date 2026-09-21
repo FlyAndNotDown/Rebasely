@@ -1983,6 +1983,32 @@ pub fn write_commit_patch(repo: &Repository, spec: &str, dest: &str) -> AppResul
     Ok(())
 }
 
+pub fn apply_patch(repo: &mut Repository, patch_path: &str) -> AppResult<WorkspaceSnapshot> {
+    let path = PathBuf::from(patch_path.trim());
+    if !path.is_file() {
+        return Err(AppError::msg("Patch file was not found"));
+    }
+    let bytes = fs::read(&path)?;
+    if bytes.is_empty() {
+        return Err(AppError::msg("Patch file is empty"));
+    }
+    let root = workdir(repo)?;
+    let path = path.to_string_lossy().into_owned();
+    if looks_like_mbox(&bytes) {
+        ensure_clean_for_replay(repo)?;
+        run_git_stdout(root, &["am", "--3way", &path])?;
+    } else {
+        run_git_stdout(root, &["apply", "--3way", "--", &path])?;
+    }
+    snapshot(repo)
+}
+
+fn looks_like_mbox(bytes: &[u8]) -> bool {
+    let preview = String::from_utf8_lossy(&bytes[..bytes.len().min(2048)]);
+    let start = preview.trim_start_matches('\u{feff}');
+    start.starts_with("From ") || preview.contains("\nFrom ")
+}
+
 fn peel_commit<'repo>(repo: &'repo Repository, spec: &str) -> AppResult<git2::Commit<'repo>> {
     let spec = spec.trim();
     if spec.is_empty() {

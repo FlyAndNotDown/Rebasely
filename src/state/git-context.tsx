@@ -232,6 +232,7 @@ interface GitContextValue {
   revertCommit: (oid: string) => Promise<boolean>;
   cherryPickCommit: (oid: string) => Promise<boolean>;
   createPatch: (commit: CommitSummary) => Promise<void>;
+  applyPatch: () => Promise<void>;
   addRemote: (name: string, url: string) => Promise<boolean>;
   stashSave: (message: string, includeUntracked: boolean) => Promise<void>;
   stashApply: (index: number) => Promise<void>;
@@ -1158,6 +1159,21 @@ export function GitProvider({ children }: { children: ReactNode }) {
     [activeRepoPath, runActivity],
   );
 
+  const applyPatch = useCallback(async () => {
+    const selected = await open({
+      multiple: false,
+      title: "Apply patch",
+      filters: [{ name: "Patch", extensions: ["patch", "diff"] }],
+    });
+    if (typeof selected !== "string" || !selected) return;
+    const ok = await runMutation(
+      "Applying patch",
+      (repoPath) => gitApi.applyPatch(repoPath, selected),
+      "Applied patch",
+    );
+    if (!ok) await refreshAfterReplay();
+  }, [refreshAfterReplay, runMutation]);
+
   const addRemote = useCallback(
     async (name: string, url: string) => {
       const added = await runMutation(
@@ -1280,6 +1296,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       revertCommit,
       cherryPickCommit,
       createPatch,
+      applyPatch,
       addRemote,
       stashSave,
       stashApply,
@@ -1327,6 +1344,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       revertCommit,
       cherryPickCommit,
       createPatch,
+      applyPatch,
       addRemote,
       stashSave,
       stashApply,

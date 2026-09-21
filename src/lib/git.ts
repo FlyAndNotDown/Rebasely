@@ -105,6 +105,8 @@ export const gitApi = {
     invoke<WorkspaceSnapshot>("cherry_pick_commit", { repoPath, oid }),
   writeCommitPatch: (repoPath: string, oid: string, dest: string) =>
     invoke<void>("write_commit_patch", { repoPath, oid, dest }),
+  applyPatch: (repoPath: string, patchPath: string) =>
+    invoke<WorkspaceSnapshot>("apply_patch", { repoPath, patchPath }),
   stashSave: (repoPath: string, message: string, includeUntracked: boolean) =>
     invoke<WorkspaceSnapshot>("stash_save", { repoPath, message, includeUntracked }),
   stashApply: (repoPath: string, index: number) =>

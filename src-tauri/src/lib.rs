@@ -261,6 +261,11 @@ async fn write_commit_patch(repo_path: String, oid: String, dest: String) -> App
 }
 
 #[tauri::command]
+async fn apply_patch(repo_path: String, patch_path: String) -> AppResult<WorkspaceSnapshot> {
+    with_repo_async(repo_path, move |repo| git::apply_patch(repo, &patch_path)).await
+}
+
+#[tauri::command]
 async fn add_remote(repo_path: String, name: String, url: String) -> AppResult<WorkspaceSnapshot> {
     with_repo_async(repo_path, move |repo| {
         git::add_remote(repo, &name, &url)?;
@@ -485,6 +490,7 @@ pub fn run() {
             revert_commit,
             cherry_pick_commit,
             write_commit_patch,
+            apply_patch,
             add_remote,
             probe_remote_url,
             set_remote_url,
