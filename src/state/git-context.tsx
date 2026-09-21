@@ -11,7 +11,7 @@ import {
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { toast } from "sonner";
-import { emptyBinaryDiff, errorMessage, gitApi } from "@/lib/git";
+import { emptyBinaryDiff, errorMessage, expandHistoryRevs, gitApi } from "@/lib/git";
 import { pathSegments, sameRepoPath } from "@/lib/format";
 import { defaultPrefs, normalizePrefs } from "@/lib/prefs";
 import type {
@@ -52,6 +52,7 @@ interface RepoSession {
   commitsLoaded: boolean;
   commitsHasMore: boolean;
   commitsLoading: boolean;
+  historyRevs: string[];
   view: View;
   changeSelection: ChangeSelection | null;
   historySelection: HistorySelection | null;
@@ -64,7 +65,7 @@ function repoTabId(path: string): string {
   return `repo:${path}`;
 }
 
-function emptySession(path: string): RepoSession {
+function emptySession(path: string, historyRevs: string[] = []): RepoSession {
   return {
     path,
     snapshot: null,
@@ -72,6 +73,7 @@ function emptySession(path: string): RepoSession {
     commitsLoaded: false,
     commitsHasMore: true,
     commitsLoading: false,
+    historyRevs,
     view: "changes",
     changeSelection: null,
     historySelection: null,
@@ -79,6 +81,19 @@ function emptySession(path: string): RepoSession {
     historyDiff: null,
     commitDetails: null,
   };
+}
+
+function lookupHistoryRevs(map: Record<string, string[]>, path: string): string[] {
+  if (Object.prototype.hasOwnProperty.call(map, path)) return map[path] ?? [];
+  const key = Object.keys(map).find((item) => sameRepoPath(item, path));
+  return key ? (map[key] ?? []) : [];
+}
+
+function sameRevs(left: string[], right: string[]) {
+  if (left.length !== right.length) return false;
+  const a = [...left].sort();
+  const b = [...right].sort();
+  return a.every((value, index) => value === b[index]);
 }
 
 function progressFromGitLine(line: string): number | undefined {
@@ -150,6 +165,7 @@ interface GitContextValue {
   commits: CommitSummary[];
   commitsHasMore: boolean;
   commitsLoading: boolean;
+  historyRevs: string[];
   view: View;
   changeSelection: ChangeSelection | null;
   historySelection: HistorySelection | null;
@@ -172,6 +188,7 @@ interface GitContextValue {
   ensureBranches: () => Promise<void>;
   ensureHistory: () => Promise<void>;
   loadMoreCommits: () => Promise<void>;
+  setHistoryRevs: (revs: string[]) => void;
   forgetRecent: (path: string) => Promise<void>;
   closeRepo: () => void;
   selectChange: (path: string, staged: boolean) => Promise<void>;
@@ -186,6 +203,7 @@ interface GitContextValue {
   pullRemote: () => Promise<void>;
   pushRemote: (force?: boolean) => Promise<void>;
   createBranch: (name: string, switchTo: boolean) => Promise<void>;
+  addRemote: (name: string, url: string) => Promise<boolean>;
   stashSave: (message: string, includeUntracked: boolean) => Promise<void>;
   stashApply: (index: number) => Promise<void>;
   stashPop: (index: number) => Promise<void>;
@@ -210,6 +228,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
   const sessionsRef = useRef(sessions);
   const activeTabIdRef = useRef(activeTabId);
   const openingPathsRef = useRef(new Set<string>());
+  const historyRevsMapRef = useRef<Record<string, string[]>>({});
   tabsRef.current = tabs;
   sessionsRef.current = sessions;
   activeTabIdRef.current = activeTabId;
@@ -258,20 +277,27 @@ export function GitProvider({ children }: { children: ReactNode }) {
       .map((tab) => tab.path);
     const activeTab = nextTabs.find((tab) => tab.id === nextActiveId);
     const active = activeTab?.kind === "repo" ? activeTab.path : "welcome";
-    void gitApi.saveSession({ openPaths, active }).catch(() => undefined);
+    const historyRevs = { ...historyRevsMapRef.current };
+    for (const item of Object.values(sessionsRef.current)) {
+      if (item.path) historyRevs[item.path] = item.historyRevs;
+    }
+    historyRevsMapRef.current = historyRevs;
+    void gitApi.saveSession({ openPaths, active, historyRevs }).catch(() => undefined);
   }, []);
 
   const restoreSession = useCallback((session: AppSession, recentsList: RecentRepo[]) => {
     const nextTabs: AppTab[] = [{ id: WELCOME_TAB_ID, kind: "welcome" }];
     const nextSessions: Record<string, RepoSession> = {};
     let activeId = WELCOME_TAB_ID;
+    const historyRevsMap = session.historyRevs ?? {};
+    historyRevsMapRef.current = historyRevsMap;
 
     for (const path of session.openPaths) {
       const recent = recentsList.find((item) => sameRepoPath(item.path, path));
       const tab = tabFromPath(path, recent?.name);
       if (nextTabs.some((item) => item.id === tab.id)) continue;
       nextTabs.push(tab);
-      nextSessions[tab.id] = emptySession(path);
+      nextSessions[tab.id] = emptySession(path, lookupHistoryRevs(historyRevsMap, path));
       if (session.active !== "welcome" && sameRepoPath(session.active, path)) {
         activeId = tab.id;
       }
@@ -373,7 +399,14 @@ export function GitProvider({ children }: { children: ReactNode }) {
         setSessions((current) => {
           const next = {
             ...current,
-            [tabId]: { ...(current[tabId] ?? emptySession(snapshot.repo.path)), snapshot },
+            [tabId]: {
+              ...(current[tabId] ??
+                emptySession(
+                  snapshot.repo.path,
+                  lookupHistoryRevs(historyRevsMapRef.current, snapshot.repo.path),
+                )),
+              snapshot,
+            },
           };
           sessionsRef.current = next;
           return next;
@@ -422,7 +455,14 @@ export function GitProvider({ children }: { children: ReactNode }) {
       setSessions((current) => {
         const next = {
           ...current,
-          [tab.id]: { ...(current[tab.id] ?? emptySession(snapshot.repo.path)), snapshot },
+          [tab.id]: {
+            ...(current[tab.id] ??
+              emptySession(
+                snapshot.repo.path,
+                lookupHistoryRevs(historyRevsMapRef.current, snapshot.repo.path),
+              )),
+            snapshot,
+          },
         };
         sessionsRef.current = next;
         return next;
@@ -531,7 +571,13 @@ export function GitProvider({ children }: { children: ReactNode }) {
     patchSession(tabId, { commitsLoading: true });
     try {
       const commits = await runActivity("Loading history", current.snapshot?.repo.name, () =>
-        gitApi.getCommits(repoPath, COMMIT_PAGE, 0),
+        gitApi.getCommits(
+          repoPath,
+          COMMIT_PAGE,
+          0,
+          undefined,
+          expandHistoryRevs(current.historyRevs, current.snapshot?.branches.local),
+        ),
       );
       patchSession(tabId, {
         commits,
@@ -557,7 +603,13 @@ export function GitProvider({ children }: { children: ReactNode }) {
     patchSession(tabId, { commitsLoading: true });
     try {
       const more = await runActivity("Loading earlier history", current.snapshot?.repo.name, () =>
-        gitApi.getCommits(repoPath, COMMIT_PAGE, current.commits.length),
+        gitApi.getCommits(
+          repoPath,
+          COMMIT_PAGE,
+          current.commits.length,
+          undefined,
+          expandHistoryRevs(current.historyRevs, current.snapshot?.branches.local),
+        ),
       );
       patchSession(tabId, {
         commits: [...current.commits, ...more],
@@ -569,6 +621,32 @@ export function GitProvider({ children }: { children: ReactNode }) {
       toast.error(errorMessage(error));
     }
   }, [activeRepoPath, patchSession, runActivity]);
+
+  const setHistoryRevs = useCallback(
+    (revs: string[]) => {
+      const tabId = activeTabIdRef.current;
+      const current = sessionsRef.current[tabId];
+      const next = [...new Set(revs.map((rev) => rev.trim()).filter(Boolean))];
+      if (!current || sameRevs(current.historyRevs, next)) return;
+      historyInflightRef.current.delete(tabId);
+      historyRevsMapRef.current = { ...historyRevsMapRef.current, [current.path]: next };
+      patchSession(tabId, {
+        historyRevs: next,
+        commits: [],
+        commitsLoaded: false,
+        commitsHasMore: true,
+        commitsLoading: false,
+        historySelection: null,
+        historyDiff: null,
+        commitDetails: null,
+      });
+      persistSession(tabsRef.current, activeTabIdRef.current);
+      if (sessionsRef.current[tabId]?.view === "history") {
+        void ensureHistory();
+      }
+    },
+    [ensureHistory, patchSession, persistSession],
+  );
 
   const refreshRepo = useCallback(
     async (path: string) => {
@@ -618,7 +696,13 @@ export function GitProvider({ children }: { children: ReactNode }) {
             : {}),
         });
         if (headChanged && current?.view === "history") {
-          const commits = await gitApi.getCommits(path, COMMIT_PAGE, 0);
+          const commits = await gitApi.getCommits(
+            path,
+            COMMIT_PAGE,
+            0,
+            undefined,
+            expandHistoryRevs(current.historyRevs, current.snapshot?.branches.local),
+          );
           patchSession(tab.id, {
             commits,
             commitsLoaded: true,
@@ -917,6 +1001,32 @@ export function GitProvider({ children }: { children: ReactNode }) {
     [runMutation],
   );
 
+  const addRemote = useCallback(
+    async (name: string, url: string) => {
+      const added = await runMutation(
+        `Adding ${name}`,
+        (repoPath) => gitApi.addRemote(repoPath, name, url),
+        `Added ${name}`,
+      );
+      if (!added) return false;
+      await runMutation(
+        `Fetching ${name}`,
+        (repoPath, activityId) => gitApi.fetchRemote(repoPath, activityId, name),
+      );
+      const tabId = activeTabIdRef.current;
+      patchSession(tabId, {
+        commits: [],
+        commitsLoaded: false,
+        commitsHasMore: true,
+      });
+      if (sessionsRef.current[tabId]?.view === "history") {
+        void ensureHistory();
+      }
+      return true;
+    },
+    [ensureHistory, patchSession, runMutation],
+  );
+
   const stashSave = useCallback(
     async (message: string, includeUntracked: boolean) => {
       await runMutation(
@@ -969,6 +1079,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       commits: session?.commits ?? [],
       commitsHasMore: session?.commitsHasMore ?? true,
       commitsLoading: session?.commitsLoading ?? false,
+      historyRevs: session?.historyRevs ?? [],
       view: session?.view ?? "changes",
       changeSelection: session?.changeSelection ?? null,
       historySelection: session?.historySelection ?? null,
@@ -991,6 +1102,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       ensureBranches,
       ensureHistory,
       loadMoreCommits,
+      setHistoryRevs,
       forgetRecent,
       closeRepo,
       selectChange,
@@ -1005,6 +1117,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       pullRemote,
       pushRemote,
       createBranch,
+      addRemote,
       stashSave,
       stashApply,
       stashPop,
@@ -1032,6 +1145,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       ensureBranches,
       ensureHistory,
       loadMoreCommits,
+      setHistoryRevs,
       forgetRecent,
       closeRepo,
       selectChange,
@@ -1046,6 +1160,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       pullRemote,
       pushRemote,
       createBranch,
+      addRemote,
       stashSave,
       stashApply,
       stashPop,

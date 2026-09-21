@@ -46,6 +46,7 @@ export interface CommitSummary {
   timestamp: number;
   parents: string[];
   refs: CommitRef[];
+  onCurrentBranch: boolean;
 }
 
 export interface DiffLine {
@@ -114,6 +115,10 @@ export interface RemoteInfo {
   pushUrl: string | null;
 }
 
+export interface RemoteProbe {
+  heads: number;
+}
+
 export interface StashInfo {
   index: number;
   message: string;
@@ -145,6 +150,7 @@ export interface RecentRepo {
 export interface AppSession {
   openPaths: string[];
   active: string;
+  historyRevs?: Record<string, string[]>;
 }
 
 export type Selection =

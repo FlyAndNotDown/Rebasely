@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/context-menu";
 import { Input } from "@/components/ui/input";
 import { formatAbsoluteTime } from "@/lib/format";
-import { errorMessage, gitApi } from "@/lib/git";
+import { errorMessage, expandHistoryRevs, gitApi } from "@/lib/git";
 import { graphWidth, laneColor, layoutCommitGraph, type GraphRow } from "@/lib/commit-graph";
 import { cn } from "@/lib/utils";
 import { COMMIT_PAGE, useGit } from "@/state/git-context";
@@ -34,6 +34,7 @@ export function HistoryPane() {
     selectCommit,
     ensureHistory,
     loadMoreCommits,
+    historyRevs,
     prefs,
     snapshot,
   } = useGit();
@@ -73,7 +74,13 @@ export function HistoryPane() {
     let cancelled = false;
     setSearching(true);
     void gitApi
-      .getCommits(repoPath, COMMIT_PAGE, 0, debounced)
+      .getCommits(
+        repoPath,
+        COMMIT_PAGE,
+        0,
+        debounced,
+        expandHistoryRevs(historyRevs, snapshot?.branches.local),
+      )
       .then((items) => {
         if (cancelled) return;
         setResults(items);
@@ -88,14 +95,20 @@ export function HistoryPane() {
     return () => {
       cancelled = true;
     };
-  }, [debounced, snapshot?.repo.path]);
+  }, [debounced, historyRevs, snapshot?.repo.path]);
 
   async function loadMoreSearch() {
     const repoPath = snapshot?.repo.path;
     if (!repoPath || !debounced || searching || !searchHasMore || !results) return;
     setSearching(true);
     try {
-      const more = await gitApi.getCommits(repoPath, COMMIT_PAGE, results.length, debounced);
+      const more = await gitApi.getCommits(
+        repoPath,
+        COMMIT_PAGE,
+        results.length,
+        debounced,
+        expandHistoryRevs(historyRevs, snapshot?.branches.local),
+      );
       setResults((current) => [...(current ?? []), ...more]);
       setSearchHasMore(more.length === COMMIT_PAGE);
     } catch (error) {
@@ -221,7 +234,12 @@ function CommitRow({
           ) : null}
           <span className="flex min-w-0 flex-1 items-center gap-1.5">
             <CommitRefs refs={commit.refs ?? []} />
-            <span className="min-w-0 truncate text-sm">
+            <span
+              className={cn(
+                "min-w-0 truncate text-sm",
+                commit.onCurrentBranch === false && "text-muted-foreground/50",
+              )}
+            >
               {commit.summary || "(no message)"}
             </span>
           </span>

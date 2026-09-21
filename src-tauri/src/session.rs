@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
@@ -11,6 +12,8 @@ use crate::git::strip_verbatim_prefix;
 pub struct AppSession {
     pub open_paths: Vec<String>,
     pub active: String,
+    #[serde(default)]
+    pub history_revs: HashMap<String, Vec<String>>,
 }
 
 impl Default for AppSession {
@@ -18,6 +21,7 @@ impl Default for AppSession {
         Self {
             open_paths: Vec::new(),
             active: "welcome".to_string(),
+            history_revs: HashMap::new(),
         }
     }
 }
@@ -47,7 +51,25 @@ pub fn load_session(app: &AppHandle) -> AppResult<AppSession> {
     if session.active.is_empty() {
         session.active = "welcome".to_string();
     }
+    session.history_revs = normalize_history_revs(session.history_revs);
     Ok(session)
+}
+
+fn normalize_history_revs(map: HashMap<String, Vec<String>>) -> HashMap<String, Vec<String>> {
+    map.into_iter()
+        .filter_map(|(path, revs)| {
+            let path = strip_verbatim_prefix(&path);
+            if path.is_empty() {
+                return None;
+            }
+            let revs = revs
+                .into_iter()
+                .map(|rev| rev.trim().to_string())
+                .filter(|rev| !rev.is_empty())
+                .collect();
+            Some((path, revs))
+        })
+        .collect()
 }
 
 pub fn save_session(app: &AppHandle, mut session: AppSession) -> AppResult<AppSession> {
@@ -61,6 +83,7 @@ pub fn save_session(app: &AppHandle, mut session: AppSession) -> AppResult<AppSe
     if session.active.is_empty() {
         session.active = "welcome".to_string();
     }
+    session.history_revs = normalize_history_revs(session.history_revs);
     let path = session_path(app)?;
     fs::write(
         path,

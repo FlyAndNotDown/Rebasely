@@ -2,15 +2,31 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   AppPrefs,
   AppSession,
+  BranchInfo,
   BranchList,
   CommitDetails,
   CommitSummary,
   FileDiff,
   GitIdentity,
   RecentRepo,
+  RemoteProbe,
   TerminalOption,
   WorkspaceSnapshot,
 } from "@/types/git";
+
+export function isRemoteTrackingBranch(name: string, remotes: string[] = []) {
+  const trimmed = name.trim();
+  if (!trimmed.includes("/") || /(?:^|\/)HEAD$/i.test(trimmed)) return false;
+  return !remotes.some((remote) => remote.toLowerCase() === trimmed.toLowerCase());
+}
+
+export function expandHistoryRevs(revs: string[] | null | undefined, locals?: BranchInfo[]): string[] {
+  if (!revs?.length) return [];
+  const extra = (locals ?? [])
+    .filter((branch) => revs.includes(branch.name) && branch.upstream)
+    .map((branch) => branch.upstream as string);
+  return [...new Set([...revs, ...extra])];
+}
 
 export function emptyBinaryDiff(path: string, oldPath: string | null = null): FileDiff {
   return {
@@ -37,8 +53,14 @@ export const gitApi = {
     invoke<WorkspaceSnapshot>("open_repository", { path }),
   refreshWorkspace: (repoPath: string) =>
     invoke<WorkspaceSnapshot>("refresh_workspace", { repoPath }),
-  getCommits: (repoPath: string, limit = 80, skip = 0, query?: string) =>
-    invoke<CommitSummary[]>("get_commits", { repoPath, limit, skip, query: query || null }),
+  getCommits: (repoPath: string, limit = 80, skip = 0, query?: string, revs?: string[] | null) =>
+    invoke<CommitSummary[]>("get_commits", {
+      repoPath,
+      limit,
+      skip,
+      query: query || null,
+      rev: revs?.length ? revs : null,
+    }),
   getBranches: (repoPath: string) => invoke<BranchList>("get_branches", { repoPath }),
   getWorkdirDiff: (repoPath: string, path: string, staged: boolean) =>
     invoke<FileDiff>("get_workdir_diff", { repoPath, path, staged }),
@@ -56,8 +78,16 @@ export const gitApi = {
     invoke<WorkspaceSnapshot>("commit_changes", { repoPath, message, amend }),
   checkoutBranch: (repoPath: string, name: string) =>
     invoke<WorkspaceSnapshot>("checkout_branch", { repoPath, name }),
-  fetchRemote: (repoPath: string, activityId?: string) =>
-    invoke<WorkspaceSnapshot>("fetch_remote", { repoPath, activityId }),
+  fetchRemote: (repoPath: string, activityId?: string, remote?: string) =>
+    invoke<WorkspaceSnapshot>("fetch_remote", {
+      repoPath,
+      activityId,
+      remote: remote || null,
+    }),
+  addRemote: (repoPath: string, name: string, url: string) =>
+    invoke<WorkspaceSnapshot>("add_remote", { repoPath, name, url }),
+  probeRemoteUrl: (repoPath: string, url: string) =>
+    invoke<RemoteProbe>("probe_remote_url", { repoPath, url }),
   pullRemote: (repoPath: string, activityId?: string) =>
     invoke<WorkspaceSnapshot>("pull_remote", { repoPath, activityId }),
   pushRemote: (repoPath: string, activityId?: string, force = false) =>

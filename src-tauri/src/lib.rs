@@ -16,7 +16,9 @@ use tauri::{AppHandle, Emitter, Manager, State};
 const APP_ICON_PNG: &[u8] = include_bytes!("../icons/icon.png");
 
 use error::{AppError, AppResult};
-use git::{BranchList, CommitDetails, CommitSummary, FileDiff, GitIdentity, WorkspaceSnapshot};
+use git::{
+    BranchList, CommitDetails, CommitSummary, FileDiff, GitIdentity, RemoteProbe, WorkspaceSnapshot,
+};
 use prefs::AppPrefs;
 use recents::RecentRepo;
 use session::AppSession;
@@ -82,6 +84,7 @@ async fn get_commits(
     limit: Option<usize>,
     skip: Option<usize>,
     query: Option<String>,
+    rev: Option<Vec<String>>,
 ) -> AppResult<Vec<CommitSummary>> {
     with_repo_async(repo_path, move |repo| {
         git::commits(
@@ -89,6 +92,7 @@ async fn get_commits(
             limit.unwrap_or(80),
             skip.unwrap_or(0),
             query.as_deref(),
+            rev.as_deref().unwrap_or(&[]),
         )
     })
     .await
@@ -167,10 +171,15 @@ async fn checkout_branch(repo_path: String, name: String) -> AppResult<Workspace
 async fn fetch_remote(
     repo_path: String,
     activity_id: Option<String>,
+    remote: Option<String>,
     app: AppHandle,
 ) -> AppResult<WorkspaceSnapshot> {
     with_repo_async(repo_path, move |repo| {
-        git::fetch_remote(repo, progress_sink(&app, activity_id.as_deref()))
+        git::fetch_remote(
+            repo,
+            remote.as_deref(),
+            progress_sink(&app, activity_id.as_deref()),
+        )
     })
     .await
 }
@@ -238,6 +247,11 @@ async fn add_remote(repo_path: String, name: String, url: String) -> AppResult<W
         git::snapshot(repo)
     })
     .await
+}
+
+#[tauri::command]
+async fn probe_remote_url(repo_path: String, url: String) -> AppResult<RemoteProbe> {
+    with_repo_async(repo_path, move |repo| git::probe_remote_url(repo, &url)).await
 }
 
 #[tauri::command]
@@ -449,6 +463,7 @@ pub fn run() {
             push_remote,
             create_branch,
             add_remote,
+            probe_remote_url,
             set_remote_url,
             delete_remote,
             stash_save,

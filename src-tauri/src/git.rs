@@ -57,6 +57,7 @@ pub struct CommitSummary {
     pub timestamp: i64,
     pub parents: Vec<String>,
     pub refs: Vec<CommitRefLabel>,
+    pub on_current_branch: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -408,9 +409,13 @@ fn status_from_git(root: &Path) -> AppResult<StatusSnapshot> {
 
 pub fn fetch_remote(
     repo: &mut Repository,
+    remote: Option<&str>,
     on_progress: impl FnMut(&str) + Send,
 ) -> AppResult<WorkspaceSnapshot> {
-    run_git_ok_progress(workdir(repo)?, &["fetch", "--progress"], on_progress)?;
+    match remote.map(str::trim).filter(|name| !name.is_empty()) {
+        Some(name) => run_git_ok_progress(workdir(repo)?, &["fetch", "--progress", name], on_progress)?,
+        None => run_git_ok_progress(workdir(repo)?, &["fetch", "--progress"], on_progress)?,
+    }
     snapshot(repo)
 }
 
@@ -992,6 +997,7 @@ fn summarize_oid(repo: &Repository, oid: Oid) -> AppResult<CommitSummary> {
         timestamp: commit.time().seconds(),
         parents: commit.parent_ids().map(|id| id.to_string()).collect(),
         refs: Vec::new(),
+        on_current_branch: true,
     })
 }
 
@@ -1000,34 +1006,78 @@ pub fn commits(
     limit: usize,
     skip: usize,
     query: Option<&str>,
+    revs: &[String],
 ) -> AppResult<Vec<CommitSummary>> {
     let query = query.map(str::trim).filter(|value| !value.is_empty());
+    let revs = normalize_revs(revs);
     if let Some(query) = query {
-        return search_commits(repo, limit, skip, query);
+        return search_commits(repo, limit, skip, query, &revs);
     }
     if let Ok(root) = workdir(repo) {
-        let n = format!("-n{limit}");
-        let s = format!("--skip={skip}");
-        if let Ok(stdout) = run_git_stdout(
-            root,
-            &[
-                "-c",
-                "log.showSignature=false",
-                "log",
-                "--topo-order",
-                &n,
-                &s,
-                "--pretty=format:%H%x00%h%x00%s%x00%an%x00%ae%x00%at%x00%P",
-            ],
-        ) {
+        let args = git_log_args(
+            limit,
+            skip,
+            &revs,
+            &["-c", "log.showSignature=false", "log", "--topo-order"],
+        );
+        let argv: Vec<&str> = args.iter().map(String::as_str).collect();
+        if let Ok(stdout) = run_git_stdout(root, &argv) {
             let mut items = parse_git_log(&stdout)?;
             decorate_commits(repo, &mut items);
             return Ok(items);
         }
     }
-    let mut items = commits_from_revwalk(repo, limit, skip)?;
+    let mut items = commits_from_revwalk(repo, limit, skip, &revs)?;
     decorate_commits(repo, &mut items);
     Ok(items)
+}
+
+fn normalize_revs(revs: &[String]) -> Vec<String> {
+    revs
+        .iter()
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_string())
+        .collect()
+}
+
+fn push_all_branch_tips(args: &mut Vec<String>) {
+    if let Some(index) = args.iter().position(|arg| arg == "log") {
+        args.insert(index + 1, "--branches".to_string());
+        args.insert(index + 2, "--remotes".to_string());
+    } else {
+        args.push("--branches".to_string());
+        args.push("--remotes".to_string());
+    }
+}
+
+fn git_log_args(limit: usize, skip: usize, revs: &[String], prefix: &[&str]) -> Vec<String> {
+    let mut args: Vec<String> = prefix.iter().map(|value| (*value).to_string()).collect();
+    if revs.is_empty() {
+        push_all_branch_tips(&mut args);
+    }
+    args.push(format!("-n{limit}"));
+    args.push(format!("--skip={skip}"));
+    args.push("--pretty=format:%H%x00%h%x00%s%x00%an%x00%ae%x00%at%x00%P".to_string());
+    args.extend(revs.iter().cloned());
+    args
+}
+
+fn git_search_log_args(revs: &[String]) -> Vec<String> {
+    let mut args = vec![
+        "-c".to_string(),
+        "log.showSignature=false".to_string(),
+        "-c".to_string(),
+        "i18n.logOutputEncoding=utf-8".to_string(),
+        "log".to_string(),
+    ];
+    if revs.is_empty() {
+        args.push("--branches".to_string());
+        args.push("--remotes".to_string());
+    }
+    args.push("--pretty=format:%H%x00%h%x00%s%x00%an%x00%ae%x00%at%x00%P".to_string());
+    args.extend(revs.iter().cloned());
+    args
 }
 
 fn search_commits(
@@ -1035,6 +1085,7 @@ fn search_commits(
     limit: usize,
     skip: usize,
     query: &str,
+    revs: &[String],
 ) -> AppResult<Vec<CommitSummary>> {
     let needle = query.to_lowercase();
     let labels = collect_ref_labels(repo);
@@ -1042,17 +1093,9 @@ fn search_commits(
     let mut skipped = 0usize;
 
     if let Ok(root) = workdir(repo) {
-        let mut child = spawn_git_stdout(
-            root,
-            &[
-                "-c",
-                "log.showSignature=false",
-                "-c",
-                "i18n.logOutputEncoding=utf-8",
-                "log",
-                "--pretty=format:%H%x00%h%x00%s%x00%an%x00%ae%x00%at%x00%P",
-            ],
-        )?;
+        let args = git_search_log_args(revs);
+        let argv: Vec<&str> = args.iter().map(String::as_str).collect();
+        let mut child = spawn_git_stdout(root, &argv)?;
         if let Some(stdout) = child.stdout.take() {
             let mut reader = BufReader::new(stdout);
             let mut record = Vec::new();
@@ -1078,6 +1121,7 @@ fn search_commits(
     }
 
     apply_ref_labels(&mut items, &labels);
+    mark_on_current_branch(repo, &mut items);
     Ok(items)
 }
 
@@ -1141,6 +1185,7 @@ fn parse_search_record(bytes: &[u8]) -> Option<CommitSummary> {
             .filter_map(normalize_oid)
             .collect(),
         refs: Vec::new(),
+        on_current_branch: true,
     })
 }
 
@@ -1183,18 +1228,17 @@ fn commits_from_revwalk(
     repo: &Repository,
     limit: usize,
     skip: usize,
+    revs: &[String],
 ) -> AppResult<Vec<CommitSummary>> {
     let mut revwalk = repo.revwalk()?;
-    match repo.head() {
-        Ok(head) => {
-            if let Some(oid) = head.target() {
-                revwalk.push(oid)?;
-            } else {
-                return Ok(Vec::new());
-            }
+    if revs.is_empty() {
+        let _ = revwalk.push_glob("refs/heads/*");
+        let _ = revwalk.push_glob("refs/remotes/*");
+    } else {
+        for rev in revs {
+            let object = repo.revparse_single(rev)?;
+            revwalk.push(object.peel_to_commit()?.id())?;
         }
-        Err(err) if err.code() == ErrorCode::UnbornBranch => return Ok(Vec::new()),
-        Err(err) => return Err(err.into()),
     }
     revwalk.set_sorting(Sort::TOPOLOGICAL)?;
 
@@ -1234,6 +1278,7 @@ fn parse_git_log(bytes: &[u8]) -> AppResult<Vec<CommitSummary>> {
                 parents.split_whitespace().map(str::to_string).collect()
             },
             refs: Vec::new(),
+            on_current_branch: true,
         });
     }
     Ok(items)
@@ -1242,6 +1287,28 @@ fn parse_git_log(bytes: &[u8]) -> AppResult<Vec<CommitSummary>> {
 fn decorate_commits(repo: &Repository, commits: &mut [CommitSummary]) {
     let labels = collect_ref_labels(repo);
     apply_ref_labels(commits, &labels);
+    mark_on_current_branch(repo, commits);
+}
+
+fn mark_on_current_branch(repo: &Repository, commits: &mut [CommitSummary]) {
+    let head_oid = match repo.head() {
+        Ok(head) => head.target(),
+        Err(_) => None,
+    };
+    let Some(head_oid) = head_oid else {
+        return;
+    };
+    let head_id = head_oid.to_string();
+    for commit in commits {
+        if commit.id == head_id {
+            commit.on_current_branch = true;
+            continue;
+        }
+        let Ok(oid) = Oid::from_str(&commit.id) else {
+            continue;
+        };
+        commit.on_current_branch = repo.graph_descendant_of(head_oid, oid).unwrap_or(false);
+    }
 }
 
 fn apply_ref_labels(
@@ -1271,6 +1338,7 @@ fn ref_kind_rank(kind: &str) -> u8 {
 
 fn collect_ref_labels(repo: &Repository) -> HashMap<String, Vec<CommitRefLabel>> {
     let mut labels: HashMap<String, Vec<CommitRefLabel>> = HashMap::new();
+    let remote_names = configured_remote_names(repo);
     if let Ok(root) = workdir(repo) {
         if let Ok(stdout) = run_git_stdout(
             root,
@@ -1279,6 +1347,7 @@ fn collect_ref_labels(repo: &Repository) -> HashMap<String, Vec<CommitRefLabel>>
                 "--format=%(if)%(*objectname)%(then)%(*objectname)%(else)%(objectname)%(end)%00%(refname)%00%(HEAD)",
                 "refs/heads",
                 "refs/tags",
+                "refs/remotes",
             ],
         ) {
             let text = String::from_utf8_lossy(&stdout);
@@ -1293,6 +1362,11 @@ fn collect_ref_labels(repo: &Repository) -> HashMap<String, Vec<CommitRefLabel>>
                     ("branch", name)
                 } else if let Some(name) = refname.strip_prefix("refs/tags/") {
                     ("tag", name)
+                } else if let Some(name) = refname.strip_prefix("refs/remotes/") {
+                    if !is_remote_branch_name(name, &remote_names) {
+                        continue;
+                    }
+                    ("branch", name)
                 } else {
                     continue;
                 };
@@ -1697,16 +1771,21 @@ pub fn branches(repo: &Repository, include_remote: bool) -> AppResult<BranchList
 
     let mut remote = Vec::new();
     if include_remote {
-        remote = match workdir(repo).ok().and_then(|root| remote_branches_from_git(root).ok()) {
+        let remote_names = configured_remote_names(repo);
+        remote = match workdir(repo)
+            .ok()
+            .and_then(|root| remote_branches_from_git(root, &remote_names).ok())
+        {
             Some(items) => items,
             None => {
                 let mut items = Vec::new();
                 for item in repo.branches(Some(BranchType::Remote))? {
                     let (branch, _) = item?;
-                    let name = branch.name()?.unwrap_or_default().to_string();
-                    if name.is_empty() || name.ends_with("/HEAD") {
+                    let full = branch.get().name().unwrap_or_default();
+                    let name = branch.name()?.unwrap_or_default();
+                    let Some(name) = remote_tracking_branch_name(full, name, &remote_names) else {
                         continue;
-                    }
+                    };
                     items.push(BranchInfo {
                         is_head: false,
                         is_remote: true,
@@ -1728,22 +1807,70 @@ pub fn branches(repo: &Repository, include_remote: bool) -> AppResult<BranchList
     })
 }
 
-fn remote_branches_from_git(root: &Path) -> AppResult<Vec<BranchInfo>> {
+fn configured_remote_names(repo: &Repository) -> Vec<String> {
+    repo.remotes()
+        .ok()
+        .map(|names| names.iter().flatten().map(str::to_string).collect())
+        .unwrap_or_default()
+}
+
+fn is_remote_branch_name(name: &str, remotes: &[String]) -> bool {
+    let name = name.trim();
+    if name.is_empty() {
+        return false;
+    }
+    let lower = name.to_ascii_lowercase();
+    if lower == "head" || lower.ends_with("/head") {
+        return false;
+    }
+    if !name.contains('/') {
+        return false;
+    }
+    !remotes
+        .iter()
+        .any(|remote| name.eq_ignore_ascii_case(remote))
+}
+
+fn remote_tracking_branch_name(full_ref: &str, short_name: &str, remotes: &[String]) -> Option<String> {
+    if let Some(rest) = full_ref.strip_prefix("refs/remotes/") {
+        if !is_remote_branch_name(rest, remotes) {
+            return None;
+        }
+    } else if !full_ref.is_empty() {
+        return None;
+    }
+    if !is_remote_branch_name(short_name, remotes) {
+        return None;
+    }
+    Some(short_name.trim().to_string())
+}
+
+fn remote_branches_from_git(root: &Path, remotes: &[String]) -> AppResult<Vec<BranchInfo>> {
     let stdout = run_git_stdout(
         root,
-        &["for-each-ref", "--format=%(refname:short)", "refs/remotes"],
+        &[
+            "for-each-ref",
+            "--format=%(refname)%00%(refname:short)%00%(symref)",
+            "refs/remotes",
+        ],
     )?;
     let text = String::from_utf8_lossy(&stdout);
     let mut remote = Vec::new();
     for line in text.lines() {
-        let name = line.trim();
-        if name.is_empty() || name.ends_with("/HEAD") {
+        let mut fields = line.split('\0');
+        let full = fields.next().unwrap_or("").trim();
+        let name = fields.next().unwrap_or("").trim();
+        let symref = fields.next().unwrap_or("").trim();
+        if !symref.is_empty() {
             continue;
         }
+        let Some(name) = remote_tracking_branch_name(full, name, remotes) else {
+            continue;
+        };
         remote.push(BranchInfo {
             is_head: false,
             is_remote: true,
-            name: name.to_string(),
+            name,
             upstream: None,
         });
     }
@@ -1830,14 +1957,86 @@ pub fn list_remotes(repo: &Repository) -> AppResult<Vec<RemoteInfo>> {
     Ok(remotes)
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteProbe {
+    pub heads: usize,
+}
+
+pub fn probe_remote_url(repo: &Repository, url: &str) -> AppResult<RemoteProbe> {
+    let url = url.trim();
+    if url.is_empty() {
+        return Err(AppError::msg("Remote URL is required"));
+    }
+    let git = find_git().ok_or_else(|| AppError::msg("Git executable was not found"))?;
+    let mut command = Command::new(git);
+    command.arg("-C").arg(workdir(repo)?);
+    command.args([
+        "-c",
+        "http.lowSpeedLimit=1000",
+        "-c",
+        "http.lowSpeedTime=20",
+        "ls-remote",
+        "--heads",
+        url,
+    ]);
+    command.env("GIT_TERMINAL_PROMPT", "0");
+    command.env("GIT_SSH_COMMAND", "ssh -o BatchMode=yes -o ConnectTimeout=15");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    let output = command
+        .output()
+        .map_err(|err| AppError::msg(err.to_string()))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let message = [stderr.trim(), stdout.trim()]
+            .into_iter()
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n");
+        return Err(AppError::msg(if message.is_empty() {
+            "Could not reach this remote".to_string()
+        } else {
+            message
+        }));
+    }
+    let heads = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .count();
+    Ok(RemoteProbe { heads })
+}
+
 pub fn add_remote(repo: &Repository, name: &str, url: &str) -> AppResult<()> {
     let name = name.trim();
     let url = url.trim();
     if name.is_empty() || url.is_empty() {
         return Err(AppError::msg("Remote name and URL are required"));
     }
+    if !is_valid_remote_name(name) {
+        return Err(AppError::msg(
+            "Remote name can only contain letters, numbers, dots, hyphens, and underscores",
+        ));
+    }
+    if repo.find_remote(name).is_ok() {
+        return Err(AppError::msg(format!("Remote `{name}` already exists")));
+    }
     repo.remote(name, url)?;
     Ok(())
+}
+
+fn is_valid_remote_name(name: &str) -> bool {
+    if name.is_empty() || name == "." || name == ".." || name.starts_with('-') || name.ends_with('.')
+    {
+        return false;
+    }
+    name.chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
 }
 
 pub fn set_remote_url(repo: &Repository, name: &str, url: &str) -> AppResult<()> {

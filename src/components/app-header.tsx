@@ -44,6 +44,7 @@ import { AppMark } from "@/components/app-mark";
 import { AppToolbar } from "@/components/app-toolbar";
 import { WindowControls } from "@/components/window-controls";
 import { disambiguateRepoLabels } from "@/lib/format";
+import { isRemoteTrackingBranch } from "@/lib/git";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { cn } from "@/lib/utils";
 import { useGit, type AppTab } from "@/state/git-context";
@@ -69,7 +70,12 @@ export function AppHeader() {
   const [newBranch, setNewBranch] = useState("");
   const repo = snapshot?.repo;
   const local = snapshot?.branches.local ?? [];
-  const remote = snapshot?.branches.remote ?? [];
+  const remote = useMemo(() => {
+    const remoteNames = snapshot?.remotes.map((item) => item.name) ?? [];
+    return (snapshot?.branches.remote ?? []).filter((branch) =>
+      isRemoteTrackingBranch(branch.name, remoteNames),
+    );
+  }, [snapshot?.branches.remote, snapshot?.remotes]);
   const query = branchQuery.trim().toLowerCase();
   const remoteGroups = useMemo(() => groupRemoteBranches(remote), [remote]);
   const filteredRemote = useMemo(() => {
