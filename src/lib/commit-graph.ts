@@ -1,12 +1,14 @@
 export interface GraphLine {
   from: number;
   to: number;
+  color: number;
 }
 
 export interface GraphRow {
   lane: number;
   laneCount: number;
   lines: GraphLine[];
+  merges: GraphLine[];
 }
 
 export function layoutCommitGraph(
@@ -14,10 +16,16 @@ export function layoutCommitGraph(
 ): GraphRow[] {
   const rows: GraphRow[] = [];
   let lanes: (string | null)[] = [];
+  const seen = new Set<string>();
 
   for (const commit of commits) {
-    let lane = lanes.indexOf(commit.id);
-    if (lane === -1) {
+    const reserved: number[] = [];
+    for (let index = 0; index < lanes.length; index += 1) {
+      if (lanes[index] === commit.id) reserved.push(index);
+    }
+
+    let lane: number;
+    if (reserved.length === 0) {
       lane = firstEmpty(lanes);
       if (lane === -1) {
         lane = lanes.length;
@@ -25,26 +33,45 @@ export function layoutCommitGraph(
       } else {
         lanes[lane] = commit.id;
       }
+      reserved.push(lane);
+    } else {
+      lane = reserved[0];
     }
 
     const next = lanes.slice();
-    for (let index = 0; index < next.length; index += 1) {
-      if (next[index] === commit.id) next[index] = null;
-    }
+    for (const index of reserved) next[index] = null;
 
     const lines: GraphLine[] = [];
+    const merges: GraphLine[] = [];
+    for (const index of reserved) {
+      if (index !== lane) {
+        merges.push({ from: index, to: lane, color: index });
+      }
+    }
+
+    const reuse = reserved.filter((index) => index !== lane);
 
     commit.parents.forEach((parent, parentIndex) => {
-      const existing = next.indexOf(parent);
-      if (existing !== -1) {
-        lines.push({ from: lane, to: existing });
-        return;
-      }
+      if (seen.has(parent)) return;
       if (parentIndex === 0) {
         next[lane] = parent;
-        lines.push({ from: lane, to: lane });
+        lines.push({ from: lane, to: lane, color: lane });
         return;
       }
+
+      const existing = next.indexOf(parent);
+      if (existing !== -1) {
+        lines.push({ from: lane, to: existing, color: existing });
+        return;
+      }
+
+      const reused = reuse.shift();
+      if (reused !== undefined) {
+        next[reused] = parent;
+        lines.push({ from: lane, to: reused, color: reused });
+        return;
+      }
+
       let target = firstEmpty(next);
       if (target === -1) {
         target = next.length;
@@ -52,13 +79,14 @@ export function layoutCommitGraph(
       } else {
         next[target] = parent;
       }
-      lines.push({ from: lane, to: target });
+      lines.push({ from: lane, to: target, color: target });
     });
 
     lanes.forEach((id, index) => {
       if (!id || id === commit.id) return;
-      const dest = next.indexOf(id);
-      if (dest !== -1) lines.push({ from: index, to: dest });
+      if (next[index] === id) {
+        lines.push({ from: index, to: index, color: index });
+      }
     });
 
     while (next.length > 0 && next[next.length - 1] === null) next.pop();
@@ -67,8 +95,10 @@ export function layoutCommitGraph(
       lane,
       laneCount: Math.max(lanes.length, next.length, 1),
       lines,
+      merges,
     });
     lanes = next;
+    seen.add(commit.id);
   }
 
   return rows;

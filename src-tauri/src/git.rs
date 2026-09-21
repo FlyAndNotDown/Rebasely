@@ -1014,6 +1014,7 @@ pub fn commits(
                 "-c",
                 "log.showSignature=false",
                 "log",
+                "--topo-order",
                 &n,
                 &s,
                 "--pretty=format:%H%x00%h%x00%s%x00%an%x00%ae%x00%at%x00%P",
@@ -1195,7 +1196,7 @@ fn commits_from_revwalk(
         Err(err) if err.code() == ErrorCode::UnbornBranch => return Ok(Vec::new()),
         Err(err) => return Err(err.into()),
     }
-    revwalk.set_sorting(Sort::NONE)?;
+    revwalk.set_sorting(Sort::TOPOLOGICAL)?;
 
     let mut items = Vec::new();
     for oid in revwalk.skip(skip).take(limit) {

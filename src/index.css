@@ -44,12 +44,12 @@
   --diff-del: oklch(0.5 0.16 25);
   --diff-del-bg: oklch(0.95 0.04 25);
   --diff-hunk: oklch(0.48 0.09 250);
-  --graph-1: oklch(0.52 0.02 250);
-  --graph-2: oklch(0.48 0.06 230);
-  --graph-3: oklch(0.50 0.05 175);
-  --graph-4: oklch(0.51 0.05 85);
-  --graph-5: oklch(0.50 0.05 320);
-  --graph-6: oklch(0.50 0.045 25);
+  --graph-1: #3a86ff;
+  --graph-2: #12b886;
+  --graph-3: #e6b007;
+  --graph-4: #e8590c;
+  --graph-5: #845ef7;
+  --graph-6: #e64980;
   --font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, monospace;
 }
@@ -91,12 +91,12 @@
   --diff-del: oklch(0.78 0.14 22);
   --diff-del-bg: oklch(0.23 0.05 22);
   --diff-hunk: oklch(0.76 0.08 250);
-  --graph-1: oklch(0.70 0.015 250);
-  --graph-2: oklch(0.70 0.05 230);
-  --graph-3: oklch(0.72 0.045 175);
-  --graph-4: oklch(0.74 0.04 85);
-  --graph-5: oklch(0.72 0.045 320);
-  --graph-6: oklch(0.71 0.04 25);
+  --graph-1: #5b9dff;
+  --graph-2: #3ee0b2;
+  --graph-3: #ffe066;
+  --graph-4: #ff8a4c;
+  --graph-5: #c4a1ff;
+  --graph-6: #ff6b9d;
 }
 
 @theme inline {

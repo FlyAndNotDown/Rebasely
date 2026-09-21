@@ -20,7 +20,10 @@ import type { AvatarProvider, CommitRef, CommitSummary } from "@/types/git";
 import { toast } from "sonner";
 
 const ROW_HEIGHT = 32;
-const LANE_GAP = 12;
+const LANE_GAP = 14;
+const NODE_RADIUS = 4.5;
+const LINE_WIDTH = 2;
+const CORNER_RADIUS = 5;
 
 export function HistoryPane() {
   const {
@@ -209,7 +212,12 @@ function CommitRow({
           onClick={onSelect}
         >
           {graph ? (
-            <GraphCell width={graph.width} row={graph.row} previous={graph.previous} />
+            <GraphCell
+              width={graph.width}
+              row={graph.row}
+              previous={graph.previous}
+              selected={selected}
+            />
           ) : null}
           <span className="flex min-w-0 flex-1 items-center gap-1.5">
             <CommitRefs refs={commit.refs ?? []} />
@@ -297,6 +305,9 @@ function rowGraphWidth(row: GraphRow, previous?: GraphRow): number {
   for (const line of row.lines) {
     maxLane = Math.max(maxLane, line.from, line.to);
   }
+  for (const line of row.merges) {
+    maxLane = Math.max(maxLane, line.from, line.to);
+  }
   if (previous) {
     for (const line of previous.lines) {
       maxLane = Math.max(maxLane, line.to);
@@ -309,12 +320,19 @@ function GraphCell({
   width,
   row,
   previous,
+  selected,
 }: {
   width: number;
   row: GraphRow;
   previous?: GraphRow;
+  selected: boolean;
 }) {
   const mid = ROW_HEIGHT / 2;
+  const color = laneColor(row.lane);
+  const mergeFrom = new Set(row.merges.map((line) => line.from));
+  const incoming = previous
+    ? [...new Map(previous.lines.map((line) => [line.to, line])).values()]
+    : [];
 
   return (
     <svg
@@ -323,42 +341,74 @@ function GraphCell({
       className="shrink-0 overflow-visible"
       aria-hidden
     >
-      {previous
-        ? [...new Set(previous.lines.map((line) => line.to))].map((lane) => (
-            <line
-              key={`in-${lane}`}
-              x1={lane * LANE_GAP + LANE_GAP / 2}
-              y1="0"
-              x2={lane * LANE_GAP + LANE_GAP / 2}
-              y2={mid}
-              stroke={laneColor(lane)}
-              strokeWidth="1.25"
-            />
-          ))
-        : null}
+      {incoming.map((line) =>
+        mergeFrom.has(line.to) ? null : (
+          <line
+            key={`in-${line.to}`}
+            x1={line.to * LANE_GAP + LANE_GAP / 2}
+            y1="0"
+            x2={line.to * LANE_GAP + LANE_GAP / 2}
+            y2={mid}
+            stroke={laneColor(line.color)}
+            strokeWidth={LINE_WIDTH}
+            strokeLinecap="round"
+          />
+        ),
+      )}
+      {row.merges.map((line, index) => (
+        <path
+          key={`merge-${index}`}
+          d={mergeIn(line.from, line.to, mid)}
+          fill="none"
+          stroke={laneColor(line.color)}
+          strokeWidth={LINE_WIDTH}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      ))}
       {row.lines.map((line, index) => (
         <path
           key={`out-${index}`}
-          d={connector(line.from, line.to, mid, ROW_HEIGHT)}
+          d={branchOut(line.from, line.to, mid, ROW_HEIGHT)}
           fill="none"
-          stroke={laneColor(line.to)}
-          strokeWidth="1.25"
+          stroke={laneColor(line.color)}
+          strokeWidth={LINE_WIDTH}
+          strokeLinecap="round"
+          strokeLinejoin="round"
         />
       ))}
       <circle
         cx={row.lane * LANE_GAP + LANE_GAP / 2}
         cy={mid}
-        r="3"
-        fill={laneColor(row.lane)}
+        r={NODE_RADIUS}
+        fill={selected ? color : "var(--background)"}
+        stroke={color}
+        strokeWidth={LINE_WIDTH}
       />
     </svg>
   );
 }
 
-function connector(from: number, to: number, y1: number, y2: number): string {
-  const x1 = from * LANE_GAP + LANE_GAP / 2;
-  const x2 = to * LANE_GAP + LANE_GAP / 2;
+function laneX(lane: number): number {
+  return lane * LANE_GAP + LANE_GAP / 2;
+}
+
+function mergeIn(from: number, to: number, mid: number): string {
+  const x1 = laneX(from);
+  const x2 = laneX(to);
+  if (x1 === x2) return `M ${x1} 0 L ${x2} ${mid}`;
+  const dx = x2 - x1;
+  const radius = Math.min(CORNER_RADIUS, Math.abs(dx) / 2, mid / 2);
+  const sign = dx > 0 ? 1 : -1;
+  return `M ${x1} 0 L ${x1} ${mid - radius} Q ${x1} ${mid} ${x1 + sign * radius} ${mid} L ${x2} ${mid}`;
+}
+
+function branchOut(from: number, to: number, y1: number, y2: number): string {
+  const x1 = laneX(from);
+  const x2 = laneX(to);
   if (x1 === x2) return `M ${x1} ${y1} L ${x2} ${y2}`;
-  const midY = (y1 + y2) / 2;
-  return `M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`;
+  const dx = x2 - x1;
+  const radius = Math.min(CORNER_RADIUS, Math.abs(dx) / 2, (y2 - y1) / 2);
+  const sign = dx > 0 ? 1 : -1;
+  return `M ${x1} ${y1} L ${x2 - sign * radius} ${y1} Q ${x2} ${y1} ${x2} ${y1 + radius} L ${x2} ${y2}`;
 }
