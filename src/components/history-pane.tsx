@@ -65,7 +65,7 @@ export function HistoryPane() {
     createPatch,
   } = useGit();
   const [query, setQuery] = useState("");
-  const [debounced, setDebounced] = useState("");
+  const [applied, setApplied] = useState("");
   const [results, setResults] = useState<CommitSummary[] | null>(null);
   const [searching, setSearching] = useState(false);
   const [searchHasMore, setSearchHasMore] = useState(false);
@@ -76,7 +76,11 @@ export function HistoryPane() {
     null,
   );
   const selectedId = historySelection?.id ?? null;
-  const searchingMode = Boolean(debounced);
+  const searchRevs = useMemo(
+    () => expandHistoryRevs(historyRevs, snapshot?.branches.local),
+    [historyRevs, snapshot?.branches.local],
+  );
+  const searchingMode = Boolean(applied);
   const visible = searchingMode ? (results ?? []) : commits;
   const graph = useMemo(
     () => (searchingMode ? [] : layoutCommitGraph(visible)),
@@ -90,12 +94,7 @@ export function HistoryPane() {
   }, [ensureHistory]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => setDebounced(query.trim()), 250);
-    return () => window.clearTimeout(timer);
-  }, [query]);
-
-  useEffect(() => {
-    if (!debounced) {
+    if (!applied) {
       setResults(null);
       setSearchHasMore(false);
       setSearching(false);
@@ -106,13 +105,7 @@ export function HistoryPane() {
     let cancelled = false;
     setSearching(true);
     void gitApi
-      .getCommits(
-        repoPath,
-        COMMIT_PAGE,
-        0,
-        debounced,
-        expandHistoryRevs(historyRevs, snapshot?.branches.local),
-      )
+      .getCommits(repoPath, COMMIT_PAGE, 0, applied, searchRevs)
       .then((items) => {
         if (cancelled) return;
         setResults(items);
@@ -127,19 +120,19 @@ export function HistoryPane() {
     return () => {
       cancelled = true;
     };
-  }, [debounced, historyRevs, snapshot?.repo.path]);
+  }, [applied, searchRevs, snapshot?.repo.path]);
 
   async function loadMoreSearch() {
     const repoPath = snapshot?.repo.path;
-    if (!repoPath || !debounced || searching || !searchHasMore || !results) return;
+    if (!repoPath || !applied || searching || !searchHasMore || !results) return;
     setSearching(true);
     try {
       const more = await gitApi.getCommits(
         repoPath,
         COMMIT_PAGE,
         results.length,
-        debounced,
-        expandHistoryRevs(historyRevs, snapshot?.branches.local),
+        applied,
+        searchRevs,
       );
       setResults((current) => [...(current ?? []), ...more]);
       setSearchHasMore(more.length === COMMIT_PAGE);
@@ -165,6 +158,17 @@ export function HistoryPane() {
           <Input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                setApplied(query.trim());
+              }
+              if (event.key === "Escape") {
+                event.preventDefault();
+                setQuery("");
+                setApplied("");
+              }
+            }}
             placeholder="Search commits"
             className="h-7 pl-7"
           />

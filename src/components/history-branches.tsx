@@ -44,10 +44,10 @@ export function HistoryBranches() {
     deleteBranch,
   } = useGit();
   const [query, setQuery] = useState("");
+  const [needle, setNeedle] = useState("");
   const [addOpen, setAddOpen] = useState(false);
   const [deleting, setDeleting] = useState<BranchInfo | null>(null);
   const branches = snapshot?.branches;
-  const needle = query.trim().toLowerCase();
   const watched = useMemo(() => new Set(historyRevs), [historyRevs]);
   const expanded = useMemo(
     () => new Set(historyExpanded ?? DEFAULT_EXPANDED),
@@ -156,6 +156,17 @@ export function HistoryBranches() {
           <Input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                setNeedle(query.trim().toLowerCase());
+              }
+              if (event.key === "Escape") {
+                event.preventDefault();
+                setQuery("");
+                setNeedle("");
+              }
+            }}
             placeholder="Filter branches"
             className="h-7 pl-7"
           />
