@@ -424,9 +424,14 @@ pub fn pull_remote(
 
 pub fn push_remote(
     repo: &mut Repository,
+    force: bool,
     on_progress: impl FnMut(&str) + Send,
 ) -> AppResult<WorkspaceSnapshot> {
-    run_git_ok_progress(workdir(repo)?, &["push", "--progress"], on_progress)?;
+    let mut args = vec!["push", "--progress"];
+    if force {
+        args.insert(1, "--force-with-lease");
+    }
+    run_git_ok_progress(workdir(repo)?, &args, on_progress)?;
     snapshot(repo)
 }
 

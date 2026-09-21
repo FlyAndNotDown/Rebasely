@@ -60,8 +60,8 @@ export const gitApi = {
     invoke<WorkspaceSnapshot>("fetch_remote", { repoPath, activityId }),
   pullRemote: (repoPath: string, activityId?: string) =>
     invoke<WorkspaceSnapshot>("pull_remote", { repoPath, activityId }),
-  pushRemote: (repoPath: string, activityId?: string) =>
-    invoke<WorkspaceSnapshot>("push_remote", { repoPath, activityId }),
+  pushRemote: (repoPath: string, activityId?: string, force = false) =>
+    invoke<WorkspaceSnapshot>("push_remote", { repoPath, activityId, force }),
   createBranch: (repoPath: string, name: string, switchTo: boolean) =>
     invoke<WorkspaceSnapshot>("create_branch", {
       repoPath,

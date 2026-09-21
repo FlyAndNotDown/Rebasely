@@ -46,8 +46,6 @@ export function HistoryPane() {
     () => (searchingMode ? [] : layoutCommitGraph(visible)),
     [searchingMode, visible],
   );
-  const lanes = Math.max(1, ...graph.map((row) => row.laneCount));
-  const gutter = graphWidth(lanes, LANE_GAP) + 8;
   const loading = searchingMode ? searching : commitsLoading;
   const hasMore = searchingMode ? searchHasMore : commitsHasMore;
 
@@ -145,7 +143,11 @@ export function HistoryPane() {
                 avatarProvider={prefs.avatarProvider}
                 graph={
                   !searchingMode && graph[index]
-                    ? { width: gutter, row: graph[index], previous: graph[index - 1] }
+                    ? {
+                        width: rowGraphWidth(graph[index], graph[index - 1]),
+                        row: graph[index],
+                        previous: graph[index - 1],
+                      }
                     : null
                 }
                 onSelect={() => void selectCommit(commit.id)}
@@ -201,7 +203,7 @@ function CommitRow({
         <button
           type="button"
           className={cn(
-            "flex h-8 w-full items-center gap-3 px-2 text-left hover:bg-muted/70",
+            "flex h-8 w-full items-center gap-2 px-2 text-left hover:bg-muted/70",
             selected && "bg-muted",
           )}
           onClick={onSelect}
@@ -285,6 +287,19 @@ function CommitRefs({ refs }: { refs: CommitRef[] }) {
       ))}
     </span>
   );
+}
+
+function rowGraphWidth(row: GraphRow, previous?: GraphRow): number {
+  let maxLane = row.lane;
+  for (const line of row.lines) {
+    maxLane = Math.max(maxLane, line.from, line.to);
+  }
+  if (previous) {
+    for (const line of previous.lines) {
+      maxLane = Math.max(maxLane, line.to);
+    }
+  }
+  return graphWidth(maxLane + 1, LANE_GAP) + 8;
 }
 
 function GraphCell({

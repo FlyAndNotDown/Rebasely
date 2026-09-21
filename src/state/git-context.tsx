@@ -176,7 +176,7 @@ interface GitContextValue {
   checkoutBranch: (name: string) => Promise<void>;
   fetchRemote: () => Promise<void>;
   pullRemote: () => Promise<void>;
-  pushRemote: () => Promise<void>;
+  pushRemote: (force?: boolean) => Promise<void>;
   createBranch: (name: string, switchTo: boolean) => Promise<void>;
   stashSave: (message: string, includeUntracked: boolean) => Promise<void>;
   stashApply: (index: number) => Promise<void>;
@@ -887,11 +887,11 @@ export function GitProvider({ children }: { children: ReactNode }) {
     );
   }, [runMutation]);
 
-  const pushRemote = useCallback(async () => {
+  const pushRemote = useCallback(async (force = false) => {
     await runMutation(
-      "Pushing",
-      (repoPath, activityId) => gitApi.pushRemote(repoPath, activityId),
-      "Pushed",
+      force ? "Force pushing" : "Pushing",
+      (repoPath, activityId) => gitApi.pushRemote(repoPath, activityId, force),
+      force ? "Force pushed" : "Pushed",
     );
   }, [runMutation]);
 
