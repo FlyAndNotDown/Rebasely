@@ -56,7 +56,15 @@ function HistoryWorkspace() {
 }
 
 export function Workspace() {
-  const { view } = useGit();
+  const { view, snapshot } = useGit();
+
+  if (!snapshot) {
+    return (
+      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+        Opening repository…
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-full min-h-0">

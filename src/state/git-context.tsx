@@ -12,7 +12,7 @@ import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { toast } from "sonner";
 import { emptyBinaryDiff, errorMessage, gitApi } from "@/lib/git";
-import { sameRepoPath } from "@/lib/format";
+import { pathSegments, sameRepoPath } from "@/lib/format";
 import { defaultPrefs, normalizePrefs } from "@/lib/prefs";
 import type {
   Activity,
@@ -78,6 +78,22 @@ function emptySession(path: string): RepoSession {
     changeDiff: null,
     historyDiff: null,
     commitDetails: null,
+  };
+}
+
+function repoNameFromPath(path: string): string {
+  const segments = pathSegments(path);
+  return segments[segments.length - 1] || path;
+}
+
+function tabFromPath(path: string, name?: string): RepoTab {
+  return {
+    id: repoTabId(path),
+    kind: "repo",
+    path,
+    name: name || repoNameFromPath(path),
+    branch: null,
+    isDetached: false,
   };
 }
 
@@ -237,23 +253,19 @@ export function GitProvider({ children }: { children: ReactNode }) {
     void gitApi.saveSession({ openPaths, active }).catch(() => undefined);
   }, []);
 
-  const restoreSession = useCallback(async (session: AppSession) => {
+  const restoreSession = useCallback((session: AppSession, recentsList: RecentRepo[]) => {
     const nextTabs: AppTab[] = [{ id: WELCOME_TAB_ID, kind: "welcome" }];
     const nextSessions: Record<string, RepoSession> = {};
     let activeId = WELCOME_TAB_ID;
 
     for (const path of session.openPaths) {
-      try {
-        const snapshot = await gitApi.openRepository(path);
-        const tab = tabFromSnapshot(snapshot);
-        if (nextTabs.some((item) => item.id === tab.id)) continue;
-        nextTabs.push(tab);
-        nextSessions[tab.id] = { ...emptySession(snapshot.repo.path), snapshot };
-        if (session.active !== "welcome" && sameRepoPath(session.active, snapshot.repo.path)) {
-          activeId = tab.id;
-        }
-      } catch {
-        // Skip folders that disappeared since the last session.
+      const recent = recentsList.find((item) => sameRepoPath(item.path, path));
+      const tab = tabFromPath(path, recent?.name);
+      if (nextTabs.some((item) => item.id === tab.id)) continue;
+      nextTabs.push(tab);
+      nextSessions[tab.id] = emptySession(path);
+      if (session.active !== "welcome" && sameRepoPath(session.active, path)) {
+        activeId = tab.id;
       }
     }
 
@@ -262,10 +274,10 @@ export function GitProvider({ children }: { children: ReactNode }) {
       if (fallback) activeId = fallback.id;
     }
 
+    sessionsRef.current = nextSessions;
     setSessions(nextSessions);
     setTabs(nextTabs);
     setActiveTabId(activeId);
-    setRecents(await gitApi.listRecents());
   }, []);
 
   useEffect(() => {
@@ -278,7 +290,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
         ]);
         setPrefs(normalizePrefs(loadedPrefs));
         setRecents(recentsList);
-        await restoreSession(session);
+        restoreSession(session, recentsList);
       } catch (error) {
         toast.error(errorMessage(error));
       } finally {
@@ -332,10 +344,58 @@ export function GitProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  const hydrateRepo = useCallback(
+    async (tabId: string) => {
+      const tab = tabsRef.current.find((item) => item.id === tabId);
+      if (!tab || tab.kind !== "repo") return;
+      if (sessionsRef.current[tabId]?.snapshot) return;
+
+      const pendingKey = tab.path.toLowerCase();
+      if (openingPathsRef.current.has(pendingKey)) return;
+      openingPathsRef.current.add(pendingKey);
+      setOpening(true);
+      try {
+        const snapshot = await runActivity("Opening repository", tab.path, () =>
+          gitApi.openRepository(tab.path),
+        );
+        if (!tabsRef.current.some((item) => item.id === tabId)) return;
+        setSessions((current) => {
+          const next = {
+            ...current,
+            [tabId]: { ...(current[tabId] ?? emptySession(snapshot.repo.path)), snapshot },
+          };
+          sessionsRef.current = next;
+          return next;
+        });
+        syncTabMeta(tabId, snapshot);
+        setRecents(await gitApi.listRecents());
+      } catch (error) {
+        toast.error(errorMessage(error));
+      } finally {
+        openingPathsRef.current.delete(pendingKey);
+        setOpening(openingPathsRef.current.size > 0);
+      }
+    },
+    [runActivity, syncTabMeta],
+  );
+
+  const setActiveTab = useCallback(
+    (id: string) => {
+      setActiveTabId(id);
+      void hydrateRepo(id);
+    },
+    [hydrateRepo],
+  );
+
+  useEffect(() => {
+    if (loading) return;
+    void hydrateRepo(activeTabId);
+  }, [activeTabId, hydrateRepo, loading]);
+
   const openPath = useCallback(async (path: string) => {
     const existing = findRepoTab(tabsRef.current, path);
     if (existing) {
-      setActiveTabId(existing.id);
+      setActiveTab(existing.id);
       return;
     }
 
@@ -347,18 +407,15 @@ export function GitProvider({ children }: { children: ReactNode }) {
       const snapshot = await runActivity("Opening repository", path, () =>
         gitApi.openRepository(path),
       );
-      const opened = findRepoTab(tabsRef.current, snapshot.repo.path);
-      if (opened) {
-        setActiveTabId(opened.id);
-        setRecents(await gitApi.listRecents());
-        return;
-      }
-
-      const tab = tabFromSnapshot(snapshot);
-      setSessions((current) => ({
-        ...current,
-        [tab.id]: { ...emptySession(snapshot.repo.path), snapshot },
-      }));
+      const tab = findRepoTab(tabsRef.current, snapshot.repo.path) ?? tabFromSnapshot(snapshot);
+      setSessions((current) => {
+        const next = {
+          ...current,
+          [tab.id]: { ...(current[tab.id] ?? emptySession(snapshot.repo.path)), snapshot },
+        };
+        sessionsRef.current = next;
+        return next;
+      });
       setTabs((current) => (current.some((item) => item.id === tab.id) ? current : [...current, tab]));
       setActiveTabId(tab.id);
       setRecents(await gitApi.listRecents());
@@ -368,7 +425,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       openingPathsRef.current.delete(pendingKey);
       setOpening(openingPathsRef.current.size > 0);
     }
-  }, [runActivity]);
+  }, [runActivity, setActiveTab]);
 
   const openFolder = useCallback(async () => {
     const selected = await open({
@@ -564,10 +621,19 @@ export function GitProvider({ children }: { children: ReactNode }) {
     [patchSession],
   );
 
+  const watchedKey = useMemo(
+    () =>
+      Object.values(sessions)
+        .filter((item) => item.snapshot)
+        .map((item) => item.path)
+        .sort((left, right) => left.localeCompare(right))
+        .join("\n"),
+    [sessions],
+  );
+
   useEffect(() => {
-    const paths = tabs.filter((tab): tab is RepoTab => tab.kind === "repo").map((tab) => tab.path);
-    void gitApi.syncWatches(paths).catch(() => undefined);
-  }, [tabs]);
+    void gitApi.syncWatches(watchedKey ? watchedKey.split("\n") : []).catch(() => undefined);
+  }, [watchedKey]);
 
   useEffect(() => {
     let disposed = false;
@@ -899,7 +965,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       loading,
       busy: opening || activities.length > 0,
       setView,
-      setActiveTab: setActiveTabId,
+      setActiveTab,
       closeTab,
       reorderTabs,
       openFolder,
@@ -940,6 +1006,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       loading,
       opening,
       setView,
+      setActiveTab,
       closeTab,
       reorderTabs,
       openFolder,
