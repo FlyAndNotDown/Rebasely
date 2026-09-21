@@ -38,11 +38,12 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import { Kbd } from "@/components/ui/kbd";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ActivityMeter } from "@/components/activity-meter";
 import { AppToolbar } from "@/components/app-toolbar";
+import { WindowControls } from "@/components/window-controls";
 import { disambiguateRepoLabels } from "@/lib/format";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { cn } from "@/lib/utils";
 import { useGit, type AppTab } from "@/state/git-context";
 import type { BranchInfo } from "@/types/git";
@@ -55,7 +56,6 @@ export function AppHeader() {
     setActiveTab,
     closeTab,
     reorderTabs,
-    openFolder,
     revealRepo,
     openTerminal,
     ensureBranches,
@@ -90,22 +90,20 @@ export function AppHeader() {
     : (repo?.currentBranch ?? "unknown");
 
   return (
-    <header className="flex h-11 shrink-0 items-center gap-2 overflow-hidden border-b bg-background px-2">
-      <TabStrip
-        tabs={tabs}
-        activeTabId={activeTabId}
-        setActiveTab={setActiveTab}
-        closeTab={closeTab}
-        reorderTabs={reorderTabs}
-        openFolder={openFolder}
-      />
+    <header className="shrink-0 bg-background">
+      <div className="flex h-9 items-stretch">
+        <TabStrip
+          tabs={tabs}
+          activeTabId={activeTabId}
+          setActiveTab={setActiveTab}
+          closeTab={closeTab}
+          reorderTabs={reorderTabs}
+        />
+        <WindowControls />
+      </div>
 
-      <div className="flex shrink-0 items-center gap-2">
-      <ActivityMeter />
-
-      {repo ? <AppToolbar /> : null}
-
-      {repo ? (
+      <div className="flex h-9 items-center gap-1.5 border-y px-2">
+        {repo ? (
         <>
           <DropdownMenu
             open={branchMenuOpen}
@@ -190,11 +188,20 @@ export function AppHeader() {
         </>
       ) : null}
 
+      {repo ? <AppToolbar /> : null}
+
+      <ActivityMeter />
+
       {repo ? (
         <>
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon-sm" onClick={() => void openTerminal()}>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="ml-auto"
+                onClick={() => void openTerminal()}
+              >
                 <SquareTerminalIcon />
               </Button>
             </TooltipTrigger>
@@ -258,14 +265,12 @@ function TabStrip({
   setActiveTab,
   closeTab,
   reorderTabs,
-  openFolder,
 }: {
   tabs: AppTab[];
   activeTabId: string;
   setActiveTab: (id: string) => void;
   closeTab: (id: string) => void;
   reorderTabs: (fromId: string, toId: string, place: "before" | "after") => void;
-  openFolder: () => void | Promise<void>;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const measureRef = useRef<HTMLDivElement>(null);
@@ -286,15 +291,13 @@ function TabStrip({
     function update() {
       const nodes = Array.from(measureNode.children) as HTMLElement[];
       if (nodes.length === 0) return;
-      const plus = nodes[nodes.length - 1];
-      const tabEls = nodes.slice(0, -1);
       const gap = 4;
-      const plusWidth = plus.offsetWidth;
       const moreWidth = 56;
-      const available = containerNode.clientWidth;
-      const widths = tabEls.map((node) => node.offsetWidth);
+      const dragReserve = 32;
+      const available = Math.max(0, containerNode.clientWidth - dragReserve);
+      const widths = nodes.map((node) => node.offsetWidth);
 
-      let used = plusWidth;
+      let used = 0;
       let count = 0;
       for (let index = 0; index < widths.length; index += 1) {
         const remaining = widths.length - index - 1;
@@ -396,7 +399,7 @@ function TabStrip({
   }
 
   return (
-    <div ref={containerRef} className="relative min-w-0 flex-1">
+    <div ref={containerRef} className="relative flex h-full min-w-0 flex-1">
       <div
         ref={measureRef}
         className="pointer-events-none invisible absolute flex items-center gap-1"
@@ -412,13 +415,10 @@ function TabStrip({
             onClose={() => undefined}
           />
         ))}
-        <Button variant="ghost" size="icon-xs">
-          <PlusIcon />
-        </Button>
       </div>
       <div
         ref={stripRef}
-        className={cn("flex min-w-0 items-center gap-1", draggingId && "select-none")}
+        className={cn("flex h-full w-full min-w-0 items-center gap-1 pl-1.5", draggingId && "select-none")}
       >
         {visible.map((tab) => (
           <TabButton
@@ -470,23 +470,11 @@ function TabStrip({
             </DropdownMenuContent>
           </DropdownMenu>
         ) : null}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              className="shrink-0"
-              onClick={() => void openFolder()}
-              aria-label="Open repository"
-            >
-              <PlusIcon />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>
-            Open repository
-            <Kbd>Ctrl+O</Kbd>
-          </TooltipContent>
-        </Tooltip>
+        <div
+          className="h-full min-h-9 min-w-8 flex-1"
+          data-tauri-drag-region
+          onDoubleClick={() => void getCurrentWindow().toggleMaximize()}
+        />
       </div>
     </div>
   );

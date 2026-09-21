@@ -168,6 +168,10 @@
   [role="button"] {
     cursor: pointer;
   }
+
+  [data-tauri-drag-region] {
+    app-region: drag;
+  }
 }
 
 @keyframes activity-indeterminate {

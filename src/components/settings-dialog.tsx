@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { CheckIcon, ChevronDownIcon } from "lucide-react";
 import { useTheme } from "next-themes";
 import { toast } from "sonner";
@@ -25,7 +25,7 @@ import { cn } from "@/lib/utils";
 import { useGit } from "@/state/git-context";
 import type { AvatarProvider, TerminalOption } from "@/types/git";
 
-type SettingsSection = "git" | "terminal" | "avatars" | "appearance";
+type SettingsSection = "git" | "general";
 type ThemeChoice = "dark" | "light" | "system";
 
 const avatarProviders: { id: AvatarProvider; label: string }[] = [
@@ -101,29 +101,11 @@ export function SettingsDialog({
       <DialogContent className="flex max-h-[min(44rem,calc(100vh-4rem))] w-[min(56rem,calc(100vw-4rem))] max-w-none flex-col gap-0 p-0 sm:max-w-none">
         <div className="flex min-h-0 flex-1">
           <aside className="flex w-44 shrink-0 flex-col gap-1 border-r p-4">
-            <NavButton
-              active={section === "git"}
-              onClick={() => setSection("git")}
-            >
+            <NavButton active={section === "git"} onClick={() => setSection("git")}>
               Git
             </NavButton>
-            <NavButton
-              active={section === "terminal"}
-              onClick={() => setSection("terminal")}
-            >
-              Terminal
-            </NavButton>
-            <NavButton
-              active={section === "avatars"}
-              onClick={() => setSection("avatars")}
-            >
-              Avatars
-            </NavButton>
-            <NavButton
-              active={section === "appearance"}
-              onClick={() => setSection("appearance")}
-            >
-              Appearance
+            <NavButton active={section === "general"} onClick={() => setSection("general")}>
+              General
             </NavButton>
           </aside>
           <div className="min-w-0 flex-1 overflow-auto p-6">
@@ -157,102 +139,74 @@ export function SettingsDialog({
                   </div>
                 </div>
               </>
-            ) : section === "terminal" ? (
-              <>
-                <DialogHeader>
-                  <DialogTitle>Terminal</DialogTitle>
-                  <DialogDescription>
-                    Opens in the current repository folder. Available apps depend on this machine.
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="mt-6 grid gap-2">
-                  <Label htmlFor="terminal-app">Application</Label>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button
-                        id="terminal-app"
-                        type="button"
-                        variant="outline"
-                        className="w-full justify-between font-normal"
-                      >
-                        <span className="truncate">
-                          {terminals.find((item) => item.id === terminalId)?.name ?? "System default"}
-                        </span>
-                        <ChevronDownIcon />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="start" className="w-(--radix-dropdown-menu-trigger-width)">
-                      {terminals.map((option) => (
-                        <DropdownMenuItem
-                          key={option.id}
-                          disabled={!option.available}
-                          onClick={() => setTerminalId(option.id)}
-                        >
-                          <span className="min-w-4">
-                            {option.id === terminalId ? <CheckIcon className="size-3.5" /> : null}
-                          </span>
-                          <span className="truncate">{option.name}</span>
-                          {!option.available ? (
-                            <span className="ml-auto text-xs text-muted-foreground">Not found</span>
-                          ) : null}
-                        </DropdownMenuItem>
-                      ))}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-              </>
-            ) : section === "avatars" ? (
-              <>
-                <DialogHeader>
-                  <DialogTitle>Avatars</DialogTitle>
-                  <DialogDescription>
-                    Used for commit authors in History. More providers can be added later.
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="mt-6 grid gap-5">
-                  <ProviderField
-                    id="avatar-provider"
-                    label="Provider"
-                    value={avatarProvider}
-                    onChange={setAvatarProvider}
-                  />
-                </div>
-              </>
             ) : (
               <>
                 <DialogHeader>
-                  <DialogTitle>Appearance</DialogTitle>
+                  <DialogTitle>General</DialogTitle>
                   <DialogDescription>
-                    Light, dark, or follow the system. Dark is the default.
+                    Theme, author avatars, and the terminal used to open a repository.
                   </DialogDescription>
                 </DialogHeader>
-                <div className="mt-6 grid gap-2">
-                  <Label htmlFor="theme-choice">Theme</Label>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button
-                        id="theme-choice"
-                        type="button"
-                        variant="outline"
-                        className="w-full justify-between font-normal"
-                      >
-                        <span>
-                          {themeOptions.find((option) => option.id === themeChoice)?.label ?? "Dark"}
-                        </span>
-                        <ChevronDownIcon />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="start" className="w-(--radix-dropdown-menu-trigger-width)">
-                      {themeOptions.map((option) => (
-                        <DropdownMenuItem key={option.id} onClick={() => setThemeChoice(option.id)}>
-                          <span className="min-w-4">
-                            {option.id === themeChoice ? <CheckIcon className="size-3.5" /> : null}
-                          </span>
-                          {option.label}
-                        </DropdownMenuItem>
-                      ))}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+                <div className="mt-6 grid gap-8">
+                  <FieldGroup title="Appearance">
+                    <SelectField
+                      id="theme-choice"
+                      label="Theme"
+                      value={themeChoice}
+                      options={themeOptions}
+                      onChange={setThemeChoice}
+                    />
+                    <SelectField
+                      id="avatar-provider"
+                      label="Avatar provider"
+                      value={avatarProvider}
+                      options={avatarProviders}
+                      onChange={setAvatarProvider}
+                    />
+                  </FieldGroup>
+                  <FieldGroup title="Terminal">
+                    <div className="grid gap-2">
+                      <Label htmlFor="terminal-app">Application</Label>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            id="terminal-app"
+                            type="button"
+                            variant="outline"
+                            className="w-full justify-between font-normal"
+                          >
+                            <span className="truncate">
+                              {terminals.find((item) => item.id === terminalId)?.name ??
+                                "System default"}
+                            </span>
+                            <ChevronDownIcon />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent
+                          align="start"
+                          className="w-(--radix-dropdown-menu-trigger-width)"
+                        >
+                          {terminals.map((option) => (
+                            <DropdownMenuItem
+                              key={option.id}
+                              disabled={!option.available}
+                              onClick={() => setTerminalId(option.id)}
+                            >
+                              <span className="min-w-4">
+                                {option.id === terminalId ? <CheckIcon className="size-3.5" /> : null}
+                              </span>
+                              <span className="truncate">{option.name}</span>
+                              {!option.available ? (
+                                <span className="ml-auto text-xs text-muted-foreground">
+                                  Not found
+                                </span>
+                              ) : null}
+                            </DropdownMenuItem>
+                          ))}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                  </FieldGroup>
                 </div>
               </>
             )}
@@ -271,16 +225,27 @@ export function SettingsDialog({
   );
 }
 
-function ProviderField({
+function FieldGroup({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div className="grid gap-5">
+      <h3 className="text-sm font-medium">{title}</h3>
+      {children}
+    </div>
+  );
+}
+
+function SelectField<T extends string>({
   id,
   label,
   value,
+  options,
   onChange,
 }: {
   id: string;
   label: string;
-  value: AvatarProvider;
-  onChange: (value: AvatarProvider) => void;
+  value: T;
+  options: { id: T; label: string }[];
+  onChange: (value: T) => void;
 }) {
   return (
     <div className="grid gap-2">
@@ -293,12 +258,12 @@ function ProviderField({
             variant="outline"
             className="w-full justify-between font-normal"
           >
-            <span>{avatarProviders.find((option) => option.id === value)?.label ?? "DiceBear"}</span>
+            <span>{options.find((option) => option.id === value)?.label ?? options[0]?.label}</span>
             <ChevronDownIcon />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-(--radix-dropdown-menu-trigger-width)">
-          {avatarProviders.map((option) => (
+          {options.map((option) => (
             <DropdownMenuItem key={option.id} onClick={() => onChange(option.id)}>
               <span className="min-w-4">
                 {option.id === value ? <CheckIcon className="size-3.5" /> : null}
