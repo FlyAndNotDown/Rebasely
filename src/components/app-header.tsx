@@ -40,6 +40,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ActivityMeter } from "@/components/activity-meter";
+import { AppMark } from "@/components/app-mark";
 import { AppToolbar } from "@/components/app-toolbar";
 import { WindowControls } from "@/components/window-controls";
 import { disambiguateRepoLabels } from "@/lib/format";
@@ -529,7 +530,9 @@ function TabButton({
             onAuxClick={handleAuxClick}
             className="flex min-w-0 flex-1 items-center gap-1.5 px-2"
           >
-            {tab.kind === "welcome" ? <GitBranchIcon className="size-3.5 shrink-0" /> : null}
+            {tab.kind === "welcome" ? (
+              <AppMark className="size-4" iconClassName="size-4" />
+            ) : null}
             <span className="truncate">{label}</span>
           </button>
           {closable ? (

@@ -1,4 +1,5 @@
-import { FolderOpenIcon, GitBranchIcon, XIcon } from "lucide-react";
+import { FolderOpenIcon, XIcon } from "lucide-react";
+import { AppMark } from "@/components/app-mark";
 import { Button } from "@/components/ui/button";
 import { disambiguateRepoLabels, displayPath, formatRelativeTime } from "@/lib/format";
 import { useGit } from "@/state/git-context";
@@ -11,9 +12,7 @@ export function WelcomeScreen() {
     <div className="flex h-full min-h-0 items-center justify-center overflow-hidden bg-background p-8">
       <div className="flex max-h-full w-full max-w-md flex-col overflow-hidden">
         <div className="mb-8 flex shrink-0 items-start gap-3">
-          <div className="mt-0.5 flex size-10 items-center justify-center rounded-lg bg-foreground text-background">
-            <GitBranchIcon className="size-5" />
-          </div>
+          <AppMark className="mt-0.5 size-10" iconClassName="size-5" />
           <div>
             <h1 className="text-2xl font-medium tracking-tight">Rebasely</h1>
             <p className="mt-1 text-sm text-muted-foreground">

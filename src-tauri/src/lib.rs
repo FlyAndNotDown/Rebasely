@@ -10,7 +10,10 @@ mod window_state;
 use std::path::Path;
 
 use serde::Serialize;
+use tauri::image::Image;
 use tauri::{AppHandle, Emitter, Manager, State};
+
+const APP_ICON_PNG: &[u8] = include_bytes!("../icons/icon.png");
 
 use error::{AppError, AppResult};
 use git::{BranchList, CommitDetails, CommitSummary, FileDiff, GitIdentity, WorkspaceSnapshot};
@@ -414,6 +417,9 @@ pub fn run() {
         .setup(|app| {
             if let Some(window) = app.get_webview_window("main") {
                 apply_window_chrome(&window, true);
+                if let Ok(icon) = Image::from_bytes(APP_ICON_PNG) {
+                    let _ = window.set_icon(icon);
+                }
                 window_state::restore(&window, app.handle());
                 window_state::watch(&window, app.handle());
                 let _ = window.show();
