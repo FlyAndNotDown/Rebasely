@@ -46,13 +46,20 @@ export function CommitFiles() {
           </button>
           <button
             type="button"
+            title="Copy time"
+            className="rounded-md px-1 py-0.5 tabular-nums hover:bg-muted hover:text-foreground"
+            onClick={() => void copyText(formatAbsoluteTime(commit.timestamp), "Copied time")}
+          >
+            {formatAbsoluteTime(commit.timestamp)}
+          </button>
+          <button
+            type="button"
             title="Copy full hash"
-            className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-[11px] text-foreground/80 hover:bg-muted/80 hover:text-foreground"
+            className="rounded-md px-1 py-0.5 font-mono hover:bg-muted hover:text-foreground"
             onClick={() => void copyText(commit.id, "Copied commit hash")}
           >
             {commit.shortId}
           </button>
-          <span className="tabular-nums">{formatAbsoluteTime(commit.timestamp)}</span>
         </div>
         {commit.body ? (
           <p className="mt-2 max-h-24 overflow-auto whitespace-pre-wrap text-xs text-muted-foreground">
