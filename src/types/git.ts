@@ -105,6 +105,7 @@ export type AvatarProvider = "dicebear";
 export interface AppPrefs {
   terminalId: string;
   avatarProvider: AvatarProvider;
+  sidebarOrder: string[];
 }
 
 export interface RemoteInfo {

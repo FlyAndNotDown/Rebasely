@@ -46,7 +46,7 @@ export function SettingsDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const { theme, setTheme } = useTheme();
-  const { updatePrefs } = useGit();
+  const { prefs, updatePrefs } = useGit();
   const [section, setSection] = useState<SettingsSection>("git");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -82,6 +82,7 @@ export function SettingsDialog({
       await Promise.all([
         gitApi.setGitIdentity({ name: name.trim(), email: email.trim() }),
         updatePrefs({
+          ...prefs,
           terminalId,
           avatarProvider,
         }),

@@ -12,6 +12,8 @@ pub struct AppPrefs {
     pub terminal_id: String,
     #[serde(default = "default_avatar_provider")]
     pub avatar_provider: String,
+    #[serde(default = "default_sidebar_order")]
+    pub sidebar_order: Vec<String>,
 }
 
 fn default_terminal_id() -> String {
@@ -22,11 +24,20 @@ fn default_avatar_provider() -> String {
     "dicebear".to_string()
 }
 
+fn default_sidebar_order() -> Vec<String> {
+    vec![
+        "changes".to_string(),
+        "history".to_string(),
+        "stash".to_string(),
+    ]
+}
+
 impl Default for AppPrefs {
     fn default() -> Self {
         Self {
             terminal_id: default_terminal_id(),
             avatar_provider: default_avatar_provider(),
+            sidebar_order: default_sidebar_order(),
         }
     }
 }
