@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { type Layout } from "react-resizable-panels";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useGroupRef, type Layout } from "react-resizable-panels";
 import { ChangesPane } from "@/components/changes-pane";
 import { CommitFiles } from "@/components/commit-files";
 import { DiffViewer } from "@/components/diff-viewer";
@@ -15,20 +15,42 @@ import { cn } from "@/lib/utils";
 import { useGit } from "@/state/git-context";
 import type { PanelLayoutId } from "@/types/git";
 
-function HistoryWorkspace() {
+function usePanelGroupLayout(id: PanelLayoutId) {
   const { prefs, updatePanelLayout } = useGit();
-  const layouts = useRef(prefs.panelLayouts);
-  const persist = (id: PanelLayoutId) => (layout: Layout, meta: { isUserInteraction: boolean }) => {
-    if (meta.isUserInteraction) updatePanelLayout(id, layout);
+  const groupRef = useGroupRef();
+  const layout = prefs.panelLayouts[id];
+  const layoutRef = useRef(layout);
+  layoutRef.current = layout;
+
+  useLayoutEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      groupRef.current?.setLayout(layoutRef.current);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [groupRef]);
+
+  return {
+    groupRef,
+    defaultLayout: layout,
+    onLayoutChanged: (next: Layout, meta: { isUserInteraction: boolean }) => {
+      if (meta.isUserInteraction) updatePanelLayout(id, next);
+    },
   };
+}
+
+function HistoryWorkspace() {
+  const shell = usePanelGroupLayout("historyShell");
+  const history = usePanelGroupLayout("history");
+  const details = usePanelGroupLayout("historyDetails");
 
   return (
     <ResizablePanelGroup
       id="history-shell"
+      groupRef={shell.groupRef}
       orientation="horizontal"
-      className="min-h-0 flex-1"
-      defaultLayout={layouts.current.historyShell}
-      onLayoutChanged={persist("historyShell")}
+      className="min-h-0 min-w-0 flex-1"
+      defaultLayout={shell.defaultLayout}
+      onLayoutChanged={shell.onLayoutChanged}
     >
       <ResizablePanel id="history-branches" defaultSize="15%" minSize="12%" maxSize="32%">
         <HistoryBranches />
@@ -37,10 +59,11 @@ function HistoryWorkspace() {
       <ResizablePanel id="history-main" defaultSize="85%" minSize="50%">
         <ResizablePanelGroup
           id="history"
+          groupRef={history.groupRef}
           orientation="vertical"
-          className="min-h-0"
-          defaultLayout={layouts.current.history}
-          onLayoutChanged={persist("history")}
+          className="min-h-0 min-w-0"
+          defaultLayout={history.defaultLayout}
+          onLayoutChanged={history.onLayoutChanged}
         >
           <ResizablePanel id="history-commits" defaultSize="67%" minSize="28%">
             <HistoryPane />
@@ -49,10 +72,11 @@ function HistoryWorkspace() {
           <ResizablePanel id="history-details" defaultSize="33%" minSize="18%">
             <ResizablePanelGroup
               id="history-details"
+              groupRef={details.groupRef}
               orientation="horizontal"
-              className="min-h-0"
-              defaultLayout={layouts.current.historyDetails}
-              onLayoutChanged={persist("historyDetails")}
+              className="min-h-0 min-w-0"
+              defaultLayout={details.defaultLayout}
+              onLayoutChanged={details.onLayoutChanged}
             >
               <ResizablePanel id="history-files" defaultSize="34%" minSize="20%" maxSize="55%">
                 <CommitFiles />
@@ -70,18 +94,16 @@ function HistoryWorkspace() {
 }
 
 function ChangesWorkspace() {
-  const { prefs, updatePanelLayout } = useGit();
-  const layouts = useRef(prefs.panelLayouts);
+  const changes = usePanelGroupLayout("changes");
 
   return (
     <ResizablePanelGroup
       id="changes"
+      groupRef={changes.groupRef}
       orientation="horizontal"
-      className="min-h-0 flex-1"
-      defaultLayout={layouts.current.changes}
-      onLayoutChanged={(layout, meta) => {
-        if (meta.isUserInteraction) updatePanelLayout("changes", layout);
-      }}
+      className="min-h-0 min-w-0 flex-1"
+      defaultLayout={changes.defaultLayout}
+      onLayoutChanged={changes.onLayoutChanged}
     >
       <ResizablePanel id="changes-files" defaultSize="36%" minSize="24%" maxSize="52%">
         <ChangesPane />
@@ -94,12 +116,34 @@ function ChangesWorkspace() {
   );
 }
 
+function StackedPane({
+  active,
+  children,
+}: {
+  active: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      className={cn(
+        "absolute inset-0 min-h-0 min-w-0",
+        active ? "z-10 flex" : "pointer-events-none invisible flex",
+      )}
+      aria-hidden={!active}
+    >
+      {children}
+    </div>
+  );
+}
+
 export function Workspace() {
   const { view, snapshot } = useGit();
   const [visited, setVisited] = useState({
     history: view === "history",
     stash: view === "stash",
   });
+  const showHistory = visited.history || view === "history";
+  const showStash = visited.stash || view === "stash";
 
   useEffect(() => {
     setVisited((current) => {
@@ -118,20 +162,20 @@ export function Workspace() {
   }
 
   return (
-    <div className="flex h-full min-h-0">
-      {visited.stash ? (
-        <div className={cn("min-h-0 flex-1", view === "stash" ? "flex" : "hidden")}>
+    <div className="relative h-full min-h-0 min-w-0">
+      {showStash ? (
+        <StackedPane active={view === "stash"}>
           <StashPane />
-        </div>
+        </StackedPane>
       ) : null}
-      {visited.history ? (
-        <div className={cn("min-h-0 flex-1", view === "history" ? "flex" : "hidden")}>
+      {showHistory ? (
+        <StackedPane active={view === "history"}>
           <HistoryWorkspace />
-        </div>
+        </StackedPane>
       ) : null}
-      <div className={cn("min-h-0 flex-1", view === "changes" ? "flex" : "hidden")}>
+      <StackedPane active={view === "changes"}>
         <ChangesWorkspace />
-      </div>
+      </StackedPane>
     </div>
   );
 }

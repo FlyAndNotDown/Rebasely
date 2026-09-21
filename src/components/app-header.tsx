@@ -59,6 +59,7 @@ export function AppHeader() {
     closeTab,
     reorderTabs,
     revealRepo,
+    openFolder,
     openTerminal,
     ensureBranches,
     checkoutBranch,
@@ -105,6 +106,7 @@ export function AppHeader() {
           setActiveTab={setActiveTab}
           closeTab={closeTab}
           reorderTabs={reorderTabs}
+          onOpenRepository={() => void openFolder()}
         />
         <WindowControls />
       </div>
@@ -272,12 +274,14 @@ function TabStrip({
   setActiveTab,
   closeTab,
   reorderTabs,
+  onOpenRepository,
 }: {
   tabs: AppTab[];
   activeTabId: string;
   setActiveTab: (id: string) => void;
   closeTab: (id: string) => void;
   reorderTabs: (fromId: string, toId: string, place: "before" | "after") => void;
+  onOpenRepository: () => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const measureRef = useRef<HTMLDivElement>(null);
@@ -300,8 +304,9 @@ function TabStrip({
       if (nodes.length === 0) return;
       const gap = 4;
       const moreWidth = 56;
+      const plusWidth = 32;
       const dragReserve = 32;
-      const available = Math.max(0, containerNode.clientWidth - dragReserve);
+      const available = Math.max(0, containerNode.clientWidth - plusWidth - dragReserve);
       const widths = nodes.map((node) => node.offsetWidth);
 
       let used = 0;
@@ -477,6 +482,21 @@ function TabStrip({
             </DropdownMenuContent>
           </DropdownMenu>
         ) : null}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              className="size-8 shrink-0 text-muted-foreground"
+              aria-label="Open repository"
+              onClick={onOpenRepository}
+            >
+              <PlusIcon />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Open repository</TooltipContent>
+        </Tooltip>
         <div
           className="h-full min-h-9 min-w-8 flex-1"
           data-tauri-drag-region

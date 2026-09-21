@@ -60,9 +60,20 @@ export function normalizeLayout(value: PanelLayout | null | undefined, fallback:
   return compactLayout(next);
 }
 
+export function normalizeHistoryShell(value?: PanelLayout | null): PanelLayout {
+  const fallback = DEFAULT_PANEL_LAYOUTS.historyShell;
+  const raw = normalizeLayout(value, fallback);
+  const branches = raw["history-branches"];
+  if (branches < 12 || branches > 32) return { ...fallback };
+  return {
+    "history-branches": branches,
+    "history-main": Math.round((100 - branches) * 100) / 100,
+  };
+}
+
 export function normalizePanelLayouts(value?: Partial<PanelLayouts> | null): PanelLayouts {
   return {
-    historyShell: normalizeLayout(value?.historyShell, DEFAULT_PANEL_LAYOUTS.historyShell),
+    historyShell: normalizeHistoryShell(value?.historyShell),
     history: normalizeLayout(value?.history, DEFAULT_PANEL_LAYOUTS.history),
     historyDetails: normalizeLayout(value?.historyDetails, DEFAULT_PANEL_LAYOUTS.historyDetails),
     changes: normalizeLayout(value?.changes, DEFAULT_PANEL_LAYOUTS.changes),
