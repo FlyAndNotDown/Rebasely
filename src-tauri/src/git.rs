@@ -1939,6 +1939,60 @@ pub fn create_branch(
     Ok(())
 }
 
+fn split_remote_branch(repo: &Repository, name: &str) -> AppResult<(String, String)> {
+    let remotes = repo.remotes()?;
+    let mut best: Option<(String, String)> = None;
+    for remote in remotes.iter().flatten() {
+        let prefix = format!("{remote}/");
+        let Some(rest) = name.strip_prefix(&prefix) else {
+            continue;
+        };
+        if rest.is_empty() || rest == "HEAD" {
+            continue;
+        }
+        if best.as_ref().map(|(current, _)| current.len()).unwrap_or(0) < remote.len() {
+            best = Some((remote.to_string(), rest.to_string()));
+        }
+    }
+    best.ok_or_else(|| AppError::msg(format!("Not a remote branch: {name}")))
+}
+
+pub fn delete_branch(
+    repo: &mut Repository,
+    name: &str,
+    on_progress: impl FnMut(&str) + Send,
+) -> AppResult<WorkspaceSnapshot> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(AppError::msg("Branch name cannot be empty"));
+    }
+    if repo.find_branch(name, BranchType::Local).is_ok() {
+        if repo
+            .head()
+            .ok()
+            .and_then(|head| head.shorthand().map(|current| current == name))
+            .unwrap_or(false)
+        {
+            return Err(AppError::msg("Cannot delete the current branch"));
+        }
+        run_git_stdout(workdir(repo)?, &["branch", "-d", name])?;
+        return snapshot(repo);
+    }
+    if repo.find_branch(name, BranchType::Remote).is_ok() {
+        let (remote, branch) = split_remote_branch(repo, name)?;
+        run_git_ok_progress(
+            workdir(repo)?,
+            &["push", "--progress", &remote, "--delete", &branch],
+            on_progress,
+        )?;
+        if let Ok(mut tracking) = repo.find_branch(name, BranchType::Remote) {
+            let _ = tracking.delete();
+        }
+        return snapshot(repo);
+    }
+    Err(AppError::msg(format!("Branch not found: {name}")))
+}
+
 pub fn revert_commit(repo: &mut Repository, spec: &str) -> AppResult<WorkspaceSnapshot> {
     let (oid, is_merge) = {
         let commit = peel_commit(repo, spec)?;

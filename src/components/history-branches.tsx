@@ -1,6 +1,21 @@
 import { useEffect, useMemo, useState } from "react";
 import { ChevronRightIcon, EyeIcon, GitBranchIcon, PlusIcon, SearchIcon } from "lucide-react";
 import { AddRemoteDialog } from "@/components/add-remote-dialog";
+import { Button } from "@/components/ui/button";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { isRemoteTrackingBranch } from "@/lib/git";
 import { cn } from "@/lib/utils";
@@ -25,9 +40,12 @@ export function HistoryBranches() {
     setHistoryExpanded,
     ensureBranches,
     addRemote,
+    checkoutBranch,
+    deleteBranch,
   } = useGit();
   const [query, setQuery] = useState("");
   const [addOpen, setAddOpen] = useState(false);
+  const [deleting, setDeleting] = useState<BranchInfo | null>(null);
   const branches = snapshot?.branches;
   const needle = query.trim().toLowerCase();
   const watched = useMemo(() => new Set(historyRevs), [historyRevs]);
@@ -93,6 +111,15 @@ export function HistoryBranches() {
     setHistoryRevs([...historyRevs, name]);
   }
 
+  function requestDelete(branch: BranchInfo) {
+    if (branch.isHead) return;
+    if (branch.isRemote) {
+      setDeleting(branch);
+      return;
+    }
+    void deleteBranch(branch.name);
+  }
+
   async function handleAddRemote(name: string, url: string) {
     const ok = await addRemote(name, url);
     if (ok) {
@@ -148,6 +175,8 @@ export function HistoryBranches() {
             watched={watched}
             onToggleFolder={toggleFolder}
             onToggleWatch={toggleWatch}
+            onCheckout={(branch) => void checkoutBranch(branch.name)}
+            onDelete={requestDelete}
             onAddRemote={() => setAddOpen(true)}
           />
         )}
@@ -158,6 +187,35 @@ export function HistoryBranches() {
         existingNames={snapshot?.remotes.map((remote) => remote.name) ?? []}
         onAdd={handleAddRemote}
       />
+      <Dialog open={Boolean(deleting)} onOpenChange={(open) => !open && setDeleting(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete remote branch?</DialogTitle>
+            <DialogDescription>
+              This permanently deletes{" "}
+              <span className="font-mono text-foreground">{deleting?.name}</span> from the remote.
+              Anyone still using it will need to recover the branch.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setDeleting(null)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => {
+                const branch = deleting;
+                if (!branch) return;
+                setDeleting(null);
+                void deleteBranch(branch.name);
+              }}
+            >
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -170,6 +228,8 @@ function TreeRows({
   watched,
   onToggleFolder,
   onToggleWatch,
+  onCheckout,
+  onDelete,
   onAddRemote,
 }: {
   nodes: BranchTreeNode[];
@@ -179,29 +239,57 @@ function TreeRows({
   watched: Set<string>;
   onToggleFolder: (id: string) => void;
   onToggleWatch: (name: string) => void;
+  onCheckout: (branch: BranchInfo) => void;
+  onDelete: (branch: BranchInfo) => void;
   onAddRemote?: () => void;
 }) {
   return (
     <>
       {nodes.map((node) => {
         if (node.branch) {
-          const active = watched.has(node.branch.name);
+          const branch = node.branch;
+          const active = watched.has(branch.name);
           return (
-            <div
-              key={node.id}
-              className="flex h-7 items-center gap-1 pr-1"
-              style={{ paddingLeft: 8 + depth * 12 }}
-            >
-              <GitBranchIcon className="size-3.5 shrink-0 text-muted-foreground" />
-              <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
-                {node.label}
-              </span>
-              <WatchButton
-                active={active}
-                title={active ? "Remove this branch from History" : "Add this branch to History"}
-                onClick={() => onToggleWatch(node.branch!.name)}
-              />
-            </div>
+            <ContextMenu key={node.id}>
+              <ContextMenuTrigger asChild>
+                <div
+                  className="flex h-7 items-center gap-1 pr-1 text-muted-foreground hover:bg-muted/70"
+                  style={{ paddingLeft: 8 + depth * 12 }}
+                >
+                  <GitBranchIcon
+                    className={cn(
+                      "size-3.5 shrink-0",
+                      branch.isHead ? "text-foreground" : "text-muted-foreground",
+                    )}
+                  />
+                  <span
+                    className={cn(
+                      "min-w-0 flex-1 truncate font-mono text-xs",
+                      branch.isHead ? "text-foreground" : "text-muted-foreground",
+                    )}
+                  >
+                    {node.label}
+                  </span>
+                  <WatchButton
+                    active={active}
+                    title={active ? "Remove this branch from History" : "Add this branch to History"}
+                    onClick={() => onToggleWatch(branch.name)}
+                  />
+                </div>
+              </ContextMenuTrigger>
+              <ContextMenuContent className="w-44">
+                <ContextMenuItem disabled={branch.isHead} onClick={() => onCheckout(branch)}>
+                  Checkout
+                </ContextMenuItem>
+                <ContextMenuItem
+                  variant="destructive"
+                  disabled={branch.isHead}
+                  onClick={() => onDelete(branch)}
+                >
+                  Delete
+                </ContextMenuItem>
+              </ContextMenuContent>
+            </ContextMenu>
           );
         }
         const open = forceOpen || expanded.has(node.id);
@@ -250,6 +338,8 @@ function TreeRows({
                 watched={watched}
                 onToggleFolder={onToggleFolder}
                 onToggleWatch={onToggleWatch}
+                onCheckout={onCheckout}
+                onDelete={onDelete}
                 onAddRemote={onAddRemote}
               />
             ) : null}

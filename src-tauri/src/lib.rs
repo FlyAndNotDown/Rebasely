@@ -246,6 +246,19 @@ async fn create_branch(
 }
 
 #[tauri::command]
+async fn delete_branch(
+    repo_path: String,
+    name: String,
+    activity_id: Option<String>,
+    app: AppHandle,
+) -> AppResult<WorkspaceSnapshot> {
+    with_repo_async(repo_path, move |repo| {
+        git::delete_branch(repo, &name, progress_sink(&app, activity_id.as_deref()))
+    })
+    .await
+}
+
+#[tauri::command]
 async fn revert_commit(repo_path: String, oid: String) -> AppResult<WorkspaceSnapshot> {
     with_repo_async(repo_path, move |repo| git::revert_commit(repo, &oid)).await
 }
@@ -487,6 +500,7 @@ pub fn run() {
             pull_remote,
             push_remote,
             create_branch,
+            delete_branch,
             revert_commit,
             cherry_pick_commit,
             write_commit_patch,

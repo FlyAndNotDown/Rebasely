@@ -99,6 +99,12 @@ export const gitApi = {
       switch: switchTo,
       start: start || null,
     }),
+  deleteBranch: (repoPath: string, name: string, activityId?: string) =>
+    invoke<WorkspaceSnapshot>("delete_branch", {
+      repoPath,
+      name,
+      activityId: activityId || null,
+    }),
   revertCommit: (repoPath: string, oid: string) =>
     invoke<WorkspaceSnapshot>("revert_commit", { repoPath, oid }),
   cherryPickCommit: (repoPath: string, oid: string) =>
