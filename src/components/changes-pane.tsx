@@ -160,32 +160,6 @@ export function ChangesPane() {
     <div className="flex h-full min-h-0 flex-col">
       <div className="min-h-0 flex-1 overflow-auto px-2 py-2">
         <Section
-          title="Staged"
-          count={counts.staged}
-          open={stagedOpen}
-          onOpenChange={setStagedOpen}
-          actionLabel="Unstage all"
-          onAction={
-            staged.length ? () => void unstage(staged.map((file) => file.path)) : undefined
-          }
-        >
-          {staged.length === 0 ? (
-            <p className="px-1.5 py-2 text-xs text-muted-foreground">No staged files</p>
-          ) : (
-            staged.map((file) => (
-              <FileRow
-                key={`staged:${file.path}`}
-                file={file}
-                active={selectedChange?.path === file.path && selectedChange.staged}
-                onSelect={() => void selectChange(file.path, true)}
-                onPrimary={() => void unstage([file.path])}
-                primaryLabel="Unstage"
-              />
-            ))
-          )}
-        </Section>
-
-        <Section
           title="Changes"
           count={counts.unstaged}
           open={changesOpen}
@@ -207,6 +181,32 @@ export function ChangesPane() {
                 onPrimary={() => void stage([file.path])}
                 onDiscard={() => setDiscardTarget([file.path])}
                 primaryLabel="Stage"
+              />
+            ))
+          )}
+        </Section>
+
+        <Section
+          title="Staged"
+          count={counts.staged}
+          open={stagedOpen}
+          onOpenChange={setStagedOpen}
+          actionLabel="Unstage all"
+          onAction={
+            staged.length ? () => void unstage(staged.map((file) => file.path)) : undefined
+          }
+        >
+          {staged.length === 0 ? (
+            <p className="px-1.5 py-2 text-xs text-muted-foreground">No staged files</p>
+          ) : (
+            staged.map((file) => (
+              <FileRow
+                key={`staged:${file.path}`}
+                file={file}
+                active={selectedChange?.path === file.path && selectedChange.staged}
+                onSelect={() => void selectChange(file.path, true)}
+                onPrimary={() => void unstage([file.path])}
+                primaryLabel="Unstage"
               />
             ))
           )}
