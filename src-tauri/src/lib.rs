@@ -232,12 +232,32 @@ fn progress_sink(app: &AppHandle, activity_id: Option<&str>) -> impl FnMut(&str)
 }
 
 #[tauri::command]
-async fn create_branch(repo_path: String, name: String, switch: bool) -> AppResult<WorkspaceSnapshot> {
+async fn create_branch(
+    repo_path: String,
+    name: String,
+    switch: bool,
+    start: Option<String>,
+) -> AppResult<WorkspaceSnapshot> {
     with_repo_async(repo_path, move |repo| {
-        git::create_branch(repo, &name, switch)?;
+        git::create_branch(repo, &name, switch, start.as_deref())?;
         git::snapshot(repo)
     })
     .await
+}
+
+#[tauri::command]
+async fn revert_commit(repo_path: String, oid: String) -> AppResult<WorkspaceSnapshot> {
+    with_repo_async(repo_path, move |repo| git::revert_commit(repo, &oid)).await
+}
+
+#[tauri::command]
+async fn cherry_pick_commit(repo_path: String, oid: String) -> AppResult<WorkspaceSnapshot> {
+    with_repo_async(repo_path, move |repo| git::cherry_pick_commit(repo, &oid)).await
+}
+
+#[tauri::command]
+async fn write_commit_patch(repo_path: String, oid: String, dest: String) -> AppResult<()> {
+    with_repo_async(repo_path, move |repo| git::write_commit_patch(repo, &oid, &dest)).await
 }
 
 #[tauri::command]
@@ -462,6 +482,9 @@ pub fn run() {
             pull_remote,
             push_remote,
             create_branch,
+            revert_commit,
+            cherry_pick_commit,
+            write_commit_patch,
             add_remote,
             probe_remote_url,
             set_remote_url,

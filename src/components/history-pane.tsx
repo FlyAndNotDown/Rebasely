@@ -1,15 +1,37 @@
 import { useEffect, useMemo, useState, type UIEvent } from "react";
-import { CopyIcon, HashIcon, MailIcon, MessageSquareTextIcon, SearchIcon, UserIcon } from "lucide-react";
+import {
+  CopyIcon,
+  CopyPlusIcon,
+  FileDiffIcon,
+  GitBranchIcon,
+  HashIcon,
+  MailIcon,
+  MessageSquareTextIcon,
+  SearchIcon,
+  Undo2Icon,
+  UserIcon,
+} from "lucide-react";
 import { AuthorAvatar } from "@/components/author-avatar";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
+  ContextMenuSeparator,
   ContextMenuSub,
   ContextMenuSubContent,
   ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { formatAbsoluteTime } from "@/lib/format";
 import { errorMessage, expandHistoryRevs, gitApi } from "@/lib/git";
@@ -37,12 +59,22 @@ export function HistoryPane() {
     historyRevs,
     prefs,
     snapshot,
+    createBranch,
+    revertCommit,
+    cherryPickCommit,
+    createPatch,
   } = useGit();
   const [query, setQuery] = useState("");
   const [debounced, setDebounced] = useState("");
   const [results, setResults] = useState<CommitSummary[] | null>(null);
   const [searching, setSearching] = useState(false);
   const [searchHasMore, setSearchHasMore] = useState(false);
+  const [branchCommit, setBranchCommit] = useState<CommitSummary | null>(null);
+  const [branchName, setBranchName] = useState("");
+  const [checkoutNew, setCheckoutNew] = useState(true);
+  const [confirm, setConfirm] = useState<{ kind: "revert" | "cherry-pick"; commit: CommitSummary } | null>(
+    null,
+  );
   const selectedId = historySelection?.id ?? null;
   const searchingMode = Boolean(debounced);
   const visible = searchingMode ? (results ?? []) : commits;
@@ -167,6 +199,14 @@ export function HistoryPane() {
                     : null
                 }
                 onSelect={() => void selectCommit(commit.id)}
+                onCreateBranch={() => {
+                  setBranchCommit(commit);
+                  setBranchName("");
+                  setCheckoutNew(true);
+                }}
+                onRevert={() => setConfirm({ kind: "revert", commit })}
+                onCherryPick={() => setConfirm({ kind: "cherry-pick", commit })}
+                onCreatePatch={() => void createPatch(commit)}
               />
             ))}
             <div className="px-3 py-2 text-center text-[11px] text-muted-foreground">
@@ -181,6 +221,92 @@ export function HistoryPane() {
           </>
         )}
       </div>
+      <Dialog
+        open={Boolean(branchCommit)}
+        onOpenChange={(open) => {
+          if (!open) setBranchCommit(null);
+        }}
+      >
+        <DialogContent>
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              const name = branchName.trim();
+              const commit = branchCommit;
+              if (!name || !commit) return;
+              void createBranch(name, checkoutNew, commit.id).then((ok) => {
+                if (ok) setBranchCommit(null);
+              });
+            }}
+          >
+            <DialogHeader>
+              <DialogTitle>Create branch</DialogTitle>
+              <DialogDescription>
+                Starts at {branchCommit?.shortId}
+                {branchCommit?.summary ? ` — ${branchCommit.summary}` : ""}.
+              </DialogDescription>
+            </DialogHeader>
+            <Input
+              className="mt-3 font-mono"
+              autoFocus
+              placeholder="foo"
+              value={branchName}
+              onChange={(event) => setBranchName(event.target.value)}
+            />
+            <label className="mt-3 flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={checkoutNew}
+                onCheckedChange={(value) => setCheckoutNew(value === true)}
+              />
+              <span>Check out after creating</span>
+            </label>
+            <DialogFooter className="mt-4">
+              <Button type="button" variant="outline" onClick={() => setBranchCommit(null)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={!branchName.trim()}>
+                Create
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={Boolean(confirm)} onOpenChange={(open) => !open && setConfirm(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{confirm?.kind === "revert" ? "Revert this commit?" : "Cherry-pick this commit?"}</DialogTitle>
+            <DialogDescription>
+              {confirm?.kind === "revert"
+                ? "Creates a new commit that undoes this change on the current branch."
+                : "Applies this commit onto the current branch."}{" "}
+              {confirm ? (
+                <span className="font-mono text-foreground">
+                  {confirm.commit.shortId}
+                  {confirm.commit.summary ? ` — ${confirm.commit.summary}` : ""}
+                </span>
+              ) : null}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setConfirm(null)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant={confirm?.kind === "revert" ? "destructive" : "default"}
+              onClick={() => {
+                const next = confirm;
+                if (!next) return;
+                setConfirm(null);
+                if (next.kind === "revert") void revertCommit(next.commit.id);
+                else void cherryPickCommit(next.commit.id);
+              }}
+            >
+              {confirm?.kind === "revert" ? "Revert" : "Cherry-pick"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -191,12 +317,20 @@ function CommitRow({
   avatarProvider,
   graph,
   onSelect,
+  onCreateBranch,
+  onRevert,
+  onCherryPick,
+  onCreatePatch,
 }: {
   commit: CommitSummary;
   selected: boolean;
   avatarProvider: AvatarProvider;
   graph: { width: number; row: GraphRow; previous?: GraphRow } | null;
   onSelect: () => void;
+  onCreateBranch: () => void;
+  onRevert: () => void;
+  onCherryPick: () => void;
+  onCreatePatch: () => void;
 }) {
   const message = [commit.summary, commit.body].filter(Boolean).join("\n\n");
 
@@ -259,7 +393,24 @@ function CommitRow({
           </span>
         </button>
       </ContextMenuTrigger>
-      <ContextMenuContent className="w-44">
+      <ContextMenuContent className="w-48">
+        <ContextMenuItem onClick={onCreateBranch}>
+          <GitBranchIcon />
+          Create branch
+        </ContextMenuItem>
+        <ContextMenuItem onClick={onRevert}>
+          <Undo2Icon />
+          Revert
+        </ContextMenuItem>
+        <ContextMenuItem onClick={onCherryPick}>
+          <CopyPlusIcon />
+          Cherry-pick
+        </ContextMenuItem>
+        <ContextMenuItem onClick={onCreatePatch}>
+          <FileDiffIcon />
+          Create patch
+        </ContextMenuItem>
+        <ContextMenuSeparator />
         <ContextMenuSub>
           <ContextMenuSubTrigger>
             <CopyIcon />

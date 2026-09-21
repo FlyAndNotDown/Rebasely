@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { open } from "@tauri-apps/plugin-dialog";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import { toast } from "sonner";
 import { emptyBinaryDiff, errorMessage, expandHistoryRevs, gitApi } from "@/lib/git";
 import { pathSegments, sameRepoPath } from "@/lib/format";
@@ -202,7 +202,10 @@ interface GitContextValue {
   fetchRemote: () => Promise<void>;
   pullRemote: () => Promise<void>;
   pushRemote: (force?: boolean) => Promise<void>;
-  createBranch: (name: string, switchTo: boolean) => Promise<void>;
+  createBranch: (name: string, switchTo: boolean, start?: string) => Promise<boolean>;
+  revertCommit: (oid: string) => Promise<boolean>;
+  cherryPickCommit: (oid: string) => Promise<boolean>;
+  createPatch: (commit: CommitSummary) => Promise<void>;
   addRemote: (name: string, url: string) => Promise<boolean>;
   stashSave: (message: string, includeUntracked: boolean) => Promise<void>;
   stashApply: (index: number) => Promise<void>;
@@ -991,14 +994,109 @@ export function GitProvider({ children }: { children: ReactNode }) {
   }, [runMutation]);
 
   const createBranch = useCallback(
-    async (name: string, switchTo: boolean) => {
-      await runMutation(
+    async (name: string, switchTo: boolean, start?: string) => {
+      const ok = await runMutation(
         switchTo ? `Creating and checking out ${name}` : `Creating ${name}`,
-        (repoPath) => gitApi.createBranch(repoPath, name, switchTo),
+        (repoPath) => gitApi.createBranch(repoPath, name, switchTo, start),
         switchTo ? `Created and checked out ${name}` : `Created ${name}`,
       );
+      if (!ok) return false;
+      const tabId = activeTabIdRef.current;
+      patchSession(tabId, {
+        ...(switchTo
+          ? {
+              changeSelection: null,
+              historySelection: null,
+              changeDiff: null,
+              historyDiff: null,
+              commitDetails: null,
+            }
+          : {}),
+        commits: [],
+        commitsLoaded: false,
+        commitsHasMore: true,
+      });
+      if (sessionsRef.current[tabId]?.view === "history") {
+        void ensureHistory();
+      }
+      return true;
     },
-    [runMutation],
+    [ensureHistory, patchSession, runMutation],
+  );
+
+  const refreshAfterReplay = useCallback(async () => {
+    const repoPath = activeRepoPath();
+    const tabId = activeTabIdRef.current;
+    if (!repoPath) return;
+    try {
+      const snapshot = await gitApi.refreshWorkspace(repoPath);
+      const dirty = snapshot.status.staged.length > 0 || snapshot.status.unstaged.length > 0;
+      const headChanged = sessionsRef.current[tabId]?.snapshot?.repo.headId !== snapshot.repo.headId;
+      patchSession(tabId, {
+        snapshot,
+        ...(dirty ? { view: "changes" } : {}),
+        ...(headChanged
+          ? {
+              commits: [],
+              commitsLoaded: false,
+              commitsHasMore: true,
+            }
+          : {}),
+      });
+      if (headChanged && sessionsRef.current[tabId]?.view === "history") {
+        void ensureHistory();
+      }
+    } catch {
+      /* the original error is already shown */
+    }
+  }, [activeRepoPath, ensureHistory, patchSession]);
+
+  const revertCommit = useCallback(
+    async (oid: string) => {
+      const ok = await runMutation(
+        `Reverting ${oid.slice(0, 7)}`,
+        (repoPath) => gitApi.revertCommit(repoPath, oid),
+        "Reverted commit",
+      );
+      if (!ok) await refreshAfterReplay();
+      return ok;
+    },
+    [refreshAfterReplay, runMutation],
+  );
+
+  const cherryPickCommit = useCallback(
+    async (oid: string) => {
+      const ok = await runMutation(
+        `Cherry-picking ${oid.slice(0, 7)}`,
+        (repoPath) => gitApi.cherryPickCommit(repoPath, oid),
+        "Cherry-picked commit",
+      );
+      if (!ok) await refreshAfterReplay();
+      return ok;
+    },
+    [refreshAfterReplay, runMutation],
+  );
+
+  const createPatch = useCallback(
+    async (commit: CommitSummary) => {
+      const repoPath = activeRepoPath();
+      if (!repoPath) return;
+      const dest = await save({
+        title: "Save patch",
+        defaultPath: patchFileName(commit),
+        filters: [{ name: "Patch", extensions: ["patch"] }],
+      });
+      if (typeof dest !== "string" || !dest) return;
+      try {
+        await runActivity("Creating patch", sessionsRef.current[activeTabIdRef.current]?.snapshot?.repo.name, () =>
+          gitApi.writeCommitPatch(repoPath, commit.id, dest),
+        );
+        toast.success("Saved patch");
+      } catch (error) {
+        toast.error(errorMessage(error));
+      }
+    },
+    [activeRepoPath, runActivity],
   );
 
   const addRemote = useCallback(
@@ -1117,6 +1215,9 @@ export function GitProvider({ children }: { children: ReactNode }) {
       pullRemote,
       pushRemote,
       createBranch,
+      revertCommit,
+      cherryPickCommit,
+      createPatch,
       addRemote,
       stashSave,
       stashApply,
@@ -1160,6 +1261,9 @@ export function GitProvider({ children }: { children: ReactNode }) {
       pullRemote,
       pushRemote,
       createBranch,
+      revertCommit,
+      cherryPickCommit,
+      createPatch,
       addRemote,
       stashSave,
       stashApply,
@@ -1178,4 +1282,15 @@ export function useGit() {
     throw new Error("useGit must be used within GitProvider");
   }
   return value;
+}
+
+function patchFileName(commit: CommitSummary) {
+  const slug = (commit.summary || commit.shortId)
+    .toLowerCase()
+    .replace(/[<>:"/\\|?*]+/g, "-")
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 48);
+  return `${commit.shortId}-${slug || "commit"}.patch`;
 }

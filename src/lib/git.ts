@@ -92,12 +92,19 @@ export const gitApi = {
     invoke<WorkspaceSnapshot>("pull_remote", { repoPath, activityId }),
   pushRemote: (repoPath: string, activityId?: string, force = false) =>
     invoke<WorkspaceSnapshot>("push_remote", { repoPath, activityId, force }),
-  createBranch: (repoPath: string, name: string, switchTo: boolean) =>
+  createBranch: (repoPath: string, name: string, switchTo: boolean, start?: string) =>
     invoke<WorkspaceSnapshot>("create_branch", {
       repoPath,
       name,
       switch: switchTo,
+      start: start || null,
     }),
+  revertCommit: (repoPath: string, oid: string) =>
+    invoke<WorkspaceSnapshot>("revert_commit", { repoPath, oid }),
+  cherryPickCommit: (repoPath: string, oid: string) =>
+    invoke<WorkspaceSnapshot>("cherry_pick_commit", { repoPath, oid }),
+  writeCommitPatch: (repoPath: string, oid: string, dest: string) =>
+    invoke<void>("write_commit_patch", { repoPath, oid, dest }),
   stashSave: (repoPath: string, message: string, includeUntracked: boolean) =>
     invoke<WorkspaceSnapshot>("stash_save", { repoPath, message, includeUntracked }),
   stashApply: (repoPath: string, index: number) =>

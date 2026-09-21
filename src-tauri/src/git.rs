@@ -1910,18 +1910,96 @@ pub fn checkout_branch(repo: &Repository, name: &str) -> AppResult<()> {
     checkout_local_branch(repo, &local)
 }
 
-pub fn create_branch(repo: &Repository, name: &str, switch: bool) -> AppResult<()> {
+pub fn create_branch(
+    repo: &Repository,
+    name: &str,
+    switch: bool,
+    start: Option<&str>,
+) -> AppResult<()> {
     let name = name.trim();
     if name.is_empty() {
         return Err(AppError::msg("Branch name cannot be empty"));
     }
-    let commit = repo
-        .head()
-        .map_err(|_| AppError::msg("Cannot create a branch before the first commit"))?
-        .peel_to_commit()?;
-    repo.branch(name, &commit, false)?;
+    {
+        let commit = if let Some(start) = start.map(str::trim).filter(|value| !value.is_empty()) {
+            peel_commit(repo, start)?
+        } else {
+            repo.head()
+                .map_err(|_| AppError::msg("Cannot create a branch before the first commit"))?
+                .peel_to_commit()?
+        };
+        if repo.find_branch(name, BranchType::Local).is_ok() {
+            return Err(AppError::msg(format!("Branch `{name}` already exists")));
+        }
+        repo.branch(name, &commit, false)?;
+    }
     if switch {
         checkout_branch(repo, name)?;
+    }
+    Ok(())
+}
+
+pub fn revert_commit(repo: &mut Repository, spec: &str) -> AppResult<WorkspaceSnapshot> {
+    let (oid, is_merge) = {
+        let commit = peel_commit(repo, spec)?;
+        (commit.id().to_string(), commit.parent_count() > 1)
+    };
+    ensure_clean_for_replay(repo)?;
+    let root = workdir(repo)?;
+    if is_merge {
+        run_git_stdout(root, &["revert", "--no-edit", "-m", "1", &oid])?;
+    } else {
+        run_git_stdout(root, &["revert", "--no-edit", &oid])?;
+    }
+    snapshot(repo)
+}
+
+pub fn cherry_pick_commit(repo: &mut Repository, spec: &str) -> AppResult<WorkspaceSnapshot> {
+    let (oid, is_merge) = {
+        let commit = peel_commit(repo, spec)?;
+        (commit.id().to_string(), commit.parent_count() > 1)
+    };
+    ensure_clean_for_replay(repo)?;
+    let root = workdir(repo)?;
+    if is_merge {
+        run_git_stdout(root, &["cherry-pick", "-m", "1", &oid])?;
+    } else {
+        run_git_stdout(root, &["cherry-pick", &oid])?;
+    }
+    snapshot(repo)
+}
+
+pub fn write_commit_patch(repo: &Repository, spec: &str, dest: &str) -> AppResult<()> {
+    let oid = peel_commit(repo, spec)?.id().to_string();
+    let dest = dest.trim();
+    if dest.is_empty() {
+        return Err(AppError::msg("A patch path is required"));
+    }
+    let bytes = run_git_stdout(workdir(repo)?, &["format-patch", "-1", "--stdout", &oid])?;
+    if bytes.is_empty() {
+        return Err(AppError::msg("Git produced an empty patch"));
+    }
+    fs::write(dest, bytes)?;
+    Ok(())
+}
+
+fn peel_commit<'repo>(repo: &'repo Repository, spec: &str) -> AppResult<git2::Commit<'repo>> {
+    let spec = spec.trim();
+    if spec.is_empty() {
+        return Err(AppError::msg("Commit is required"));
+    }
+    Ok(repo.revparse_single(spec)?.peel_to_commit()?)
+}
+
+fn ensure_clean_for_replay(repo: &Repository) -> AppResult<()> {
+    let status = status_snapshot(repo)?;
+    if !status.staged.is_empty()
+        || status
+            .unstaged
+            .iter()
+            .any(|file| file.kind != "untracked")
+    {
+        return Err(AppError::msg("Commit or stash your changes first"));
     }
     Ok(())
 }
