@@ -1,6 +1,7 @@
 import { FolderOpenIcon, XIcon } from "lucide-react";
 import { AppMark } from "@/components/app-mark";
 import { Button } from "@/components/ui/button";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { disambiguateRepoLabels, displayPath, formatRelativeTime } from "@/lib/format";
 import { useGit } from "@/state/git-context";
 
@@ -29,7 +30,8 @@ export function WelcomeScreen() {
         {recents.length > 0 ? (
           <div className="mt-8 flex min-h-0 flex-col overflow-hidden">
             <p className="mb-2 shrink-0 text-xs text-muted-foreground">Recent</p>
-            <ul className="min-h-0 flex-1 overflow-y-auto divide-y divide-border rounded-lg border">
+            <ScrollArea className="min-h-0 flex-1 rounded-lg border">
+            <ul className="divide-y divide-border">
               {recents.map((repo) => (
                 <li key={repo.path} className="flex items-center gap-2 pr-1">
                   <button
@@ -60,6 +62,7 @@ export function WelcomeScreen() {
                 </li>
               ))}
             </ul>
+            </ScrollArea>
           </div>
         ) : null}
       </div>

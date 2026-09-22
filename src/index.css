@@ -193,6 +193,11 @@
     cursor: pointer;
   }
 
+  textarea {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklch, var(--foreground) 30%, transparent) transparent;
+  }
+
   [data-tauri-drag-region] {
     app-region: drag;
   }
@@ -211,4 +216,31 @@
 
 .activity-indeterminate {
   animation: activity-indeterminate 1.15s ease-in-out infinite;
+}
+
+@keyframes scroll-area-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes scroll-area-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+[data-slot="scroll-area-scrollbar"][data-state="visible"] {
+  animation: scroll-area-in 160ms ease-out both;
+}
+
+[data-slot="scroll-area-scrollbar"][data-state="hidden"] {
+  pointer-events: none;
+  animation: scroll-area-out 220ms ease-in both;
 }

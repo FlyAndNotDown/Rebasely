@@ -18,6 +18,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { Label } from "@/components/ui/label";
 import { errorMessage, gitApi } from "@/lib/git";
 import { normalizePrefs } from "@/lib/prefs";
@@ -109,7 +110,8 @@ export function SettingsDialog({
               General
             </NavButton>
           </aside>
-          <div className="min-w-0 flex-1 overflow-auto p-6">
+          <ScrollArea className="min-w-0 flex-1">
+          <div className="p-6">
             {section === "git" ? (
               <>
                 <DialogHeader>
@@ -212,6 +214,7 @@ export function SettingsDialog({
               </>
             )}
           </div>
+          </ScrollArea>
         </div>
         <DialogFooter className="mx-0 mb-0 rounded-none">
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>

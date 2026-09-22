@@ -1,6 +1,7 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { ChevronDownIcon, MinusIcon, PlusIcon, Undo2Icon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -158,7 +159,7 @@ export function ChangesPane() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="min-h-0 flex-1 overflow-auto px-2 py-2">
+      <ScrollArea className="min-h-0 flex-1 px-2 py-2">
         <Section
           title="Changes"
           count={counts.unstaged}
@@ -211,7 +212,7 @@ export function ChangesPane() {
             ))
           )}
         </Section>
-      </div>
+      </ScrollArea>
 
       <form
         className="shrink-0 border-t p-3"

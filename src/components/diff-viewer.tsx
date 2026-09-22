@@ -1,3 +1,4 @@
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { useGit } from "@/state/git-context";
 
@@ -40,7 +41,7 @@ export function DiffViewer() {
           </span>
         ) : null}
       </div>
-      <div className="min-h-0 flex-1 overflow-auto">
+      <ScrollArea className="min-h-0 flex-1">
         {diff?.binary ? (
           <p className="p-4 text-sm text-muted-foreground">Binary file</p>
         ) : !diff ? (
@@ -78,7 +79,7 @@ export function DiffViewer() {
             ) : null}
           </pre>
         )}
-      </div>
+      </ScrollArea>
     </div>
   );
 }

@@ -38,6 +38,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ActivityMeter } from "@/components/activity-meter";
 import { AppMark } from "@/components/app-mark";
@@ -670,7 +671,7 @@ function VirtualBranchList({
           className="h-7"
         />
       </div>
-      <div ref={listRef} className="overflow-y-auto" style={{ height }} onScroll={onScroll}>
+      <ScrollArea viewportRef={listRef} style={{ height }} onScroll={onScroll}>
         {filtered.length === 0 ? (
           <div className="flex h-full items-center justify-center px-3 text-xs text-muted-foreground">
             No matching branches
@@ -690,7 +691,7 @@ function VirtualBranchList({
             ))}
           </div>
         )}
-      </div>
+      </ScrollArea>
     </div>
   );
 }

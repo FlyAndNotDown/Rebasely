@@ -17,6 +17,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { isRemoteTrackingBranch } from "@/lib/git";
 import { cn } from "@/lib/utils";
 import { useGit } from "@/state/git-context";
@@ -172,7 +173,7 @@ export function HistoryBranches() {
           />
         </div>
       </div>
-      <div className="min-h-0 flex-1 overflow-auto py-1">
+      <ScrollArea className="min-h-0 flex-1 py-1">
         {root.length === 0 && needle ? (
           <div className="px-3 py-6 text-center text-xs text-muted-foreground">
             No matching branches
@@ -191,7 +192,7 @@ export function HistoryBranches() {
             onAddRemote={() => setAddOpen(true)}
           />
         )}
-      </div>
+      </ScrollArea>
       <AddRemoteDialog
         open={addOpen}
         onOpenChange={setAddOpen}

@@ -4,6 +4,7 @@ import { AuthorAvatar } from "@/components/author-avatar";
 import { formatAbsoluteTime } from "@/lib/format";
 import { fileKindClass, fileKindLabel } from "@/lib/file-kind";
 import { cn } from "@/lib/utils";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { useGit } from "@/state/git-context";
 import type { CommitFile } from "@/types/git";
 
@@ -71,12 +72,16 @@ export function CommitFiles() {
           </button>
         </div>
         {commit.body ? (
-          <p className="mt-2 max-h-24 overflow-auto whitespace-pre-wrap text-xs text-muted-foreground">
-            {commit.body}
-          </p>
+          <ScrollArea
+            className="mt-2 max-h-24"
+            viewportClassName="h-auto max-h-24 [&>div]:h-auto! [&>div]:min-h-0!"
+          >
+            <p className="whitespace-pre-wrap text-xs text-muted-foreground">{commit.body}</p>
+          </ScrollArea>
         ) : null}
       </div>
-      <ul className="min-h-0 flex-1 overflow-auto border-t px-1 py-1">
+      <ScrollArea className="min-h-0 flex-1 border-t">
+      <ul className="px-1 py-1">
         {commitDetails.files.map((file) => (
           <CommitFileRow
             key={file.path}
@@ -86,6 +91,7 @@ export function CommitFiles() {
           />
         ))}
       </ul>
+      </ScrollArea>
     </div>
   );
 }

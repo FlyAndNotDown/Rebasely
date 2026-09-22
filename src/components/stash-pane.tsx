@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
@@ -27,7 +28,7 @@ export function StashPane() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="min-h-0 flex-1 overflow-auto px-3 py-2">
+      <ScrollArea className="min-h-0 flex-1 px-3 py-2">
         {stashes.length === 0 ? (
           <p className="px-1 py-3 text-sm text-muted-foreground">No stashes yet</p>
         ) : (
@@ -70,7 +71,7 @@ export function StashPane() {
             </div>
           ))
         )}
-      </div>
+      </ScrollArea>
 
       <form
         className="shrink-0 border-t p-3"

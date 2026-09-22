@@ -33,6 +33,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { formatAbsoluteTime } from "@/lib/format";
 import { errorMessage, expandHistoryRevs, gitApi } from "@/lib/git";
 import { graphWidth, laneColor, layoutCommitGraph, type GraphRow } from "@/lib/commit-graph";
@@ -205,7 +206,7 @@ export function HistoryPane() {
           />
         </div>
       </div>
-      <div className="min-h-0 flex-1 overflow-auto" onScroll={onScroll}>
+      <ScrollArea className="min-h-0 flex-1" onScroll={onScroll}>
         {visible.length === 0 ? (
           <div className="flex h-full items-center justify-center p-4 text-sm text-muted-foreground">
             {loading
@@ -231,7 +232,7 @@ export function HistoryPane() {
             />
           </>
         )}
-      </div>
+      </ScrollArea>
       <Dialog
         open={Boolean(branchCommit)}
         onOpenChange={(open) => {
