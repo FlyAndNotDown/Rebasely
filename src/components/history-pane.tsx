@@ -33,6 +33,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { HistorySkeleton } from "@/components/skeletons";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { formatAbsoluteTime } from "@/lib/format";
 import { errorMessage, expandHistoryRevs, gitApi } from "@/lib/git";
@@ -208,15 +209,13 @@ export function HistoryPane() {
       </div>
       <ScrollArea className="min-h-0 flex-1" onScroll={onScroll}>
         {visible.length === 0 ? (
-          <div className="flex h-full items-center justify-center p-4 text-sm text-muted-foreground">
-            {loading
-              ? searchingMode
-                ? "Searching…"
-                : "Loading history…"
-              : searchingMode
-                ? "No matching commits"
-                : "No commits yet"}
-          </div>
+          loading ? (
+            <HistorySkeleton label={searchingMode ? "Searching" : "Loading history"} />
+          ) : (
+            <div className="flex h-full items-center justify-center p-4 text-sm text-muted-foreground">
+              {searchingMode ? "No matching commits" : "No commits yet"}
+            </div>
+          )
         ) : (
           <>
             <CommitList
@@ -372,15 +371,16 @@ const CommitList = memo(function CommitList({
           onAction={onAction}
         />
       ))}
-      <div className="px-3 py-2 text-center text-[11px] text-muted-foreground">
-        {loading
-          ? searchingMode
-            ? "Searching…"
-            : "Loading history…"
-          : hasMore
-            ? "Scroll for earlier commits"
-            : null}
-      </div>
+      {loading ? (
+        <HistorySkeleton
+          rows={3}
+          label={searchingMode ? "Searching" : "Loading history"}
+        />
+      ) : hasMore ? (
+        <div className="px-3 py-2 text-center text-[11px] text-muted-foreground">
+          Scroll for earlier commits
+        </div>
+      ) : null}
     </>
   );
 });

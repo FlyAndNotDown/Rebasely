@@ -1,3 +1,4 @@
+import { DiffSkeleton } from "@/components/skeletons";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { useGit } from "@/state/git-context";
@@ -17,9 +18,10 @@ export function DiffViewer() {
     const loadingFiles =
       selection?.type === "commit" &&
       (!commitDetails || commitDetails.commit.id !== selection.id);
+    if (loadingFiles) return <DiffSkeleton label="Loading files" />;
     return (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-        {loadingFiles ? "Loading files…" : "Select a file to see its diff"}
+        Select a file to see its diff
       </div>
     );
   }
@@ -45,7 +47,7 @@ export function DiffViewer() {
         {diff?.binary ? (
           <p className="p-4 text-sm text-muted-foreground">Binary file</p>
         ) : !diff ? (
-          <p className="p-4 text-sm text-muted-foreground">Loading diff…</p>
+          <DiffSkeleton />
         ) : diff.lines.length === 0 ? (
           <p className="p-4 text-sm text-muted-foreground">No textual diff</p>
         ) : (

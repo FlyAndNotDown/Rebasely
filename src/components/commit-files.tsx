@@ -1,10 +1,11 @@
 import { memo, useCallback } from "react";
 import { toast } from "sonner";
 import { AuthorAvatar } from "@/components/author-avatar";
+import { CommitFilesSkeleton } from "@/components/skeletons";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { formatAbsoluteTime } from "@/lib/format";
 import { fileKindClass, fileKindLabel } from "@/lib/file-kind";
 import { cn } from "@/lib/utils";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { useGit } from "@/state/git-context";
 import type { CommitFile } from "@/types/git";
 
@@ -20,9 +21,13 @@ export function CommitFiles() {
   );
   if (!commitDetails) {
     return (
-      <div className="flex h-full items-center justify-center p-4 text-sm text-muted-foreground">
-        {historySelection ? "Loading files…" : "Select a commit to see its files"}
-      </div>
+      historySelection ? (
+        <CommitFilesSkeleton />
+      ) : (
+        <div className="flex h-full items-center justify-center p-4 text-sm text-muted-foreground">
+          Select a commit to see its files
+        </div>
+      )
     );
   }
   const commit = commitDetails.commit;

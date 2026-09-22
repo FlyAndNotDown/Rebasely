@@ -11,6 +11,7 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
+import { WorkspaceSkeleton } from "@/components/skeletons";
 import { cn } from "@/lib/utils";
 import { useGit } from "@/state/git-context";
 import type { PanelLayoutId } from "@/types/git";
@@ -153,13 +154,7 @@ export function Workspace() {
     });
   }, [view]);
 
-  if (!snapshot) {
-    return (
-      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-        Opening repository…
-      </div>
-    );
-  }
+  if (!snapshot) return <WorkspaceSkeleton />;
 
   return (
     <div className="relative h-full min-h-0 min-w-0">
