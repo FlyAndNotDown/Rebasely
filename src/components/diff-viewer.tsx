@@ -2,7 +2,7 @@ import { cn } from "@/lib/utils";
 import { useGit } from "@/state/git-context";
 
 export function DiffViewer() {
-  const { view, changeSelection, historySelection, changeDiff, historyDiff } = useGit();
+  const { view, changeSelection, historySelection, changeDiff, historyDiff, commitDetails } = useGit();
   const selection = view === "changes" ? changeSelection : historySelection;
   const diff = view === "changes" ? changeDiff : historyDiff;
   const title =
@@ -13,9 +13,12 @@ export function DiffViewer() {
         : "Diff";
 
   if (!selection || (selection.type === "commit" && !selection.path)) {
+    const loadingFiles =
+      selection?.type === "commit" &&
+      (!commitDetails || commitDetails.commit.id !== selection.id);
     return (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-        {view === "history" ? "Select a file to see its diff" : "Select a file to see its diff"}
+        {loadingFiles ? "Loading files…" : "Select a file to see its diff"}
       </div>
     );
   }

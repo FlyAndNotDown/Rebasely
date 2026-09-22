@@ -1,20 +1,29 @@
+import { memo, useCallback } from "react";
 import { toast } from "sonner";
 import { AuthorAvatar } from "@/components/author-avatar";
 import { formatAbsoluteTime } from "@/lib/format";
 import { fileKindClass, fileKindLabel } from "@/lib/file-kind";
 import { cn } from "@/lib/utils";
 import { useGit } from "@/state/git-context";
+import type { CommitFile } from "@/types/git";
 
 export function CommitFiles() {
   const { commitDetails, historySelection, selectCommitFile, prefs } = useGit();
+  const selectedPath = historySelection?.path;
+  const onSelect = useCallback(
+    (path: string) => {
+      if (!commitDetails) return;
+      void selectCommitFile(commitDetails.commit.id, path);
+    },
+    [commitDetails, selectCommitFile],
+  );
   if (!commitDetails) {
     return (
       <div className="flex h-full items-center justify-center p-4 text-sm text-muted-foreground">
-        Select a commit to see its files
+        {historySelection ? "Loading files…" : "Select a commit to see its files"}
       </div>
     );
   }
-  const selectedPath = historySelection?.path;
   const commit = commitDetails.commit;
 
   async function copyText(value: string, success: string) {
@@ -69,26 +78,43 @@ export function CommitFiles() {
       </div>
       <ul className="min-h-0 flex-1 overflow-auto border-t px-1 py-1">
         {commitDetails.files.map((file) => (
-          <li key={file.path}>
-            <button
-              type="button"
-              className={cn(
-                "flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-xs hover:bg-muted/70",
-                selectedPath === file.path && "bg-muted",
-              )}
-              onClick={() => void selectCommitFile(commit.id, file.path)}
-            >
-              <span className={cn("w-3 shrink-0 font-mono text-[11px] font-medium", fileKindClass(file.kind))}>
-                {fileKindLabel(file.kind)}
-              </span>
-              <span className="min-w-0 flex-1 truncate font-mono">{file.path}</span>
-              {file.binary ? (
-                <span className="shrink-0 text-muted-foreground">binary</span>
-              ) : null}
-            </button>
-          </li>
+          <CommitFileRow
+            key={file.path}
+            file={file}
+            selected={selectedPath === file.path}
+            onSelect={onSelect}
+          />
         ))}
       </ul>
     </div>
   );
 }
+
+const CommitFileRow = memo(function CommitFileRow({
+  file,
+  selected,
+  onSelect,
+}: {
+  file: CommitFile;
+  selected: boolean;
+  onSelect: (path: string) => void;
+}) {
+  return (
+    <li>
+      <button
+        type="button"
+        className={cn(
+          "flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-xs hover:bg-muted/70",
+          selected && "bg-muted",
+        )}
+        onClick={() => onSelect(file.path)}
+      >
+        <span className={cn("w-3 shrink-0 font-mono text-[11px] font-medium", fileKindClass(file.kind))}>
+          {fileKindLabel(file.kind)}
+        </span>
+        <span className="min-w-0 flex-1 truncate font-mono">{file.path}</span>
+        {file.binary ? <span className="shrink-0 text-muted-foreground">binary</span> : null}
+      </button>
+    </li>
+  );
+});

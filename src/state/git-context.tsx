@@ -1,5 +1,6 @@
 import {
   createContext,
+  startTransition,
   useCallback,
   useContext,
   useEffect,
@@ -135,6 +136,14 @@ function sameRevs(left: string[], right: string[]) {
   const a = [...left].sort();
   const b = [...right].sort();
   return a.every((value, index) => value === b[index]);
+}
+
+function afterPaint() {
+  return new Promise<void>((resolve) => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => resolve());
+    });
+  });
 }
 
 function progressFromGitLine(line: string): number | undefined {
@@ -281,6 +290,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
   const openingPathsRef = useRef(new Set<string>());
   const historyRevsMapRef = useRef<Record<string, string[]>>({});
   const historyExpandedMapRef = useRef<Record<string, string[]>>({});
+  const historyLoadGen = useRef(0);
   tabsRef.current = tabs;
   sessionsRef.current = sessions;
   activeTabIdRef.current = activeTabId;
@@ -305,8 +315,9 @@ export function GitProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const patchSession = useCallback(
-    (tabId: string, patch: Partial<RepoSession>) => {
+    (tabId: string, patch: Partial<RepoSession>, generation?: number) => {
       setSessions((current) => {
+        if (generation !== undefined && historyLoadGen.current !== generation) return current;
         const existing = current[tabId];
         if (!existing) return current;
         const next = { ...current, [tabId]: { ...existing, ...patch } };
@@ -438,6 +449,27 @@ export function GitProvider({ children }: { children: ReactNode }) {
     },
     [],
   );
+
+  const beginActivity = useCallback((label: string, detail?: string, progress?: number) => {
+    const id = crypto.randomUUID();
+    setActivities((current) => [...current, { id, label, detail, progress }]);
+    return id;
+  }, []);
+
+  const patchActivity = useCallback(
+    (id: string, patch: Partial<Pick<Activity, "label" | "detail" | "progress">>) => {
+      setActivities((current) =>
+        current.map((item) => (item.id === id ? { ...item, ...patch } : item)),
+      );
+    },
+    [],
+  );
+
+  const endActivity = useCallback((id: string) => {
+    setActivities((current) =>
+      current.some((item) => item.id === id) ? current.filter((item) => item.id !== id) : current,
+    );
+  }, []);
 
   useEffect(() => {
     let disposed = false;
@@ -896,28 +928,76 @@ export function GitProvider({ children }: { children: ReactNode }) {
       const repoPath = activeRepoPath();
       const tabId = activeTabIdRef.current;
       if (!repoPath) return;
-      patchSession(tabId, { view: "history", historySelection: { type: "commit", id } });
+      const current = sessionsRef.current[tabId];
+      const shown = current?.commitDetails;
+      const selectedPath = current?.historySelection?.path;
+      const alreadyShown =
+        current?.view === "history" &&
+        current.historySelection?.id === id &&
+        shown?.commit.id === id &&
+        (shown.files.length === 0 ||
+          (selectedPath != null &&
+            current.historyDiff?.path === selectedPath &&
+            shown.files.some((file) => file.path === selectedPath)));
+      if (alreadyShown) return;
+
+      const generation = ++historyLoadGen.current;
+      const holdPath = current?.historySelection?.path;
+      patchSession(tabId, {
+        view: "history",
+        historySelection: holdPath ? { type: "commit", id, path: holdPath } : { type: "commit", id },
+      });
+      await afterPaint();
+      if (historyLoadGen.current !== generation) return;
+
+      const repoName = sessionsRef.current[tabId]?.snapshot?.repo.name;
+      const activityId = beginActivity("Loading commit files", repoName);
       try {
-        const details = await gitApi.getCommitDetails(repoPath, id);
-        const first = details.files[0];
-        patchSession(tabId, {
-          commitDetails: details,
-          historySelection: first ? { type: "commit", id, path: first.path } : { type: "commit", id },
-          historyDiff: first?.binary ? emptyBinaryDiff(first.path, first.oldPath) : null,
+        startTransition(() => {
+          patchSession(
+            tabId,
+            {
+              historySelection: { type: "commit", id },
+              commitDetails: null,
+              historyDiff: null,
+            },
+            generation,
+          );
         });
-        if (first && !first.binary) {
-          const historyDiff = await gitApi.getCommitDiff(repoPath, id, first.path);
-          const selected = sessionsRef.current[tabId]?.historySelection;
-          if (selected?.id === id && (selected.path ?? first.path) === first.path) {
-            patchSession(tabId, { historyDiff });
-          }
+        const details = await gitApi.getCommitDetails(repoPath, id);
+        if (historyLoadGen.current !== generation) return;
+        const first = details.files[0];
+        startTransition(() => {
+          patchSession(
+            tabId,
+            {
+              commitDetails: details,
+              historySelection: first ? { type: "commit", id, path: first.path } : { type: "commit", id },
+              historyDiff: first?.binary ? emptyBinaryDiff(first.path, first.oldPath) : null,
+            },
+            generation,
+          );
+        });
+        if (!first || first.binary) {
+          await afterPaint();
+          return;
         }
+        patchActivity(activityId, { label: "Loading file diff", detail: first.path });
+        const historyDiff = await gitApi.getCommitDiff(repoPath, id, first.path);
+        if (historyLoadGen.current !== generation) return;
+        startTransition(() => {
+          patchSession(tabId, { historyDiff }, generation);
+        });
+        await afterPaint();
       } catch (error) {
-        patchSession(tabId, { commitDetails: null, historyDiff: null });
+        if (historyLoadGen.current !== generation) return;
+        patchSession(tabId, { commitDetails: null, historyDiff: null }, generation);
         toast.error(errorMessage(error));
+      } finally {
+        endActivity(activityId);
       }
     },
-    [activeRepoPath, patchSession],
+    [activeRepoPath, beginActivity, endActivity, patchActivity, patchSession],
   );
 
   const selectCommitFile = useCallback(
@@ -925,26 +1005,73 @@ export function GitProvider({ children }: { children: ReactNode }) {
       const repoPath = activeRepoPath();
       const tabId = activeTabIdRef.current;
       if (!repoPath) return;
+      const current = sessionsRef.current[tabId];
+      if (
+        current?.view === "history" &&
+        current.historySelection?.id === id &&
+        current.historySelection.path === path &&
+        current.historyDiff?.path === path
+      ) {
+        return;
+      }
+
+      const generation = ++historyLoadGen.current;
       patchSession(tabId, { view: "history", historySelection: { type: "commit", id, path } });
+      await afterPaint();
+      if (historyLoadGen.current !== generation) return;
+
+      const cached =
+        sessionsRef.current[tabId]?.commitDetails?.commit.id === id
+          ? sessionsRef.current[tabId]?.commitDetails
+          : null;
+      const repoName = sessionsRef.current[tabId]?.snapshot?.repo.name;
+      const activityId = beginActivity(
+        cached ? "Loading file diff" : "Loading commit files",
+        cached ? path : repoName,
+      );
       try {
-        const current = sessionsRef.current[tabId];
         const details =
-          current?.commitDetails?.commit.id === id
-            ? current.commitDetails
-            : await gitApi.getCommitDetails(repoPath, id);
+          cached ??
+          (await gitApi.getCommitDetails(repoPath, id));
+        if (historyLoadGen.current !== generation) return;
+        if (!cached) {
+          startTransition(() => {
+            patchSession(tabId, { commitDetails: details }, generation);
+          });
+        }
         const file = details.files.find((item) => item.path === path);
-        patchSession(tabId, {
-          commitDetails: details,
-          historyDiff: file?.binary
-            ? emptyBinaryDiff(path, file.oldPath)
-            : await gitApi.getCommitDiff(repoPath, id, path),
+        if (file?.binary) {
+          startTransition(() => {
+            patchSession(
+              tabId,
+              { commitDetails: details, historyDiff: emptyBinaryDiff(path, file.oldPath) },
+              generation,
+            );
+          });
+          await afterPaint();
+          return;
+        }
+        if (!cached) {
+          patchActivity(activityId, { label: "Loading file diff", detail: path });
+        }
+        startTransition(() => {
+          patchSession(tabId, { historyDiff: null }, generation);
         });
+        const historyDiff = await gitApi.getCommitDiff(repoPath, id, path);
+        if (historyLoadGen.current !== generation) return;
+        startTransition(() => {
+          patchSession(tabId, { commitDetails: details, historyDiff }, generation);
+        });
+        await afterPaint();
       } catch (error) {
-        patchSession(tabId, { historyDiff: null });
+        if (historyLoadGen.current !== generation) return;
+        patchSession(tabId, { historyDiff: null }, generation);
         toast.error(errorMessage(error));
+      } finally {
+        endActivity(activityId);
       }
     },
-    [activeRepoPath, patchSession],
+    [activeRepoPath, beginActivity, endActivity, patchActivity, patchSession],
   );
 
   const runMutation = useCallback(

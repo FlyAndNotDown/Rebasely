@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type UIEvent } from "react";
+import { memo, useCallback, useEffect, useMemo, useState, type UIEvent } from "react";
 import {
   CopyIcon,
   CopyPlusIcon,
@@ -40,6 +40,13 @@ import { cn } from "@/lib/utils";
 import { COMMIT_PAGE, useGit } from "@/state/git-context";
 import type { AvatarProvider, CommitRef, CommitSummary } from "@/types/git";
 import { toast } from "sonner";
+
+type CommitRowAction =
+  | { type: "select"; id: string }
+  | { type: "branch"; commit: CommitSummary }
+  | { type: "revert"; commit: CommitSummary }
+  | { type: "cherry-pick"; commit: CommitSummary }
+  | { type: "patch"; commit: CommitSummary };
 
 const ROW_HEIGHT = 32;
 const LANE_GAP = 14;
@@ -88,6 +95,30 @@ export function HistoryPane() {
   );
   const loading = searchingMode ? searching : commitsLoading;
   const hasMore = searchingMode ? searchHasMore : commitsHasMore;
+  const onRowAction = useCallback(
+    (action: CommitRowAction) => {
+      switch (action.type) {
+        case "select":
+          void selectCommit(action.id);
+          break;
+        case "branch":
+          setBranchCommit(action.commit);
+          setBranchName("");
+          setCheckoutNew(true);
+          break;
+        case "revert":
+          setConfirm({ kind: "revert", commit: action.commit });
+          break;
+        case "cherry-pick":
+          setConfirm({ kind: "cherry-pick", commit: action.commit });
+          break;
+        case "patch":
+          void createPatch(action.commit);
+          break;
+      }
+    },
+    [createPatch, selectCommit],
+  );
 
   useEffect(() => {
     void ensureHistory();
@@ -187,41 +218,17 @@ export function HistoryPane() {
           </div>
         ) : (
           <>
-            {visible.map((commit, index) => (
-              <CommitRow
-                key={commit.id}
-                commit={commit}
-                selected={selectedId === commit.id}
-                avatarProvider={prefs.avatarProvider}
-                graph={
-                  !searchingMode && graph[index]
-                    ? {
-                        width: rowGraphWidth(graph[index], graph[index - 1]),
-                        row: graph[index],
-                        previous: graph[index - 1],
-                      }
-                    : null
-                }
-                onSelect={() => void selectCommit(commit.id)}
-                onCreateBranch={() => {
-                  setBranchCommit(commit);
-                  setBranchName("");
-                  setCheckoutNew(true);
-                }}
-                onRevert={() => setConfirm({ kind: "revert", commit })}
-                onCherryPick={() => setConfirm({ kind: "cherry-pick", commit })}
-                onCreatePatch={() => void createPatch(commit)}
-              />
-            ))}
-            <div className="px-3 py-2 text-center text-[11px] text-muted-foreground">
-              {loading
-                ? searchingMode
-                  ? "Searching…"
-                  : "Loading history…"
-                : hasMore
-                  ? "Scroll for earlier commits"
-                  : null}
-            </div>
+            <CommitList
+              commits={visible}
+              graph={graph}
+              showGraph={!searchingMode}
+              selectedId={selectedId}
+              avatarProvider={prefs.avatarProvider}
+              loading={loading}
+              searchingMode={searchingMode}
+              hasMore={hasMore}
+              onAction={onRowAction}
+            />
           </>
         )}
       </div>
@@ -315,26 +322,80 @@ export function HistoryPane() {
   );
 }
 
-function CommitRow({
+const CommitList = memo(function CommitList({
+  commits,
+  graph,
+  showGraph,
+  selectedId,
+  avatarProvider,
+  loading,
+  searchingMode,
+  hasMore,
+  onAction,
+}: {
+  commits: CommitSummary[];
+  graph: GraphRow[];
+  showGraph: boolean;
+  selectedId: string | null;
+  avatarProvider: AvatarProvider;
+  loading: boolean;
+  searchingMode: boolean;
+  hasMore: boolean;
+  onAction: (action: CommitRowAction) => void;
+}) {
+  const rows = useMemo(
+    () =>
+      commits.map((commit, index) => ({
+        commit,
+        graph:
+          showGraph && graph[index]
+            ? {
+                width: rowGraphWidth(graph[index], graph[index - 1]),
+                row: graph[index],
+                previous: graph[index - 1],
+              }
+            : null,
+      })),
+    [commits, graph, showGraph],
+  );
+
+  return (
+    <>
+      {rows.map((row) => (
+        <CommitRow
+          key={row.commit.id}
+          commit={row.commit}
+          selected={selectedId === row.commit.id}
+          avatarProvider={avatarProvider}
+          graph={row.graph}
+          onAction={onAction}
+        />
+      ))}
+      <div className="px-3 py-2 text-center text-[11px] text-muted-foreground">
+        {loading
+          ? searchingMode
+            ? "Searching…"
+            : "Loading history…"
+          : hasMore
+            ? "Scroll for earlier commits"
+            : null}
+      </div>
+    </>
+  );
+});
+
+const CommitRow = memo(function CommitRow({
   commit,
   selected,
   avatarProvider,
   graph,
-  onSelect,
-  onCreateBranch,
-  onRevert,
-  onCherryPick,
-  onCreatePatch,
+  onAction,
 }: {
   commit: CommitSummary;
   selected: boolean;
   avatarProvider: AvatarProvider;
   graph: { width: number; row: GraphRow; previous?: GraphRow } | null;
-  onSelect: () => void;
-  onCreateBranch: () => void;
-  onRevert: () => void;
-  onCherryPick: () => void;
-  onCreatePatch: () => void;
+  onAction: (action: CommitRowAction) => void;
 }) {
   const message = [commit.summary, commit.body].filter(Boolean).join("\n\n");
 
@@ -360,7 +421,7 @@ function CommitRow({
             "flex h-8 w-full items-center gap-2 px-2 text-left hover:bg-muted/70",
             selected && "bg-muted",
           )}
-          onClick={onSelect}
+          onClick={() => onAction({ type: "select", id: commit.id })}
         >
           {graph ? (
             <GraphCell
@@ -398,19 +459,19 @@ function CommitRow({
         </button>
       </ContextMenuTrigger>
       <ContextMenuContent className="w-48">
-        <ContextMenuItem onClick={onCreateBranch}>
+        <ContextMenuItem onClick={() => onAction({ type: "branch", commit })}>
           <GitBranchIcon />
           Create branch
         </ContextMenuItem>
-        <ContextMenuItem onClick={onRevert}>
+        <ContextMenuItem onClick={() => onAction({ type: "revert", commit })}>
           <Undo2Icon />
           Revert
         </ContextMenuItem>
-        <ContextMenuItem onClick={onCherryPick}>
+        <ContextMenuItem onClick={() => onAction({ type: "cherry-pick", commit })}>
           <CopyPlusIcon />
           Cherry-pick
         </ContextMenuItem>
-        <ContextMenuItem onClick={onCreatePatch}>
+        <ContextMenuItem onClick={() => onAction({ type: "patch", commit })}>
           <FileDiffIcon />
           Create patch
         </ContextMenuItem>
@@ -448,7 +509,7 @@ function CommitRow({
       </ContextMenuContent>
     </ContextMenu>
   );
-}
+});
 
 function CommitRefs({ refs }: { refs: CommitRef[] }) {
   if (refs.length === 0) return null;
