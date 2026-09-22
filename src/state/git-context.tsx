@@ -251,7 +251,8 @@ interface GitContextValue {
   discard: (paths: string[]) => Promise<void>;
   commit: (message: string, amend?: boolean) => Promise<boolean>;
   checkoutBranch: (name: string) => Promise<void>;
-  fetchRemote: () => Promise<void>;
+  fetchRemote: (remote?: string) => Promise<void>;
+  fetchAllRemotes: () => Promise<void>;
   pullRemote: () => Promise<void>;
   pushRemote: (force?: boolean) => Promise<void>;
   createBranch: (name: string, switchTo: boolean, start?: string) => Promise<boolean>;
@@ -1200,15 +1201,39 @@ export function GitProvider({ children }: { children: ReactNode }) {
     [ensureHistory, patchSession, runMutation],
   );
 
-  const fetchRemote = useCallback(async () => {
+  const refreshAfterFetch = useCallback(
+    async (ok: boolean) => {
+      await ensureBranches(true);
+      if (ok) {
+        invalidateHistory(
+          activeTabIdRef.current,
+          sessionsRef.current[activeTabIdRef.current]?.view === "history",
+        );
+      }
+    },
+    [ensureBranches, invalidateHistory],
+  );
+
+  const fetchRemote = useCallback(
+    async (remote?: string) => {
+      const ok = await runMutation(
+        remote ? `Fetching ${remote}` : "Fetching",
+        (repoPath, activityId) => gitApi.fetchRemote(repoPath, activityId, remote),
+        remote ? `Fetched ${remote}` : "Fetched",
+      );
+      await refreshAfterFetch(ok);
+    },
+    [refreshAfterFetch, runMutation],
+  );
+
+  const fetchAllRemotes = useCallback(async () => {
     const ok = await runMutation(
-      "Fetching",
-      (repoPath, activityId) => gitApi.fetchRemote(repoPath, activityId),
-      "Fetched",
+      "Fetching all remotes",
+      (repoPath, activityId) => gitApi.fetchRemote(repoPath, activityId, undefined, true),
+      "Fetched all remotes",
     );
-    await ensureBranches(true);
-    if (ok) invalidateHistory(activeTabIdRef.current, sessionsRef.current[activeTabIdRef.current]?.view === "history");
-  }, [ensureBranches, invalidateHistory, runMutation]);
+    await refreshAfterFetch(ok);
+  }, [refreshAfterFetch, runMutation]);
 
   const pullRemote = useCallback(async () => {
     const ok = await runMutation(
@@ -1569,6 +1594,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       commit,
       checkoutBranch,
       fetchRemote,
+      fetchAllRemotes,
       pullRemote,
       pushRemote,
       createBranch,
@@ -1620,6 +1646,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       commit,
       checkoutBranch,
       fetchRemote,
+      fetchAllRemotes,
       pullRemote,
       pushRemote,
       createBranch,

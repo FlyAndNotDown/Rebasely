@@ -410,11 +410,18 @@ fn status_from_git(root: &Path) -> AppResult<StatusSnapshot> {
 pub fn fetch_remote(
     repo: &mut Repository,
     remote: Option<&str>,
+    all: bool,
     on_progress: impl FnMut(&str) + Send,
 ) -> AppResult<WorkspaceSnapshot> {
-    match remote.map(str::trim).filter(|name| !name.is_empty()) {
-        Some(name) => run_git_ok_progress(workdir(repo)?, &["fetch", "--progress", name], on_progress)?,
-        None => run_git_ok_progress(workdir(repo)?, &["fetch", "--progress"], on_progress)?,
+    if all {
+        run_git_ok_progress(workdir(repo)?, &["fetch", "--all", "--progress"], on_progress)?;
+    } else {
+        match remote.map(str::trim).filter(|name| !name.is_empty()) {
+            Some(name) => {
+                run_git_ok_progress(workdir(repo)?, &["fetch", "--progress", name], on_progress)?
+            }
+            None => run_git_ok_progress(workdir(repo)?, &["fetch", "--progress"], on_progress)?,
+        }
     }
     snapshot(repo)
 }

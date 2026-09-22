@@ -21,13 +21,14 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useGit } from "@/state/git-context";
 
 export function AppToolbar() {
-  const { snapshot, fetchRemote, pullRemote, pushRemote, applyPatch } = useGit();
+  const { snapshot, fetchRemote, fetchAllRemotes, pullRemote, pushRemote, applyPatch } = useGit();
   const [repoSettingsOpen, setRepoSettingsOpen] = useState(false);
   const [forcePushOpen, setForcePushOpen] = useState(false);
   if (!snapshot) return null;
@@ -38,9 +39,37 @@ export function AppToolbar() {
   return (
     <>
       <div className="flex shrink-0 items-center rounded-md border bg-muted/40 p-0.5">
-        <ToolbarIcon label="Fetch" onClick={() => void fetchRemote()}>
-          <RefreshCwIcon />
-        </ToolbarIcon>
+        <div className="flex items-center">
+          <ToolbarIcon label="Fetch" onClick={() => void fetchRemote()}>
+            <RefreshCwIcon />
+          </ToolbarIcon>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                className="-ml-0.5 w-4 text-muted-foreground hover:text-foreground"
+                aria-label="Fetch options"
+              >
+                <ChevronDownIcon className="size-3" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="min-w-36">
+              {snapshot.remotes.map((remote) => (
+                <DropdownMenuItem
+                  key={remote.name}
+                  className="font-mono"
+                  onClick={() => void fetchRemote(remote.name)}
+                >
+                  {remote.name}
+                </DropdownMenuItem>
+              ))}
+              {snapshot.remotes.length > 0 ? <DropdownMenuSeparator /> : null}
+              <DropdownMenuItem onClick={() => void fetchAllRemotes()}>All remotes</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
         <ToolbarIcon
           label={behind > 0 ? `Pull · ${behind} behind` : "Pull"}
           badge={behind > 0 ? behind : undefined}

@@ -172,12 +172,14 @@ async fn fetch_remote(
     repo_path: String,
     activity_id: Option<String>,
     remote: Option<String>,
+    all: Option<bool>,
     app: AppHandle,
 ) -> AppResult<WorkspaceSnapshot> {
     with_repo_async(repo_path, move |repo| {
         git::fetch_remote(
             repo,
             remote.as_deref(),
+            all.unwrap_or(false),
             progress_sink(&app, activity_id.as_deref()),
         )
     })

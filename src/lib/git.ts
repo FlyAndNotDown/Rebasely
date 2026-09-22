@@ -78,11 +78,12 @@ export const gitApi = {
     invoke<WorkspaceSnapshot>("commit_changes", { repoPath, message, amend }),
   checkoutBranch: (repoPath: string, name: string) =>
     invoke<WorkspaceSnapshot>("checkout_branch", { repoPath, name }),
-  fetchRemote: (repoPath: string, activityId?: string, remote?: string) =>
+  fetchRemote: (repoPath: string, activityId?: string, remote?: string, all = false) =>
     invoke<WorkspaceSnapshot>("fetch_remote", {
       repoPath,
       activityId,
       remote: remote || null,
+      all,
     }),
   addRemote: (repoPath: string, name: string, url: string) =>
     invoke<WorkspaceSnapshot>("add_remote", { repoPath, name, url }),

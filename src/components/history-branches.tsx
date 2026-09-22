@@ -44,6 +44,7 @@ export function HistoryBranches() {
     deleteRemote,
     checkoutBranch,
     deleteBranch,
+    fetchRemote,
   } = useGit();
   const [query, setQuery] = useState("");
   const [needle, setNeedle] = useState("");
@@ -192,6 +193,7 @@ export function HistoryBranches() {
             onCheckout={(branch) => void checkoutBranch(branch.name)}
             onDelete={requestDelete}
             onDeleteRemote={setDeletingRemote}
+            onFetchRemote={(name) => void fetchRemote(name)}
             onAddRemote={() => setAddOpen(true)}
           />
         )}
@@ -275,6 +277,7 @@ function TreeRows({
   onCheckout,
   onDelete,
   onDeleteRemote,
+  onFetchRemote,
   onAddRemote,
 }: {
   nodes: BranchTreeNode[];
@@ -287,6 +290,7 @@ function TreeRows({
   onCheckout: (branch: BranchInfo) => void;
   onDelete: (branch: BranchInfo) => void;
   onDeleteRemote?: (name: string) => void;
+  onFetchRemote?: (name: string) => void;
   onAddRemote?: () => void;
 }) {
   return (
@@ -378,13 +382,18 @@ function TreeRows({
         );
         return (
           <div key={node.id}>
-            {remoteName && onDeleteRemote ? (
+            {remoteName && (onFetchRemote || onDeleteRemote) ? (
               <ContextMenu>
                 <ContextMenuTrigger asChild>{folderRow}</ContextMenuTrigger>
                 <ContextMenuContent className="w-44">
-                  <ContextMenuItem variant="destructive" onClick={() => onDeleteRemote(remoteName)}>
-                    Delete
-                  </ContextMenuItem>
+                  {onFetchRemote ? (
+                    <ContextMenuItem onClick={() => onFetchRemote(remoteName)}>Fetch</ContextMenuItem>
+                  ) : null}
+                  {onDeleteRemote ? (
+                    <ContextMenuItem variant="destructive" onClick={() => onDeleteRemote(remoteName)}>
+                      Delete
+                    </ContextMenuItem>
+                  ) : null}
                 </ContextMenuContent>
               </ContextMenu>
             ) : (
@@ -402,6 +411,7 @@ function TreeRows({
                 onCheckout={onCheckout}
                 onDelete={onDelete}
                 onDeleteRemote={onDeleteRemote}
+                onFetchRemote={onFetchRemote}
                 onAddRemote={onAddRemote}
               />
             ) : null}
