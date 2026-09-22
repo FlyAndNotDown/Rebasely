@@ -77,6 +77,7 @@ function ContextMenuContent({
         {...props}
       >
         <ScrollArea
+          gutter={false}
           className="max-h-(--radix-context-menu-content-available-height)"
           viewportClassName="h-auto max-h-(--radix-context-menu-content-available-height) [&>div]:h-auto! [&>div]:min-h-0!"
         >

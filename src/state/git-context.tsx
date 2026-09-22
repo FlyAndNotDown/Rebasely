@@ -261,6 +261,7 @@ interface GitContextValue {
   createPatch: (commit: CommitSummary) => Promise<void>;
   applyPatch: () => Promise<void>;
   addRemote: (name: string, url: string) => Promise<boolean>;
+  deleteRemote: (name: string) => Promise<boolean>;
   stashSave: (message: string, includeUntracked: boolean) => Promise<void>;
   stashApply: (index: number) => Promise<void>;
   stashPop: (index: number) => Promise<void>;
@@ -1399,6 +1400,53 @@ export function GitProvider({ children }: { children: ReactNode }) {
     [ensureBranches, ensureHistory, patchSession, runMutation],
   );
 
+  const deleteRemote = useCallback(
+    async (name: string) => {
+      const tabId = activeTabIdRef.current;
+      const removed = await runMutation(
+        `Removing ${name}`,
+        (repoPath) => gitApi.deleteRemote(repoPath, name),
+        `Removed ${name}`,
+      );
+      if (!removed) return false;
+      const prefix = `${name}/`;
+      setSessions((current) => {
+        const existing = current[tabId];
+        const snapshot = existing?.snapshot;
+        if (!existing || !snapshot) return current;
+        const next = {
+          ...current,
+          [tabId]: {
+            ...existing,
+            snapshot: {
+              ...snapshot,
+              remotes: snapshot.remotes.filter((remote) => remote.name !== name),
+              branches: {
+                ...snapshot.branches,
+                remote: snapshot.branches.remote.filter((branch) => !branch.name.startsWith(prefix)),
+              },
+            },
+          },
+        };
+        sessionsRef.current = next;
+        return next;
+      });
+      const next = sessionsRef.current[tabId];
+      if (next?.historyRevs.some((rev) => rev === name || rev.startsWith(prefix))) {
+        setHistoryRevs(next.historyRevs.filter((rev) => rev !== name && !rev.startsWith(prefix)));
+      }
+      const expanded = next?.historyExpanded;
+      if (expanded) {
+        const folder = `remote:${name}`;
+        const filtered = expanded.filter((id) => id !== folder && !id.startsWith(`${folder}/`));
+        if (filtered.length !== expanded.length) setHistoryExpanded(filtered);
+      }
+      await ensureBranches(true);
+      return true;
+    },
+    [ensureBranches, runMutation, setHistoryExpanded, setHistoryRevs, setSessions],
+  );
+
   const stashSave = useCallback(
     async (message: string, includeUntracked: boolean) => {
       await runMutation(
@@ -1530,6 +1578,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       createPatch,
       applyPatch,
       addRemote,
+      deleteRemote,
       stashSave,
       stashApply,
       stashPop,
@@ -1580,6 +1629,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       createPatch,
       applyPatch,
       addRemote,
+      deleteRemote,
       stashSave,
       stashApply,
       stashPop,

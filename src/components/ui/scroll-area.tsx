@@ -10,12 +10,14 @@ function ScrollArea({
   onScroll,
   viewportRef,
   viewportClassName,
+  gutter = true,
   type = "scroll",
   ...props
 }: React.ComponentProps<typeof ScrollAreaPrimitive.Root> & {
   onScroll?: React.UIEventHandler<HTMLDivElement>
   viewportRef?: React.Ref<HTMLDivElement>
   viewportClassName?: string
+  gutter?: boolean
 }) {
   return (
     <ScrollAreaPrimitive.Root
@@ -29,7 +31,8 @@ function ScrollArea({
         data-slot="scroll-area-viewport"
         onScroll={onScroll}
         className={cn(
-          "size-full rounded-[inherit] outline-none [&>div]:block! [&>div]:min-h-full [&>div]:pe-4 [&>div]:pb-3",
+          "size-full rounded-[inherit] outline-none [&>div]:block! [&>div]:min-h-full",
+          gutter && "[&>div]:pe-4 [&>div]:pb-3",
           viewportClassName,
         )}
       >

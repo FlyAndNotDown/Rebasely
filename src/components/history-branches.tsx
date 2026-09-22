@@ -41,6 +41,7 @@ export function HistoryBranches() {
     setHistoryExpanded,
     ensureBranches,
     addRemote,
+    deleteRemote,
     checkoutBranch,
     deleteBranch,
   } = useGit();
@@ -48,6 +49,7 @@ export function HistoryBranches() {
   const [needle, setNeedle] = useState("");
   const [addOpen, setAddOpen] = useState(false);
   const [deleting, setDeleting] = useState<BranchInfo | null>(null);
+  const [deletingRemote, setDeletingRemote] = useState<string | null>(null);
   const branches = snapshot?.branches;
   const watched = useMemo(() => new Set(historyRevs), [historyRevs]);
   const expanded = useMemo(
@@ -189,6 +191,7 @@ export function HistoryBranches() {
             onToggleWatch={toggleWatch}
             onCheckout={(branch) => void checkoutBranch(branch.name)}
             onDelete={requestDelete}
+            onDeleteRemote={setDeletingRemote}
             onAddRemote={() => setAddOpen(true)}
           />
         )}
@@ -228,6 +231,35 @@ export function HistoryBranches() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <Dialog open={Boolean(deletingRemote)} onOpenChange={(open) => !open && setDeletingRemote(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete remote?</DialogTitle>
+            <DialogDescription>
+              This removes{" "}
+              <span className="font-mono text-foreground">{deletingRemote}</span> and its
+              remote-tracking branches from this repository.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setDeletingRemote(null)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => {
+                const name = deletingRemote;
+                if (!name) return;
+                setDeletingRemote(null);
+                void deleteRemote(name);
+              }}
+            >
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -242,6 +274,7 @@ function TreeRows({
   onToggleWatch,
   onCheckout,
   onDelete,
+  onDeleteRemote,
   onAddRemote,
 }: {
   nodes: BranchTreeNode[];
@@ -253,6 +286,7 @@ function TreeRows({
   onToggleWatch: (name: string) => void;
   onCheckout: (branch: BranchInfo) => void;
   onDelete: (branch: BranchInfo) => void;
+  onDeleteRemote?: (name: string) => void;
   onAddRemote?: () => void;
 }) {
   return (
@@ -307,40 +341,55 @@ function TreeRows({
         const open = forceOpen || expanded.has(node.id);
         const section = depth === 0;
         const remotes = node.id === "section:remotes";
-        return (
-          <div key={node.id}>
-            <div
-              className="flex h-7 items-center gap-1 pr-1 text-muted-foreground hover:bg-muted/70 hover:text-foreground"
-              style={{ paddingLeft: 8 + depth * 12 }}
+        const remoteName = remoteFolderName(node.id);
+        const folderRow = (
+          <div
+            className="flex h-7 items-center gap-1 pr-1 text-muted-foreground hover:bg-muted/70 hover:text-foreground"
+            style={{ paddingLeft: 8 + depth * 12 }}
+          >
+            <button
+              type="button"
+              className="flex min-w-0 flex-1 items-center gap-1 text-left"
+              onClick={() => onToggleFolder(node.id)}
             >
+              <ChevronRightIcon className={cn("size-3.5 shrink-0 transition-transform", open && "rotate-90")} />
+              <span
+                className={cn(
+                  "min-w-0 flex-1 truncate",
+                  section
+                    ? "text-[10px] font-medium tracking-wide uppercase"
+                    : "font-mono text-xs",
+                )}
+              >
+                {node.label}
+              </span>
+            </button>
+            {remotes && onAddRemote ? (
               <button
                 type="button"
-                className="flex min-w-0 flex-1 items-center gap-1 text-left"
-                onClick={() => onToggleFolder(node.id)}
+                title="Add remote"
+                className="flex size-6 shrink-0 items-center justify-center rounded-sm hover:bg-muted hover:text-foreground"
+                onClick={onAddRemote}
               >
-                <ChevronRightIcon className={cn("size-3.5 shrink-0 transition-transform", open && "rotate-90")} />
-                <span
-                  className={cn(
-                    "min-w-0 flex-1 truncate",
-                    section
-                      ? "text-[10px] font-medium tracking-wide uppercase"
-                      : "font-mono text-xs",
-                  )}
-                >
-                  {node.label}
-                </span>
+                <PlusIcon className="size-3.5" />
               </button>
-              {remotes && onAddRemote ? (
-                <button
-                  type="button"
-                  title="Add remote"
-                  className="flex size-6 shrink-0 items-center justify-center rounded-sm hover:bg-muted hover:text-foreground"
-                  onClick={onAddRemote}
-                >
-                  <PlusIcon className="size-3.5" />
-                </button>
-              ) : null}
-            </div>
+            ) : null}
+          </div>
+        );
+        return (
+          <div key={node.id}>
+            {remoteName && onDeleteRemote ? (
+              <ContextMenu>
+                <ContextMenuTrigger asChild>{folderRow}</ContextMenuTrigger>
+                <ContextMenuContent className="w-44">
+                  <ContextMenuItem variant="destructive" onClick={() => onDeleteRemote(remoteName)}>
+                    Delete
+                  </ContextMenuItem>
+                </ContextMenuContent>
+              </ContextMenu>
+            ) : (
+              folderRow
+            )}
             {open ? (
               <TreeRows
                 nodes={node.children}
@@ -352,6 +401,7 @@ function TreeRows({
                 onToggleWatch={onToggleWatch}
                 onCheckout={onCheckout}
                 onDelete={onDelete}
+                onDeleteRemote={onDeleteRemote}
                 onAddRemote={onAddRemote}
               />
             ) : null}
@@ -451,6 +501,11 @@ function folderIdsForPath(prefix: string, segments: string[]) {
     ids.push(current);
   }
   return ids;
+}
+
+function remoteFolderName(id: string) {
+  if (!id.startsWith("remote:") || id.includes("/")) return null;
+  return id.slice("remote:".length);
 }
 
 function groupRemoteBranches(branches: BranchInfo[], extraNames: string[] = []) {

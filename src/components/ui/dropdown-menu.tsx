@@ -52,6 +52,7 @@ function DropdownMenuContent({
         {...props}
       >
         <ScrollArea
+          gutter={false}
           className="max-h-(--radix-dropdown-menu-content-available-height)"
           viewportClassName="h-auto max-h-(--radix-dropdown-menu-content-available-height) [&>div]:h-auto! [&>div]:min-h-0!"
         >

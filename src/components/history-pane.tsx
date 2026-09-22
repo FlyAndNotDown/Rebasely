@@ -464,14 +464,17 @@ const CommitRow = memo(function CommitRow({
           <GitBranchIcon />
           Create branch
         </ContextMenuItem>
-        <ContextMenuItem onClick={() => onAction({ type: "revert", commit })}>
-          <Undo2Icon />
-          Revert
-        </ContextMenuItem>
-        <ContextMenuItem onClick={() => onAction({ type: "cherry-pick", commit })}>
-          <CopyPlusIcon />
-          Cherry-pick
-        </ContextMenuItem>
+        {commit.onCurrentBranch ? (
+          <ContextMenuItem onClick={() => onAction({ type: "revert", commit })}>
+            <Undo2Icon />
+            Revert
+          </ContextMenuItem>
+        ) : (
+          <ContextMenuItem onClick={() => onAction({ type: "cherry-pick", commit })}>
+            <CopyPlusIcon />
+            Cherry-pick
+          </ContextMenuItem>
+        )}
         <ContextMenuItem onClick={() => onAction({ type: "patch", commit })}>
           <FileDiffIcon />
           Create patch

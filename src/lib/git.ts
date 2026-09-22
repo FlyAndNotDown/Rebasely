@@ -86,6 +86,8 @@ export const gitApi = {
     }),
   addRemote: (repoPath: string, name: string, url: string) =>
     invoke<WorkspaceSnapshot>("add_remote", { repoPath, name, url }),
+  deleteRemote: (repoPath: string, name: string) =>
+    invoke<WorkspaceSnapshot>("delete_remote", { repoPath, name }),
   probeRemoteUrl: (repoPath: string, url: string) =>
     invoke<RemoteProbe>("probe_remote_url", { repoPath, url }),
   pullRemote: (repoPath: string, activityId?: string) =>
