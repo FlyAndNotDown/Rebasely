@@ -699,16 +699,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       const epoch = reset ? bumpHistoryEpoch(tabId) : (historyEpochRef.current[tabId] ?? 0);
       const skip = reset ? 0 : current.commits.length;
       const revs = expandHistoryRevs(current.historyRevs, current.snapshot?.branches.local);
-      patchSession(tabId, {
-        ...(reset
-          ? {
-              commits: [],
-              commitsLoaded: false,
-              commitsHasMore: true,
-            }
-          : {}),
-        commitsLoading: true,
-      });
+      patchSession(tabId, { commitsLoading: true });
       try {
         const page = await runActivity(
           reset ? "Loading history" : "Loading earlier history",
@@ -747,7 +738,6 @@ export function GitProvider({ children }: { children: ReactNode }) {
       }
       bumpHistoryEpoch(tabId);
       patchSession(tabId, {
-        commits: [],
         commitsLoaded: false,
         commitsHasMore: true,
         commitsLoading: false,
@@ -768,15 +758,14 @@ export function GitProvider({ children }: { children: ReactNode }) {
       if (!current || sameRevs(current.historyRevs, next)) return;
       bumpHistoryEpoch(tabId);
       historyRevsMapRef.current = { ...historyRevsMapRef.current, [current.path]: next };
+      sessionsRef.current = {
+        ...sessionsRef.current,
+        [tabId]: { ...current, historyRevs: next, commitsLoaded: false, commitsHasMore: true },
+      };
       patchSession(tabId, {
         historyRevs: next,
-        commits: [],
         commitsLoaded: false,
         commitsHasMore: true,
-        commitsLoading: false,
-        historySelection: null,
-        historyDiff: null,
-        commitDetails: null,
       });
       persistSession(tabsRef.current, activeTabIdRef.current);
       if (sessionsRef.current[tabId]?.view === "history") {
@@ -808,7 +797,6 @@ export function GitProvider({ children }: { children: ReactNode }) {
       const current = sessionsRef.current[tab.id];
       try {
         const snapshot = keepRemoteBranches(current?.snapshot, await gitApi.refreshWorkspace(path));
-        const headChanged = current?.snapshot?.repo.headId !== snapshot.repo.headId;
         const graphChanged = historyGraphChanged(current?.snapshot, snapshot);
         let changeDiff = current?.changeDiff ?? null;
         let historyDiff = current?.historyDiff ?? null;
@@ -838,13 +826,6 @@ export function GitProvider({ children }: { children: ReactNode }) {
           snapshot,
           changeDiff,
           historyDiff,
-          ...(headChanged
-            ? {
-                historySelection: null,
-                historyDiff: null,
-                commitDetails: null,
-              }
-            : {}),
         });
         if (graphChanged) {
           invalidateHistory(tab.id, current?.view === "history");
@@ -904,9 +885,14 @@ export function GitProvider({ children }: { children: ReactNode }) {
 
   const setView = useCallback(
     (view: View) => {
-      patchSession(activeTabIdRef.current, { view });
+      const tabId = activeTabIdRef.current;
+      const current = sessionsRef.current[tabId];
+      patchSession(tabId, { view });
+      if (view === "history" && current && !current.commitsLoaded && !current.commitsLoading) {
+        void loadHistoryPage(tabId, true);
+      }
     },
-    [patchSession],
+    [loadHistoryPage, patchSession],
   );
 
   const selectChange = useCallback(
@@ -1113,14 +1099,13 @@ export function GitProvider({ children }: { children: ReactNode }) {
           changeSelection: next.changeSelection,
           ...(next.headChanged
             ? {
-                commits: [],
                 commitsLoaded: false,
                 commitsHasMore: true,
               }
             : {}),
         });
         if (next.headChanged && sessionsRef.current[tabId]?.view === "history") {
-          void ensureHistory();
+          void loadHistoryPage(tabId, true);
         }
         if (success) toast.success(success);
         return true;
@@ -1129,7 +1114,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
         return false;
       }
     },
-    [activeRepoPath, ensureHistory, patchSession, runActivity],
+    [activeRepoPath, loadHistoryPage, patchSession, runActivity],
   );
 
   const stage = useCallback(
@@ -1184,21 +1169,18 @@ export function GitProvider({ children }: { children: ReactNode }) {
         (repoPath) => gitApi.checkoutBranch(repoPath, name),
         `Checked out ${name}`,
       );
-      patchSession(activeTabIdRef.current, {
+      const tabId = activeTabIdRef.current;
+      patchSession(tabId, {
         changeSelection: null,
-        historySelection: null,
         changeDiff: null,
-        historyDiff: null,
-        commitDetails: null,
-        commits: [],
         commitsLoaded: false,
         commitsHasMore: true,
       });
-      if (sessionsRef.current[activeTabIdRef.current]?.view === "history") {
-        void ensureHistory();
+      if (sessionsRef.current[tabId]?.view === "history") {
+        void loadHistoryPage(tabId, true);
       }
     },
-    [ensureHistory, patchSession, runMutation],
+    [loadHistoryPage, patchSession, runMutation],
   );
 
   const refreshAfterFetch = useCallback(
@@ -1266,22 +1248,18 @@ export function GitProvider({ children }: { children: ReactNode }) {
         ...(switchTo
           ? {
               changeSelection: null,
-              historySelection: null,
               changeDiff: null,
-              historyDiff: null,
-              commitDetails: null,
             }
           : {}),
-        commits: [],
         commitsLoaded: false,
         commitsHasMore: true,
       });
       if (sessionsRef.current[tabId]?.view === "history") {
-        void ensureHistory();
+        void loadHistoryPage(tabId, true);
       }
       return true;
     },
-    [ensureHistory, patchSession, runMutation],
+    [loadHistoryPage, patchSession, runMutation],
   );
 
   const deleteBranch = useCallback(
@@ -1321,19 +1299,18 @@ export function GitProvider({ children }: { children: ReactNode }) {
         ...(dirty ? { view: "changes" } : {}),
         ...(headChanged
           ? {
-              commits: [],
               commitsLoaded: false,
               commitsHasMore: true,
             }
           : {}),
       });
       if (headChanged && sessionsRef.current[tabId]?.view === "history") {
-        void ensureHistory();
+        void loadHistoryPage(tabId, true);
       }
     } catch {
       /* the original error is already shown */
     }
-  }, [activeRepoPath, ensureHistory, patchSession]);
+  }, [activeRepoPath, loadHistoryPage, patchSession]);
 
   const revertCommit = useCallback(
     async (oid: string) => {
@@ -1412,17 +1389,16 @@ export function GitProvider({ children }: { children: ReactNode }) {
       );
       const tabId = activeTabIdRef.current;
       patchSession(tabId, {
-        commits: [],
         commitsLoaded: false,
         commitsHasMore: true,
       });
       if (sessionsRef.current[tabId]?.view === "history") {
-        void ensureHistory();
+        void loadHistoryPage(tabId, true);
       }
       await ensureBranches(true);
       return true;
     },
-    [ensureBranches, ensureHistory, patchSession, runMutation],
+    [ensureBranches, loadHistoryPage, patchSession, runMutation],
   );
 
   const deleteRemote = useCallback(
