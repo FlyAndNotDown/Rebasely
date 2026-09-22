@@ -11,6 +11,9 @@ export interface GraphRow {
   merges: GraphLine[];
 }
 
+// Commits must be newest-first and already constrained so every parent appears
+// after its children (`git log --author-date-order`). A parent that showed up
+// earlier is ignored, because a line back up the list would cross the date order.
 export function layoutCommitGraph(
   commits: { id: string; parents: string[] }[],
 ): GraphRow[] {

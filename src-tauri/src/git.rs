@@ -1025,7 +1025,7 @@ pub fn commits(
             limit,
             skip,
             &revs,
-            &["-c", "log.showSignature=false", "log", "--topo-order"],
+            &["-c", "log.showSignature=false", "log", "--author-date-order"],
         );
         let argv: Vec<&str> = args.iter().map(String::as_str).collect();
         if let Ok(stdout) = run_git_stdout(root, &argv) {
@@ -1077,6 +1077,7 @@ fn git_search_log_args(revs: &[String]) -> Vec<String> {
         "-c".to_string(),
         "i18n.logOutputEncoding=utf-8".to_string(),
         "log".to_string(),
+        "--author-date-order".to_string(),
     ];
     if revs.is_empty() {
         args.push("--branches".to_string());
@@ -1247,7 +1248,10 @@ fn commits_from_revwalk(
             revwalk.push(object.peel_to_commit()?.id())?;
         }
     }
-    revwalk.set_sorting(Sort::TOPOLOGICAL)?;
+    // TIME | TOPOLOGICAL matches `git log --date-order` (committer time, parents
+    // still below their children). The CLI path above uses author time, which is
+    // what the history column shows.
+    revwalk.set_sorting(Sort::TIME | Sort::TOPOLOGICAL)?;
 
     let mut items = Vec::new();
     for oid in revwalk.skip(skip).take(limit) {

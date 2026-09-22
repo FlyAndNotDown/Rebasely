@@ -82,8 +82,33 @@ function mergeLineKeepsBranchColor() {
   assert(colors.join(",") === "1,2", "each joining branch keeps its own lane color");
 }
 
+function sideTipInterleavesByDate() {
+  // Author-date order can place another branch's tip between two commits on main.
+  const rows = layoutCommitGraph([
+    { id: "D", parents: ids("C") },
+    { id: "S", parents: ids("A") },
+    { id: "C", parents: ids("B") },
+    { id: "B", parents: ids("A") },
+    { id: "A", parents: [] },
+  ]);
+
+  assert(rows[0].lane === 0, "main tip stays on lane 0");
+  assert(rows[1].lane === 1, "side tip dated between main commits opens its own lane");
+  assert(rows[2].lane === 0, "older main commit stays on lane 0");
+  assert(
+    rows[2].lines.some((line) => line.from === 0 && line.to === 0),
+    "main rail continues through the interleaved side commit",
+  );
+  assert(rows[4].lane === 0, "shared ancestor stays on the main lane");
+  assert(
+    rows[4].merges.some((line) => line.from === 1 && line.to === 0),
+    "side rail joins at the shared ancestor",
+  );
+}
+
 linear();
 mergeKeepsMainOnLeft();
 laterSideChildDoesNotStealMerge();
 mergeLineKeepsBranchColor();
+sideTipInterleavesByDate();
 console.log("commit-graph tests passed");
