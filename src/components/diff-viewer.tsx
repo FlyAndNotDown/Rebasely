@@ -1,5 +1,7 @@
+import { useMemo } from "react";
 import { DiffSkeleton } from "@/components/skeletons";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { diffLineSpans, type TextSpan } from "@/lib/diff-text";
 import { cn } from "@/lib/utils";
 import { useGit } from "@/state/git-context";
 
@@ -13,6 +15,7 @@ export function DiffViewer() {
       : selection?.type === "commit"
         ? (selection.path ?? "Diff")
         : "Diff";
+  const lineSpans = useMemo(() => (diff ? diffLineSpans(diff.lines) : []), [diff]);
 
   if (!selection || (selection.type === "commit" && !selection.path)) {
     const loadingFiles =
@@ -51,7 +54,7 @@ export function DiffViewer() {
         ) : diff.lines.length === 0 ? (
           <p className="p-4 text-sm text-muted-foreground">No textual diff</p>
         ) : (
-          <pre className="min-w-max font-mono text-[12px] leading-5">
+          <pre className="min-w-max font-mono text-[12px] leading-5 [tab-size:4]">
             {diff.lines.map((line, index) => (
               <div
                 key={`${line.kind}-${index}-${line.oldLineno}-${line.newLineno}`}
@@ -71,9 +74,11 @@ export function DiffViewer() {
                 <span className="text-center">
                   {line.kind === "add" ? "+" : line.kind === "delete" ? "-" : line.kind === "hunk" ? "" : " "}
                 </span>
-                <span className="whitespace-pre">
-                  {line.kind === "hunk" ? line.content : line.content || " "}
-                </span>
+                {line.kind === "hunk" ? (
+                  <span className="whitespace-pre">{line.content}</span>
+                ) : (
+                  <DiffLineText spans={lineSpans[index] ?? []} kind={line.kind} />
+                )}
               </div>
             ))}
             {diff.truncated ? (
@@ -84,4 +89,18 @@ export function DiffViewer() {
       </ScrollArea>
     </div>
   );
+}
+
+function DiffLineText({ spans, kind }: { spans: TextSpan[]; kind: string }) {
+  const body = spans.map((span, index) => {
+    if (!span.text) return null;
+    const tone = span.tone ?? (span.changed ? kind : "");
+    const mark = tone === "add" ? "bg-diff-add-char" : tone === "delete" ? "bg-diff-del-char" : undefined;
+    return (
+      <span key={index} className={mark}>
+        {span.text}
+      </span>
+    );
+  });
+  return <span className="whitespace-pre">{body.every((part) => part === null) ? " " : body}</span>;
 }

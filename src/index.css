@@ -41,8 +41,10 @@
   --sidebar-ring: oklch(0.708 0 0);
   --diff-add: oklch(0.45 0.12 150);
   --diff-add-bg: oklch(0.94 0.05 150);
+  --diff-add-char: color-mix(in oklch, var(--diff-add) 22%, var(--diff-add-bg));
   --diff-del: oklch(0.5 0.16 25);
   --diff-del-bg: oklch(0.95 0.04 25);
+  --diff-del-char: color-mix(in oklch, var(--diff-del) 22%, var(--diff-del-bg));
   --diff-hunk: oklch(0.48 0.09 250);
   --graph-1: #3a86ff;
   --graph-2: #12b886;
@@ -100,8 +102,10 @@
   --sidebar-ring: oklch(0.556 0 0);
   --diff-add: oklch(0.82 0.14 150);
   --diff-add-bg: oklch(0.22 0.04 150);
+  --diff-add-char: color-mix(in oklch, var(--diff-add) 32%, var(--diff-add-bg));
   --diff-del: oklch(0.78 0.14 22);
   --diff-del-bg: oklch(0.23 0.05 22);
+  --diff-del-char: color-mix(in oklch, var(--diff-del) 34%, var(--diff-del-bg));
   --diff-hunk: oklch(0.76 0.08 250);
   --graph-1: #5b9dff;
   --graph-2: #3ee0b2;
@@ -160,8 +164,10 @@
   --color-sidebar-ring: var(--sidebar-ring);
   --color-diff-add: var(--diff-add);
   --color-diff-add-bg: var(--diff-add-bg);
+  --color-diff-add-char: var(--diff-add-char);
   --color-diff-del: var(--diff-del);
   --color-diff-del-bg: var(--diff-del-bg);
+  --color-diff-del-char: var(--diff-del-char);
   --color-diff-hunk: var(--diff-hunk);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);

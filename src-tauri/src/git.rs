@@ -7,7 +7,6 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
-use git2::build::CheckoutBuilder;
 use git2::{
     BranchType, DiffFormat, DiffOptions, ErrorCode, IndexAddOption, ObjectType, Oid, Repository,
     Sort, Status, StatusOptions,
@@ -853,45 +852,29 @@ fn remove_worktree_path(full: &Path) -> AppResult<()> {
     Ok(())
 }
 
-fn write_worktree_bytes(full: &Path, bytes: &[u8]) -> AppResult<()> {
-    if full.is_dir() {
-        fs::remove_dir_all(full)?;
-    } else if full.exists() {
-        let mut perms = fs::metadata(full)?.permissions();
-        if perms.readonly() {
-            perms.set_readonly(false);
-            fs::set_permissions(full, perms)?;
-        }
+fn clear_readonly(full: &Path) -> AppResult<()> {
+    if !full.is_file() {
+        return Ok(());
     }
-    if let Some(parent) = full.parent() {
-        fs::create_dir_all(parent)?;
+    let mut perms = fs::metadata(full)?.permissions();
+    if perms.readonly() {
+        perms.set_readonly(false);
+        fs::set_permissions(full, perms)?;
     }
-    fs::write(full, bytes)?;
     Ok(())
 }
 
 fn restore_worktree_from_head(repo: &Repository, rel: &str, full: &Path) -> AppResult<()> {
-    let tree = repo.head()?.peel_to_tree()?;
-    match tree.get_path(Path::new(rel)) {
-        Ok(entry) => match entry.kind() {
-            Some(ObjectType::Blob) => {
-                let blob = repo.find_blob(entry.id())?;
-                // Write the HEAD blob as-is. Checkout filters (autocrlf / eol)
-                // would turn LF in HEAD back into CRLF on Windows.
-                write_worktree_bytes(full, blob.content())?;
-            }
-            Some(ObjectType::Tree) | Some(ObjectType::Commit) => {
-                let mut builder = CheckoutBuilder::new();
-                builder.force().disable_filters(true).path(rel);
-                repo.checkout_head(Some(&mut builder))?;
-            }
-            _ => {}
-        },
-        Err(err) if err.code() == ErrorCode::NotFound => {
-            remove_worktree_path(full)?;
-        }
-        Err(err) => return Err(err.into()),
+    let head = repo.head()?;
+    let in_head = head.peel_to_tree()?.get_path(Path::new(rel)).is_ok();
+    if !in_head {
+        remove_worktree_path(full)?;
+        return Ok(());
     }
+    // Match `git status` filters. Writing the raw blob turns a clean CRLF
+    // worktree into LF, which stays listed with an empty diff.
+    clear_readonly(full)?;
+    run_git_stdout(workdir(repo)?, &["checkout", "HEAD", "--", rel])?;
     Ok(())
 }
 
@@ -1478,9 +1461,6 @@ fn collect_patch(diff: git2::Diff<'_>, fallback_path: &str) -> AppResult<FileDif
         if content.ends_with('\n') {
             content.pop();
         }
-        if content.ends_with('\r') {
-            content.pop();
-        }
 
         lines.push(DiffLine {
             kind: kind.to_string(),
@@ -1595,10 +1575,7 @@ fn untracked_workdir_diff(repo: &Repository, path: &str) -> AppResult<Option<Fil
             truncated = true;
             break;
         }
-        let mut content = line.to_string();
-        if content.ends_with('\r') {
-            content.pop();
-        }
+        let content = line.strip_suffix('\r').unwrap_or(line).to_string();
         lines.push(DiffLine {
             kind: "add".to_string(),
             content,
