@@ -39,7 +39,7 @@ export function AppToolbar() {
 
   return (
     <>
-      <div className="flex h-7 shrink-0 items-center gap-1.5 rounded-[min(var(--radius-md),12px)] border border-foreground/15 bg-secondary px-1">
+      <div className="flex h-7 shrink-0 items-center gap-1.5 rounded-[min(var(--radius-md),12px)] border border-input bg-secondary px-0.5">
         <SplitAction
           label="Fetch"
           onClick={() => void fetchRemote()}
@@ -89,7 +89,7 @@ export function AppToolbar() {
         <ToolbarAction label="Apply patch" onClick={() => void applyPatch()}>
           <FileInputIcon className="size-4" />
         </ToolbarAction>
-        <span className="h-3.5 w-px bg-foreground/20" />
+        <span className="h-3.5 w-px self-center bg-foreground/20" />
         <ToolbarAction label="Repository settings" onClick={() => setRepoSettingsOpen(true)}>
           <Settings2Icon className="size-4" />
         </ToolbarAction>
@@ -125,7 +125,7 @@ export function AppToolbar() {
 }
 
 const actionClass =
-  "h-6! w-6! rounded-[6px] text-foreground hover:bg-background dark:hover:bg-background";
+  "h-[calc(1.75rem-2px)]! w-[calc(1.75rem-2px)]! rounded-[6px] text-foreground hover:bg-background dark:hover:bg-background";
 
 function ToolbarAction({
   label,
@@ -156,7 +156,7 @@ function ToolbarAction({
         >
           {children}
           {badge != null ? (
-            <span className="pointer-events-none absolute -top-1 -right-1 z-10 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-foreground px-0.5 text-[9px] leading-none font-semibold text-background tabular-nums ring-2 ring-secondary">
+            <span className="pointer-events-none absolute top-0.5 right-0.5 z-10 flex h-3 min-w-3 items-center justify-center rounded-full bg-foreground px-0.5 text-[9px] leading-none font-semibold text-background tabular-nums ring-2 ring-secondary">
               {badge}
             </span>
           ) : null}
@@ -195,7 +195,7 @@ function SplitAction({
             type="button"
             variant="ghost"
             size="icon-xs"
-            className="h-6! w-4! rounded-[6px] px-0 text-foreground/75 hover:bg-background hover:text-foreground aria-expanded:bg-background aria-expanded:text-foreground dark:hover:bg-background dark:aria-expanded:bg-background"
+            className="h-[calc(1.75rem-2px)]! w-4! rounded-[6px] px-0 text-foreground/75 hover:bg-background hover:text-foreground aria-expanded:bg-background aria-expanded:text-foreground dark:hover:bg-background dark:aria-expanded:bg-background"
             aria-label={menuLabel}
           >
             <ChevronDownIcon className="size-3" />
