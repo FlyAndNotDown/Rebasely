@@ -1,10 +1,10 @@
 import { useState, type ReactNode } from "react";
 import {
+  ArrowDownFromLineIcon,
   ArrowDownToLineIcon,
   ArrowUpFromLineIcon,
   ChevronDownIcon,
   FileInputIcon,
-  RefreshCwIcon,
   Settings2Icon,
 } from "lucide-react";
 import { RepoSettingsDialog } from "@/components/repo-settings-dialog";
@@ -60,7 +60,7 @@ export function AppToolbar() {
             </DropdownMenuContent>
           }
         >
-          <RefreshCwIcon className="size-4" />
+          <ArrowDownFromLineIcon className="size-4" />
         </SplitAction>
         <ToolbarAction
           label="Pull"
