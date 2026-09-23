@@ -7,6 +7,7 @@ import type {
   CommitDetails,
   CommitSummary,
   FileDiff,
+  StashDetails,
   GitIdentity,
   RecentRepo,
   RemoteProbe,
@@ -132,6 +133,10 @@ export const gitApi = {
     invoke<WorkspaceSnapshot>("stash_pop", { repoPath, index }),
   stashDrop: (repoPath: string, index: number) =>
     invoke<WorkspaceSnapshot>("stash_drop", { repoPath, index }),
+  getStashDetails: (repoPath: string, oid: string) =>
+    invoke<StashDetails>("get_stash_details", { repoPath, oid }),
+  getStashDiff: (repoPath: string, oid: string, path: string) =>
+    invoke<FileDiff>("get_stash_diff", { repoPath, oid, path }),
   getGitIdentity: () => invoke<GitIdentity>("get_git_identity"),
   setGitIdentity: (identity: GitIdentity) =>
     invoke<GitIdentity>("set_git_identity", { identity }),

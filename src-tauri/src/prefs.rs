@@ -17,6 +17,10 @@ pub struct PanelLayouts {
     pub history_details: HashMap<String, f64>,
     #[serde(default)]
     pub changes: HashMap<String, f64>,
+    #[serde(default)]
+    pub stash: HashMap<String, f64>,
+    #[serde(default)]
+    pub stash_details: HashMap<String, f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

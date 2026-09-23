@@ -7,6 +7,8 @@ export const DEFAULT_PANEL_LAYOUTS: PanelLayouts = {
   history: { "history-commits": 67, "history-details": 33 },
   historyDetails: { "history-files": 34, "history-diff": 66 },
   changes: { "changes-files": 36, "changes-diff": 64 },
+  stash: { "stash-side": 30, "stash-main": 70 },
+  stashDetails: { "stash-files": 28, "stash-diff": 72 },
 };
 
 export const defaultPrefs: AppPrefs = {
@@ -77,6 +79,8 @@ export function normalizePanelLayouts(value?: Partial<PanelLayouts> | null): Pan
     history: normalizeLayout(value?.history, DEFAULT_PANEL_LAYOUTS.history),
     historyDetails: normalizeLayout(value?.historyDetails, DEFAULT_PANEL_LAYOUTS.historyDetails),
     changes: normalizeLayout(value?.changes, DEFAULT_PANEL_LAYOUTS.changes),
+    stash: normalizeLayout(value?.stash, DEFAULT_PANEL_LAYOUTS.stash),
+    stashDetails: normalizeLayout(value?.stashDetails, DEFAULT_PANEL_LAYOUTS.stashDetails),
   };
 }
 

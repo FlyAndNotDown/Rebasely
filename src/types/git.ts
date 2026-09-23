@@ -106,13 +106,21 @@ export type AvatarProvider = "dicebear";
 
 export type PanelLayout = Record<string, number>;
 
-export type PanelLayoutId = "historyShell" | "history" | "historyDetails" | "changes";
+export type PanelLayoutId =
+  | "historyShell"
+  | "history"
+  | "historyDetails"
+  | "changes"
+  | "stash"
+  | "stashDetails";
 
 export interface PanelLayouts {
   historyShell: PanelLayout;
   history: PanelLayout;
   historyDetails: PanelLayout;
   changes: PanelLayout;
+  stash: PanelLayout;
+  stashDetails: PanelLayout;
 }
 
 export interface AppPrefs {
@@ -136,6 +144,12 @@ export interface StashInfo {
   index: number;
   message: string;
   id: string;
+}
+
+export interface StashDetails {
+  id: string;
+  message: string;
+  files: CommitFile[];
 }
 
 export interface WorkspaceSnapshot {

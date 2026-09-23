@@ -6,18 +6,47 @@ import { cn } from "@/lib/utils";
 import { useGit } from "@/state/git-context";
 
 export function DiffViewer() {
-  const { view, changeSelection, historySelection, changeDiff, historyDiff, commitDetails } = useGit();
-  const selection = view === "changes" ? changeSelection : historySelection;
-  const diff = view === "changes" ? changeDiff : historyDiff;
+  const {
+    view,
+    changeSelection,
+    historySelection,
+    stashSelection,
+    changeDiff,
+    historyDiff,
+    stashDiff,
+    commitDetails,
+    stashDetails,
+  } = useGit();
+  const selection =
+    view === "changes" ? changeSelection : view === "stash" ? stashSelection : historySelection;
+  const diff = view === "changes" ? changeDiff : view === "stash" ? stashDiff : historyDiff;
   const title =
     selection?.type === "change"
       ? selection.path
-      : selection?.type === "commit"
-        ? (selection.path ?? "Diff")
+      : selection?.path
+        ? selection.path
         : "Diff";
   const lineSpans = useMemo(() => (diff ? diffLineSpans(diff.lines) : []), [diff]);
 
-  if (!selection || (selection.type === "commit" && !selection.path)) {
+  if (view === "stash") {
+    if (!stashSelection) {
+      return (
+        <div className="flex h-full items-center justify-center p-6 text-center text-sm text-muted-foreground">
+          Select a stash to see its diff
+        </div>
+      );
+    }
+    if (!stashDetails || stashDetails.id !== stashSelection.id) {
+      return <DiffSkeleton label="Loading files" />;
+    }
+    if (!stashSelection.path) {
+      return (
+        <div className="flex h-full items-center justify-center p-6 text-center text-sm text-muted-foreground">
+          {stashDetails.files.length === 0 ? "No changes in this stash" : "Select a file to see its diff"}
+        </div>
+      );
+    }
+  } else if (!selection || (selection.type === "commit" && !selection.path)) {
     const loadingFiles =
       selection?.type === "commit" &&
       (!commitDetails || commitDetails.commit.id !== selection.id);
@@ -28,6 +57,8 @@ export function DiffViewer() {
       </div>
     );
   }
+
+  if (!selection) return null;
 
   return (
     <div className="flex h-full min-h-0 flex-col">

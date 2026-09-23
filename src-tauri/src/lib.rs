@@ -17,7 +17,8 @@ const APP_ICON_PNG: &[u8] = include_bytes!("../icons/icon.png");
 
 use error::{AppError, AppResult};
 use git::{
-    BranchList, CommitDetails, CommitSummary, FileDiff, GitIdentity, RemoteProbe, WorkspaceSnapshot,
+    BranchList, CommitDetails, CommitSummary, FileDiff, GitIdentity, RemoteProbe, StashDetails,
+    WorkspaceSnapshot,
 };
 use prefs::AppPrefs;
 use recents::RecentRepo;
@@ -379,6 +380,16 @@ async fn stash_drop(repo_path: String, index: usize) -> AppResult<WorkspaceSnaps
 }
 
 #[tauri::command]
+async fn get_stash_details(repo_path: String, oid: String) -> AppResult<StashDetails> {
+    with_repo_async(repo_path, move |repo| git::stash_details(repo, &oid)).await
+}
+
+#[tauri::command]
+async fn get_stash_diff(repo_path: String, oid: String, path: String) -> AppResult<FileDiff> {
+    with_repo_async(repo_path, move |repo| git::stash_file_diff(repo, &oid, &path)).await
+}
+
+#[tauri::command]
 fn get_git_identity() -> AppResult<GitIdentity> {
     git::read_git_identity()
 }
@@ -543,6 +554,8 @@ pub fn run() {
             stash_apply,
             stash_pop,
             stash_drop,
+            get_stash_details,
+            get_stash_diff,
             get_git_identity,
             set_git_identity,
             get_local_git_identity,

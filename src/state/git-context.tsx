@@ -26,6 +26,7 @@ import type {
   FileDiff,
   RecentRepo,
   Selection,
+  StashDetails,
   StashInfo,
   WorkspaceSnapshot,
 } from "@/types/git";
@@ -62,6 +63,12 @@ export type AppTab = WelcomeTab | RepoTab;
 
 type ChangeSelection = Extract<Selection, { type: "change" }>;
 type HistorySelection = Extract<Selection, { type: "commit" }>;
+export type StashSelection = {
+  type: "stash";
+  id: string;
+  index: number;
+  path?: string;
+};
 
 interface RepoSession {
   path: string;
@@ -78,6 +85,9 @@ interface RepoSession {
   changeDiff: FileDiff | null;
   historyDiff: FileDiff | null;
   commitDetails: CommitDetails | null;
+  stashSelection: StashSelection | null;
+  stashDetails: StashDetails | null;
+  stashDiff: FileDiff | null;
 }
 
 function repoTabId(path: string): string {
@@ -104,6 +114,9 @@ function emptySession(
     changeDiff: null,
     historyDiff: null,
     commitDetails: null,
+    stashSelection: null,
+    stashDetails: null,
+    stashDiff: null,
   };
 }
 
@@ -238,6 +251,9 @@ interface GitContextValue {
   changeDiff: FileDiff | null;
   historyDiff: FileDiff | null;
   commitDetails: CommitDetails | null;
+  stashSelection: StashSelection | null;
+  stashDetails: StashDetails | null;
+  stashDiff: FileDiff | null;
   stashes: StashInfo[];
   activities: Activity[];
   prefs: AppPrefs;
@@ -262,6 +278,8 @@ interface GitContextValue {
   selectChange: (path: string, staged: boolean) => Promise<void>;
   selectCommit: (id: string) => Promise<void>;
   selectCommitFile: (id: string, path: string) => Promise<void>;
+  selectStash: (stash: StashInfo) => Promise<void>;
+  selectStashFile: (id: string, path: string) => Promise<void>;
   stage: (paths: string[]) => Promise<void>;
   unstage: (paths: string[]) => Promise<void>;
   discard: (paths: string[]) => Promise<void>;
@@ -310,6 +328,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
   const historyRevsMapRef = useRef<Record<string, string[]>>({});
   const historyExpandedMapRef = useRef<Record<string, string[]>>({});
   const historyLoadGen = useRef(0);
+  const stashLoadGen = useRef(0);
   tabsRef.current = tabs;
   sessionsRef.current = sessions;
   activeTabIdRef.current = activeTabId;
@@ -334,9 +353,15 @@ export function GitProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const patchSession = useCallback(
-    (tabId: string, patch: Partial<RepoSession>, generation?: number) => {
+    (
+      tabId: string,
+      patch: Partial<RepoSession>,
+      generation?: number,
+      scope: "history" | "stash" = "history",
+    ) => {
       setSessions((current) => {
-        if (generation !== undefined && historyLoadGen.current !== generation) return current;
+        const active = scope === "stash" ? stashLoadGen.current : historyLoadGen.current;
+        if (generation !== undefined && active !== generation) return current;
         const existing = current[tabId];
         if (!existing) return current;
         const next = { ...current, [tabId]: { ...existing, ...patch } };
@@ -823,6 +848,20 @@ export function GitProvider({ children }: { children: ReactNode }) {
     [patchSession, persistSession],
   );
 
+  const stashPatchFor = useCallback((tabId: string, stashes: StashInfo[]): Partial<RepoSession> => {
+    const selection = sessionsRef.current[tabId]?.stashSelection;
+    if (!selection) return {};
+    const match = stashes.find((stash) => stash.id === selection.id);
+    if (!match) {
+      stashLoadGen.current += 1;
+      return { stashSelection: null, stashDetails: null, stashDiff: null };
+    }
+    if (match.index !== selection.index) {
+      return { stashSelection: { ...selection, index: match.index } };
+    }
+    return {};
+  }, []);
+
   const refreshRepo = useCallback(
     async (path: string) => {
       const tab = findRepoTab(tabsRef.current, path);
@@ -859,6 +898,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
           snapshot,
           changeDiff,
           historyDiff,
+          ...stashPatchFor(tab.id, snapshot.stashes),
         });
         if (graphChanged) {
           invalidateHistory(tab.id, current?.view === "history");
@@ -867,7 +907,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
         // Watch refreshes stay quiet when a repo is mid-write.
       }
     },
-    [invalidateHistory, patchSession],
+    [invalidateHistory, patchSession, stashPatchFor],
   );
 
   const watchedKey = useMemo(
@@ -1095,6 +1135,115 @@ export function GitProvider({ children }: { children: ReactNode }) {
     [activeRepoPath, beginActivity, endActivity, patchActivity, patchSession],
   );
 
+  const selectStash = useCallback(
+    async (stash: StashInfo) => {
+      const repoPath = activeRepoPath();
+      const tabId = activeTabIdRef.current;
+      if (!repoPath) return;
+      const current = sessionsRef.current[tabId];
+      if (
+        current?.stashSelection?.id === stash.id &&
+        current.stashDetails?.id === stash.id &&
+        (current.stashDetails.files.length === 0 ||
+          (current.stashSelection.path != null &&
+            current.stashDiff?.path === current.stashSelection.path))
+      ) {
+        return;
+      }
+
+      const generation = ++stashLoadGen.current;
+      patchSession(
+        tabId,
+        {
+          stashSelection: { type: "stash", id: stash.id, index: stash.index },
+          stashDetails: null,
+          stashDiff: null,
+        },
+        generation,
+        "stash",
+      );
+      const repoName = current?.snapshot?.repo.name;
+      const activityId = beginActivity("Loading stash", repoName);
+      try {
+        const details = await gitApi.getStashDetails(repoPath, stash.id);
+        if (stashLoadGen.current !== generation) return;
+        const first = details.files[0];
+        patchSession(
+          tabId,
+          {
+            stashDetails: details,
+            stashSelection: first
+              ? { type: "stash", id: stash.id, index: stash.index, path: first.path }
+              : { type: "stash", id: stash.id, index: stash.index },
+            stashDiff: first?.binary ? emptyBinaryDiff(first.path, first.oldPath) : null,
+          },
+          generation,
+          "stash",
+        );
+        if (!first || first.binary) return;
+        patchActivity(activityId, { label: "Loading file diff", detail: first.path });
+        const stashDiff = await gitApi.getStashDiff(repoPath, stash.id, first.path);
+        if (stashLoadGen.current !== generation) return;
+        patchSession(tabId, { stashDiff }, generation, "stash");
+      } catch (error) {
+        if (stashLoadGen.current !== generation) return;
+        patchSession(tabId, { stashDetails: null, stashDiff: null }, generation, "stash");
+        toast.error(errorMessage(error));
+      } finally {
+        endActivity(activityId);
+      }
+    },
+    [activeRepoPath, beginActivity, endActivity, patchActivity, patchSession],
+  );
+
+  const selectStashFile = useCallback(
+    async (id: string, path: string) => {
+      const repoPath = activeRepoPath();
+      const tabId = activeTabIdRef.current;
+      if (!repoPath) return;
+      const current = sessionsRef.current[tabId];
+      if (
+        current?.stashSelection?.id === id &&
+        current.stashSelection.path === path &&
+        current.stashDiff?.path === path
+      ) {
+        return;
+      }
+
+      const generation = ++stashLoadGen.current;
+      const index =
+        current?.stashSelection?.id === id
+          ? current.stashSelection.index
+          : (current?.snapshot?.stashes.find((stash) => stash.id === id)?.index ?? 0);
+      const cached = current?.stashDetails?.id === id ? current.stashDetails : null;
+      const file = cached?.files.find((item) => item.path === path);
+      patchSession(
+        tabId,
+        {
+          stashSelection: { type: "stash", id, index, path },
+          stashDiff: file?.binary ? emptyBinaryDiff(path, file.oldPath) : null,
+        },
+        generation,
+        "stash",
+      );
+      if (file?.binary) return;
+
+      const activityId = beginActivity("Loading file diff", path);
+      try {
+        const stashDiff = await gitApi.getStashDiff(repoPath, id, path);
+        if (stashLoadGen.current !== generation) return;
+        patchSession(tabId, { stashDiff }, generation, "stash");
+      } catch (error) {
+        if (stashLoadGen.current !== generation) return;
+        patchSession(tabId, { stashDiff: null }, generation, "stash");
+        toast.error(errorMessage(error));
+      } finally {
+        endActivity(activityId);
+      }
+    },
+    [activeRepoPath, beginActivity, endActivity, patchSession],
+  );
+
   const runMutation = useCallback(
     async (
       label: string,
@@ -1130,6 +1279,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
           snapshot: next.snapshot,
           changeDiff: next.changeDiff,
           changeSelection: next.changeSelection,
+          ...stashPatchFor(tabId, next.snapshot.stashes),
           ...(next.headChanged
             ? {
                 commitsLoaded: false,
@@ -1147,7 +1297,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
         return false;
       }
     },
-    [activeRepoPath, loadHistoryPage, patchSession, runActivity],
+    [activeRepoPath, loadHistoryPage, patchSession, runActivity, stashPatchFor],
   );
 
   const stage = useCallback(
@@ -1589,6 +1739,9 @@ export function GitProvider({ children }: { children: ReactNode }) {
       changeDiff: session?.changeDiff ?? null,
       historyDiff: session?.historyDiff ?? null,
       commitDetails: session?.commitDetails ?? null,
+      stashSelection: session?.stashSelection ?? null,
+      stashDetails: session?.stashDetails ?? null,
+      stashDiff: session?.stashDiff ?? null,
       stashes: session?.snapshot?.stashes ?? [],
       activities,
       prefs,
@@ -1613,6 +1766,8 @@ export function GitProvider({ children }: { children: ReactNode }) {
       selectChange,
       selectCommit,
       selectCommitFile,
+      selectStash,
+      selectStashFile,
       stage,
       unstage,
       discard,
@@ -1667,6 +1822,8 @@ export function GitProvider({ children }: { children: ReactNode }) {
       selectChange,
       selectCommit,
       selectCommitFile,
+      selectStash,
+      selectStashFile,
       stage,
       unstage,
       discard,

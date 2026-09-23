@@ -2393,6 +2393,92 @@ pub fn stash_drop(repo: &mut Repository, index: usize) -> AppResult<()> {
     Ok(())
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StashDetails {
+    pub id: String,
+    pub message: String,
+    pub files: Vec<CommitFile>,
+}
+
+pub fn stash_details(repo: &Repository, oid: &str) -> AppResult<StashDetails> {
+    let oid = oid.trim();
+    let parsed = Oid::from_str(oid)?;
+    let commit = repo.find_commit(parsed)?;
+    let mut files = commit_files_from_git2(repo, parsed)?;
+    // Parent 0 is HEAD, parent 1 is the index, parent 2 is untracked files.
+    if commit.parent_count() > 2 {
+        if let Ok(untracked) = commit.parent(2) {
+            for file in untracked_stash_files(repo, &untracked)? {
+                if files.iter().any(|existing| existing.path == file.path) {
+                    continue;
+                }
+                files.push(file);
+            }
+        }
+    }
+    files.sort_by(|left, right| left.path.to_lowercase().cmp(&right.path.to_lowercase()));
+    Ok(StashDetails {
+        id: parsed.to_string(),
+        message: commit.summary().unwrap_or("").trim().to_string(),
+        files,
+    })
+}
+
+pub fn stash_file_diff(repo: &Repository, oid: &str, path: &str) -> AppResult<FileDiff> {
+    let parsed = Oid::from_str(oid.trim())?;
+    let commit = repo.find_commit(parsed)?;
+    let tracked = commit_file_diff(repo, oid, path)?;
+    if tracked.binary || !tracked.lines.is_empty() {
+        return Ok(tracked);
+    }
+    if commit.parent_count() > 2 {
+        if let Ok(untracked) = commit.parent(2) {
+            let tree = untracked.tree()?;
+            let rel = to_git_path(path);
+            let mut opts = diff_options_for(&rel, false);
+            let diff = repo.diff_tree_to_tree(None, Some(&tree), Some(&mut opts))?;
+            let file_diff = collect_patch(diff, &rel)?;
+            if file_diff.binary || !file_diff.lines.is_empty() {
+                return Ok(file_diff);
+            }
+        }
+    }
+    Ok(tracked)
+}
+
+fn untracked_stash_files(repo: &Repository, commit: &git2::Commit<'_>) -> AppResult<Vec<CommitFile>> {
+    let tree = commit.tree()?;
+    let mut opts = DiffOptions::new();
+    opts.skip_binary_check(true);
+    let diff = repo.diff_tree_to_tree(None, Some(&tree), Some(&mut opts))?;
+    let mut files = Vec::new();
+    diff.foreach(
+        &mut |delta, _| {
+            let path = delta
+                .new_file()
+                .path()
+                .or_else(|| delta.old_file().path())
+                .map(|item| item.to_string_lossy().replace('\\', "/"))
+                .unwrap_or_default();
+            if path.is_empty() {
+                return true;
+            }
+            files.push(CommitFile {
+                binary: looks_binary_path(&path),
+                path,
+                old_path: None,
+                kind: "untracked".to_string(),
+            });
+            true
+        },
+        None,
+        None,
+        None,
+    )?;
+    Ok(files)
+}
+
 pub fn read_git_identity() -> AppResult<GitIdentity> {
     let cfg = git2::Config::open_default().ok();
     Ok(GitIdentity {
@@ -2486,4 +2572,86 @@ pub fn open_in_file_manager(path: &str) -> AppResult<()> {
         .spawn()
         .map_err(|err| AppError::msg(format!("Could not open folder: {err}")))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_repo() -> (PathBuf, Repository) {
+        let root = std::env::temp_dir().join(format!(
+            "rebasely-stash-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let repo = Repository::init(&root).unwrap();
+        let mut config = repo.config().unwrap();
+        config.set_str("user.name", "Rebasely Test").unwrap();
+        config.set_str("user.email", "test@example.com").unwrap();
+        (root, repo)
+    }
+
+    #[test]
+    fn stash_diff_includes_tracked_and_untracked_files() {
+        let (root, mut repo) = temp_repo();
+        fs::write(root.join("tracked.txt"), "base\n").unwrap();
+        fs::write(root.join("gone.txt"), "remove me\n").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("tracked.txt")).unwrap();
+        index.add_path(Path::new("gone.txt")).unwrap();
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        drop(index);
+        {
+            let tree = repo.find_tree(tree_id).unwrap();
+            let signature = repo.signature().unwrap();
+            repo.commit(Some("HEAD"), &signature, &signature, "init", &tree, &[])
+                .unwrap();
+        }
+
+        fs::write(root.join("tracked.txt"), "changed\n").unwrap();
+        fs::remove_file(root.join("gone.txt")).unwrap();
+        fs::write(root.join("extra.txt"), "new\n").unwrap();
+        stash_save(&mut repo, "wip", true).unwrap();
+
+        let mut id = String::new();
+        repo.stash_foreach(|index, _, oid| {
+            if index == 0 {
+                id = oid.to_string();
+            }
+            true
+        })
+        .unwrap();
+
+        let details = stash_details(&repo, &id).unwrap();
+        let kind = |path: &str| {
+            details
+                .files
+                .iter()
+                .find(|file| file.path == path)
+                .map(|file| file.kind.as_str())
+        };
+        assert_eq!(kind("tracked.txt"), Some("modified"), "{:?}", details.files);
+        assert_eq!(kind("gone.txt"), Some("deleted"), "{:?}", details.files);
+        assert_eq!(kind("extra.txt"), Some("untracked"), "{:?}", details.files);
+
+        let tracked = stash_file_diff(&repo, &id, "tracked.txt").unwrap();
+        assert!(tracked.lines.iter().any(|line| line.content.contains("changed")));
+        let extra = stash_file_diff(&repo, &id, "extra.txt").unwrap();
+        assert!(
+            extra
+                .lines
+                .iter()
+                .any(|line| line.kind == "add" && line.content.contains("new")),
+            "{:?}",
+            extra.lines
+        );
+
+        let _ = fs::remove_dir_all(&root);
+    }
 }
