@@ -34,6 +34,20 @@ export type View = "changes" | "history" | "stash";
 export const WELCOME_TAB_ID = "welcome";
 export const COMMIT_PAGE = 80;
 
+function defaultFetchRemote(snapshot: WorkspaceSnapshot | null | undefined) {
+  const names = snapshot?.remotes.map((remote) => remote.name) ?? [];
+  const upstream = snapshot?.repo.upstream;
+  if (upstream) {
+    const match = names
+      .filter((name) => upstream === name || upstream.startsWith(`${name}/`))
+      .sort((left, right) => right.length - left.length)[0];
+    if (match) return match;
+    const slash = upstream.indexOf("/");
+    if (slash > 0) return upstream.slice(0, slash);
+  }
+  return names.includes("origin") ? "origin" : undefined;
+}
+
 export type WelcomeTab = { id: typeof WELCOME_TAB_ID; kind: "welcome" };
 export type RepoTab = {
   id: string;
@@ -1198,10 +1212,13 @@ export function GitProvider({ children }: { children: ReactNode }) {
 
   const fetchRemote = useCallback(
     async (remote?: string) => {
+      const named = remote?.trim();
+      const target =
+        named || defaultFetchRemote(sessionsRef.current[activeTabIdRef.current]?.snapshot);
       const ok = await runMutation(
-        remote ? `Fetching ${remote}` : "Fetching",
-        (repoPath, activityId) => gitApi.fetchRemote(repoPath, activityId, remote),
-        remote ? `Fetched ${remote}` : "Fetched",
+        target ? `Fetching ${target}` : "Fetching",
+        (repoPath, activityId) => gitApi.fetchRemote(repoPath, activityId, named || undefined),
+        target ? `Fetched ${target}` : "Fetched",
       );
       await refreshAfterFetch(ok);
     },
