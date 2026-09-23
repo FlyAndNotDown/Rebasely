@@ -39,7 +39,7 @@ export function AppToolbar() {
 
   return (
     <>
-      <div className="flex h-7 shrink-0 items-center gap-0.5 rounded-[min(var(--radius-md),12px)] border border-foreground/15 bg-secondary px-0.5">
+      <div className="flex h-7 shrink-0 items-center gap-1.5 rounded-[min(var(--radius-md),12px)] border border-foreground/15 bg-secondary px-1">
         <SplitAction
           label="Fetch"
           onClick={() => void fetchRemote()}
@@ -89,7 +89,7 @@ export function AppToolbar() {
         <ToolbarAction label="Apply patch" onClick={() => void applyPatch()}>
           <FileInputIcon className="size-4" />
         </ToolbarAction>
-        <span className="mx-0.5 h-3.5 w-px bg-foreground/20" />
+        <span className="h-3.5 w-px bg-foreground/20" />
         <ToolbarAction label="Repository settings" onClick={() => setRepoSettingsOpen(true)}>
           <Settings2Icon className="size-4" />
         </ToolbarAction>
@@ -150,13 +150,15 @@ function ToolbarAction({
           type="button"
           variant="ghost"
           size="icon-xs"
-          className={cn(actionClass, badge != null && "w-auto! gap-0.5 px-1", className)}
+          className={cn(actionClass, "relative", className)}
           aria-label={tip}
           onClick={onClick}
         >
           {children}
           {badge != null ? (
-            <span className="min-w-2 text-[10px] leading-none font-semibold tabular-nums">{badge}</span>
+            <span className="pointer-events-none absolute -top-1 -right-1 z-10 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-foreground px-0.5 text-[9px] leading-none font-semibold text-background tabular-nums ring-2 ring-secondary">
+              {badge}
+            </span>
           ) : null}
         </Button>
       </TooltipTrigger>
