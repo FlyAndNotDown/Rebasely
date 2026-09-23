@@ -25,6 +25,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 import { useGit } from "@/state/git-context";
 
 export function AppToolbar() {
@@ -38,23 +39,12 @@ export function AppToolbar() {
 
   return (
     <>
-      <div className="flex shrink-0 items-center rounded-md border bg-muted/40 p-0.5">
-        <div className="flex items-center">
-          <ToolbarIcon label="Fetch" onClick={() => void fetchRemote()}>
-            <RefreshCwIcon />
-          </ToolbarIcon>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-xs"
-                className="-ml-0.5 w-4 text-muted-foreground hover:text-foreground"
-                aria-label="Fetch options"
-              >
-                <ChevronDownIcon className="size-3" />
-              </Button>
-            </DropdownMenuTrigger>
+      <div className="flex h-7 shrink-0 items-center gap-0.5 rounded-[min(var(--radius-md),12px)] border border-foreground/15 bg-secondary px-0.5">
+        <SplitAction
+          label="Fetch"
+          onClick={() => void fetchRemote()}
+          menuLabel="Fetch options"
+          menu={
             <DropdownMenuContent align="start" className="min-w-36">
               {snapshot.remotes.map((remote) => (
                 <DropdownMenuItem
@@ -68,49 +58,41 @@ export function AppToolbar() {
               {snapshot.remotes.length > 0 ? <DropdownMenuSeparator /> : null}
               <DropdownMenuItem onClick={() => void fetchAllRemotes()}>All remotes</DropdownMenuItem>
             </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-        <ToolbarIcon
-          label={behind > 0 ? `Pull · ${behind} behind` : "Pull"}
+          }
+        >
+          <RefreshCwIcon className="size-4" />
+        </SplitAction>
+        <ToolbarAction
+          label="Pull"
+          hint={behind > 0 ? `Pull · ${behind} behind` : "Pull"}
           badge={behind > 0 ? behind : undefined}
           onClick={() => void pullRemote()}
         >
-          <ArrowDownToLineIcon />
-        </ToolbarIcon>
-        <div className="flex items-center">
-          <ToolbarIcon
-            label={ahead > 0 ? `Push · ${ahead} ahead` : "Push"}
-            badge={ahead > 0 ? ahead : undefined}
-            onClick={() => void pushRemote()}
-          >
-            <ArrowUpFromLineIcon />
-          </ToolbarIcon>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-xs"
-                className="-ml-0.5 w-4 text-muted-foreground hover:text-foreground"
-                aria-label="Push options"
-              >
-                <ChevronDownIcon className="size-3" />
-              </Button>
-            </DropdownMenuTrigger>
+          <ArrowDownToLineIcon className="size-4" />
+        </ToolbarAction>
+        <SplitAction
+          label="Push"
+          hint={ahead > 0 ? `Push · ${ahead} ahead` : "Push"}
+          badge={ahead > 0 ? ahead : undefined}
+          onClick={() => void pushRemote()}
+          menuLabel="Push options"
+          menu={
             <DropdownMenuContent align="start" className="min-w-36">
               <DropdownMenuItem onClick={() => setForcePushOpen(true)}>
                 Force push
               </DropdownMenuItem>
             </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-        <ToolbarIcon label="Apply patch" onClick={() => void applyPatch()}>
-          <FileInputIcon />
-        </ToolbarIcon>
-        <span className="mx-0.5 h-4 w-px bg-border" />
-        <ToolbarIcon label="Repository settings" onClick={() => setRepoSettingsOpen(true)}>
-          <Settings2Icon />
-        </ToolbarIcon>
+          }
+        >
+          <ArrowUpFromLineIcon className="size-4" />
+        </SplitAction>
+        <ToolbarAction label="Apply patch" onClick={() => void applyPatch()}>
+          <FileInputIcon className="size-4" />
+        </ToolbarAction>
+        <span className="mx-0.5 h-3.5 w-px bg-foreground/20" />
+        <ToolbarAction label="Repository settings" onClick={() => setRepoSettingsOpen(true)}>
+          <Settings2Icon className="size-4" />
+        </ToolbarAction>
       </div>
       <RepoSettingsDialog open={repoSettingsOpen} onOpenChange={setRepoSettingsOpen} />
       <Dialog open={forcePushOpen} onOpenChange={setForcePushOpen}>
@@ -142,17 +124,25 @@ export function AppToolbar() {
   );
 }
 
-function ToolbarIcon({
+const actionClass =
+  "h-6! w-6! rounded-[6px] text-foreground hover:bg-background dark:hover:bg-background";
+
+function ToolbarAction({
   label,
+  hint,
   badge,
   onClick,
+  className,
   children,
 }: {
   label: string;
+  hint?: string;
   badge?: number;
   onClick: () => void;
+  className?: string;
   children: ReactNode;
 }) {
+  const tip = hint ?? label;
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -160,19 +150,57 @@ function ToolbarIcon({
           type="button"
           variant="ghost"
           size="icon-xs"
-          className="relative text-muted-foreground hover:text-foreground"
-          aria-label={label}
+          className={cn(actionClass, badge != null && "w-auto! gap-0.5 px-1", className)}
+          aria-label={tip}
           onClick={onClick}
         >
           {children}
           {badge != null ? (
-            <span className="absolute -top-0.5 -right-0.5 min-w-3 rounded-full bg-foreground px-0.5 text-center text-[9px] leading-3 text-background">
-              {badge}
-            </span>
+            <span className="min-w-2 text-[10px] leading-none font-semibold tabular-nums">{badge}</span>
           ) : null}
         </Button>
       </TooltipTrigger>
-      <TooltipContent>{label}</TooltipContent>
+      <TooltipContent>{tip}</TooltipContent>
     </Tooltip>
+  );
+}
+
+function SplitAction({
+  label,
+  hint,
+  badge,
+  menuLabel,
+  onClick,
+  menu,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  badge?: number;
+  menuLabel: string;
+  onClick: () => void;
+  menu: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <div className="flex items-center gap-px">
+      <ToolbarAction label={label} hint={hint} badge={badge} onClick={onClick}>
+        {children}
+      </ToolbarAction>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            className="h-6! w-4! rounded-[6px] px-0 text-foreground/75 hover:bg-background hover:text-foreground aria-expanded:bg-background aria-expanded:text-foreground dark:hover:bg-background dark:aria-expanded:bg-background"
+            aria-label={menuLabel}
+          >
+            <ChevronDownIcon className="size-3" />
+          </Button>
+        </DropdownMenuTrigger>
+        {menu}
+      </DropdownMenu>
+    </div>
   );
 }
