@@ -13,7 +13,7 @@ import { listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { toast } from "sonner";
 import { emptyBinaryDiff, errorMessage, expandHistoryRevs, gitApi } from "@/lib/git";
-import { pathSegments, sameRepoPath } from "@/lib/format";
+import { normalizeRepoPath, pathSegments, sameRepoPath } from "@/lib/format";
 import { defaultPrefs, normalizePrefs, sameLayout } from "@/lib/prefs";
 import type {
   Activity,
@@ -24,6 +24,7 @@ import type {
   CommitDetails,
   CommitSummary,
   FileDiff,
+  FileStatus,
   RecentRepo,
   Selection,
   StashDetails,
@@ -167,6 +168,117 @@ function historyGraphChanged(
     before.behind !== after.behind ||
     before.upstream !== after.upstream
   );
+}
+
+type RefreshHint = { paths: string[]; overflow: boolean };
+
+function mergeRefreshHint(into: RefreshHint, extra: RefreshHint) {
+  if (into.overflow || extra.overflow) {
+    into.overflow = true;
+    into.paths = [];
+    return;
+  }
+  for (const path of extra.paths) {
+    if (!into.paths.includes(path)) into.paths.push(path);
+  }
+  if (into.paths.length > 48) {
+    into.overflow = true;
+    into.paths = [];
+  }
+}
+
+function watchTouchesFile(changed: string, repoPath: string, filePath: string) {
+  const norm = normalizeRepoPath(changed);
+  if (norm.includes("\\.git\\") || norm.endsWith("\\.git")) return true;
+  const full = normalizeRepoPath(`${repoPath.replace(/[\\/]+$/, "")}/${filePath}`);
+  return norm === full;
+}
+
+function shouldReloadWorkdirDiff(hint: RefreshHint, repoPath: string, filePath: string) {
+  if (hint.overflow || hint.paths.length === 0) return true;
+  return hint.paths.some((changed) => watchTouchesFile(changed, repoPath, filePath));
+}
+
+function sameFiles(left: FileStatus[], right: FileStatus[]) {
+  if (left.length !== right.length) return false;
+  for (let index = 0; index < left.length; index += 1) {
+    const a = left[index];
+    const b = right[index];
+    if (a.path !== b.path || a.oldPath !== b.oldPath || a.kind !== b.kind || a.staged !== b.staged) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function sameDiff(left: FileDiff | null, right: FileDiff | null) {
+  if (left === right) return true;
+  if (!left || !right) return false;
+  if (
+    left.path !== right.path ||
+    left.oldPath !== right.oldPath ||
+    left.binary !== right.binary ||
+    left.truncated !== right.truncated ||
+    left.lines.length !== right.lines.length
+  ) {
+    return false;
+  }
+  for (let index = 0; index < left.lines.length; index += 1) {
+    const a = left.lines[index];
+    const b = right.lines[index];
+    if (a.kind !== b.kind || a.content !== b.content || a.oldLineno !== b.oldLineno || a.newLineno !== b.newLineno) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function sameSnapshot(previous: WorkspaceSnapshot | null | undefined, next: WorkspaceSnapshot) {
+  if (!previous) return false;
+  const before = previous.repo;
+  const after = next.repo;
+  if (
+    before.headId !== after.headId ||
+    before.currentBranch !== after.currentBranch ||
+    before.isDetached !== after.isDetached ||
+    before.ahead !== after.ahead ||
+    before.behind !== after.behind ||
+    before.upstream !== after.upstream ||
+    (previous.headCommit?.id ?? null) !== (next.headCommit?.id ?? null)
+  ) {
+    return false;
+  }
+  if (!sameFiles(previous.status.staged, next.status.staged) || !sameFiles(previous.status.unstaged, next.status.unstaged)) {
+    return false;
+  }
+  if (previous.stashes.length !== next.stashes.length || previous.remotes.length !== next.remotes.length) return false;
+  for (let index = 0; index < previous.stashes.length; index += 1) {
+    const a = previous.stashes[index];
+    const b = next.stashes[index];
+    if (a.id !== b.id || a.index !== b.index || a.message !== b.message) return false;
+  }
+  for (let index = 0; index < previous.remotes.length; index += 1) {
+    const a = previous.remotes[index];
+    const b = next.remotes[index];
+    if (a.name !== b.name || a.url !== b.url || a.pushUrl !== b.pushUrl) return false;
+  }
+  if (previous.branches.local.length !== next.branches.local.length || previous.branches.current !== next.branches.current) {
+    return false;
+  }
+  for (let index = 0; index < previous.branches.local.length; index += 1) {
+    const a = previous.branches.local[index];
+    const b = next.branches.local[index];
+    if (a.name !== b.name || a.isHead !== b.isHead || a.upstream !== b.upstream) return false;
+  }
+  if (previous.branches.remote !== next.branches.remote) {
+    if (previous.branches.remote.length !== next.branches.remote.length) return false;
+    for (let index = 0; index < previous.branches.remote.length; index += 1) {
+      const a = previous.branches.remote[index];
+      const b = next.branches.remote[index];
+      if (a.name !== b.name || a.isHead !== b.isHead || a.upstream !== b.upstream) return false;
+    }
+  }
+  return true;
 }
 
 function sameRevs(left: string[], right: string[]) {
@@ -876,50 +988,78 @@ export function GitProvider({ children }: { children: ReactNode }) {
     return {};
   }, []);
 
+  const refreshFlight = useRef({
+    running: false,
+    queued: new Map<string, RefreshHint>(),
+  });
+
   const refreshRepo = useCallback(
-    async (path: string) => {
-      const tab = findRepoTab(tabsRef.current, path);
-      if (!tab) return;
-      const current = sessionsRef.current[tab.id];
-      try {
-        const snapshot = keepRemoteBranches(current?.snapshot, await gitApi.refreshWorkspace(path));
-        const graphChanged = historyGraphChanged(current?.snapshot, snapshot);
-        let changeDiff = current?.changeDiff ?? null;
-        let historyDiff = current?.historyDiff ?? null;
-        if (current?.changeSelection) {
-          try {
-            changeDiff = await gitApi.getWorkdirDiff(
-              path,
-              current.changeSelection.path,
-              current.changeSelection.staged,
-            );
-          } catch {
-            changeDiff = null;
-          }
-        }
-        if (current?.historySelection?.path) {
-          try {
-            historyDiff = await gitApi.getCommitDiff(
-              path,
-              current.historySelection.id,
-              current.historySelection.path,
-            );
-          } catch {
-            historyDiff = null;
-          }
-        }
-        patchSession(tab.id, {
-          snapshot,
-          changeDiff,
-          historyDiff,
-          ...stashPatchFor(tab.id, snapshot.stashes),
+    (path: string, hint?: RefreshHint) => {
+      const flight = refreshFlight.current;
+      const incoming = hint ?? { paths: [], overflow: true };
+      const existing = flight.queued.get(path);
+      if (existing) mergeRefreshHint(existing, incoming);
+      else {
+        flight.queued.set(path, {
+          overflow: incoming.overflow,
+          paths: incoming.overflow ? [] : [...incoming.paths],
         });
-        if (graphChanged) {
-          invalidateHistory(tab.id, current?.view === "history");
-        }
-      } catch {
-        // Watch refreshes stay quiet when a repo is mid-write.
       }
+      if (flight.running) return;
+      flight.running = true;
+      void (async () => {
+        try {
+          for (;;) {
+            const next = flight.queued.keys().next().value;
+            if (!next) break;
+            const job = flight.queued.get(next);
+            flight.queued.delete(next);
+            if (!job) continue;
+            const tab = findRepoTab(tabsRef.current, next);
+            if (!tab) continue;
+            const current = sessionsRef.current[tab.id];
+            try {
+              const snapshot = keepRemoteBranches(current?.snapshot, await gitApi.refreshWorkspace(next));
+              const graphChanged = historyGraphChanged(current?.snapshot, snapshot);
+              let changeDiff = current?.changeDiff ?? null;
+              const selection = current?.changeSelection;
+              if (selection && shouldReloadWorkdirDiff(job, next, selection.path)) {
+                try {
+                  changeDiff = await gitApi.getWorkdirDiff(next, selection.path, selection.staged);
+                } catch {
+                  changeDiff = null;
+                }
+              }
+              const snapshotSame = sameSnapshot(current?.snapshot, snapshot);
+              const diffSame = sameDiff(changeDiff, current?.changeDiff ?? null);
+              if (!snapshotSame || !diffSame) {
+                const stashPatch = snapshotSame ? {} : stashPatchFor(tab.id, snapshot.stashes);
+                startTransition(() => {
+                  patchSession(tab.id, {
+                    ...(snapshotSame ? {} : { snapshot, ...stashPatch }),
+                    ...(diffSame ? {} : { changeDiff }),
+                  });
+                });
+              }
+              if (graphChanged) {
+                invalidateHistory(tab.id, current?.view === "history");
+              }
+            } catch {
+              // Watch refreshes stay quiet when a repo is mid-write.
+            }
+          }
+        } finally {
+          flight.running = false;
+          if (flight.queued.size > 0) {
+            const next = flight.queued.keys().next().value;
+            const job = next ? flight.queued.get(next) : undefined;
+            if (next && job) {
+              flight.queued.delete(next);
+              refreshRepo(next, job);
+            }
+          }
+        }
+      })();
     },
     [invalidateHistory, patchSession, stashPatchFor],
   );
@@ -941,8 +1081,16 @@ export function GitProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let disposed = false;
     let unlisten: (() => void) | undefined;
-    void listen<string>("repo-changed", (event) => {
-      void refreshRepo(event.payload);
+    void listen<{ path: string; paths?: string[]; overflow?: boolean } | string>("repo-changed", (event) => {
+      const payload = event.payload;
+      if (typeof payload === "string") {
+        refreshRepo(payload, { paths: [], overflow: true });
+        return;
+      }
+      refreshRepo(payload.path, {
+        paths: payload.paths ?? [],
+        overflow: payload.overflow ?? true,
+      });
     }).then((fn) => {
       if (disposed) fn();
       else unlisten = fn;

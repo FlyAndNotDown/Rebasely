@@ -1,9 +1,10 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
 
@@ -312,7 +313,7 @@ pub fn repo_info(repo: &Repository) -> AppResult<RepoInfo> {
                         if let (Some(local_oid), Some(up_oid)) =
                             (branch.get().target(), up.get().target())
                         {
-                            if let Ok((a, b)) = repo.graph_ahead_behind(local_oid, up_oid) {
+                            if let Some((a, b)) = cached_ahead_behind(repo, local_oid, up_oid) {
                                 ahead = Some(a);
                                 behind = Some(b);
                             }
@@ -1367,6 +1368,37 @@ fn mark_on_current_branch(repo: &Repository, commits: &mut [CommitSummary]) {
     let head = repo.head().ok();
     let head_oid = head.as_ref().and_then(|head| head.target());
     let upstream_oid = head.as_ref().and_then(|head| upstream_oid_of(repo, head));
+    if commit_graph_available(repo) {
+        mark_branch_flags_with_graph(repo, commits, head_oid, upstream_oid);
+        return;
+    }
+    let on_head = head_oid.and_then(|oid| reachable_commits(repo, oid));
+    let on_upstream = upstream_oid.and_then(|oid| reachable_commits(repo, oid));
+    if (on_head.is_none() && head_oid.is_some())
+        || (on_upstream.is_none() && upstream_oid.is_some())
+    {
+        mark_branch_flags_with_graph(repo, commits, head_oid, upstream_oid);
+        return;
+    }
+    let head_id = head_oid.map(|oid| oid.to_string());
+    let upstream_id = upstream_oid.map(|oid| oid.to_string());
+    for commit in commits {
+        let Ok(oid) = Oid::from_str(&commit.id) else {
+            commit.on_current_branch = head_id.as_deref() == Some(commit.id.as_str());
+            commit.on_tracking_branch = upstream_id.as_deref() == Some(commit.id.as_str());
+            continue;
+        };
+        commit.on_current_branch = on_head.as_ref().is_some_and(|set| set.contains(&oid));
+        commit.on_tracking_branch = on_upstream.as_ref().is_some_and(|set| set.contains(&oid));
+    }
+}
+
+fn mark_branch_flags_with_graph(
+    repo: &Repository,
+    commits: &mut [CommitSummary],
+    head_oid: Option<Oid>,
+    upstream_oid: Option<Oid>,
+) {
     let head_id = head_oid.map(|oid| oid.to_string());
     let upstream_id = upstream_oid.map(|oid| oid.to_string());
     for commit in commits {
@@ -1379,6 +1411,70 @@ fn mark_on_current_branch(repo: &Repository, commits: &mut [CommitSummary]) {
         commit.on_tracking_branch =
             contains_commit(repo, upstream_oid, &upstream_id, oid, &commit.id);
     }
+}
+
+fn commit_graph_available(repo: &Repository) -> bool {
+    let git_dir = repo.path();
+    if git_dir.join("objects/info/commit-graph").is_file() {
+        return true;
+    }
+    git_dir
+        .join("objects/info/commit-graphs")
+        .read_dir()
+        .map(|mut entries| entries.next().is_some())
+        .unwrap_or(false)
+}
+
+fn reachable_commits(repo: &Repository, tip: Oid) -> Option<Arc<HashSet<Oid>>> {
+    enum Cached {
+        Set(Arc<HashSet<Oid>>),
+        TooBig,
+    }
+    const MAX_REACHABLE: usize = 2_000_000;
+    static CACHE: OnceLock<Mutex<Vec<(Oid, Cached)>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(Vec::new()));
+    if let Ok(guard) = cache.lock() {
+        if let Some((_, cached)) = guard.iter().find(|(oid, _)| *oid == tip) {
+            return match cached {
+                Cached::Set(set) => Some(Arc::clone(set)),
+                Cached::TooBig => None,
+            };
+        }
+    }
+
+    let cached = match walk_reachable(repo, tip, MAX_REACHABLE) {
+        Some(set) => Cached::Set(Arc::new(set)),
+        None => Cached::TooBig,
+    };
+    let result = match &cached {
+        Cached::Set(set) => Some(Arc::clone(set)),
+        Cached::TooBig => None,
+    };
+    if let Ok(mut guard) = cache.lock() {
+        guard.retain(|(oid, _)| *oid != tip);
+        guard.push((tip, cached));
+        if guard.len() > 4 {
+            let extra = guard.len() - 4;
+            guard.drain(0..extra);
+        }
+    }
+    result
+}
+
+fn walk_reachable(repo: &Repository, tip: Oid, limit: usize) -> Option<HashSet<Oid>> {
+    let mut walk = repo.revwalk().ok()?;
+    walk.push(tip).ok()?;
+    let mut set = HashSet::new();
+    for oid in walk.flatten() {
+        set.insert(oid);
+        if set.len() > limit {
+            return None;
+        }
+    }
+    if set.is_empty() {
+        return None;
+    }
+    Some(set)
 }
 
 fn upstream_oid_of(repo: &Repository, head: &git2::Reference) -> Option<Oid> {
@@ -1839,6 +1935,15 @@ pub fn commit_file_diff(repo: &Repository, oid: &str, path: &str) -> AppResult<F
 
 pub fn branches(repo: &Repository, include_remote: bool) -> AppResult<BranchList> {
     let info = repo_info(repo)?;
+    branch_list(repo, include_remote, info.current_branch, info.is_detached)
+}
+
+fn branch_list(
+    repo: &Repository,
+    include_remote: bool,
+    current: Option<String>,
+    is_detached: bool,
+) -> AppResult<BranchList> {
     let mut local = Vec::new();
     for item in repo.branches(Some(BranchType::Local))? {
         let (branch, _) = item?;
@@ -1890,8 +1995,8 @@ pub fn branches(repo: &Repository, include_remote: bool) -> AppResult<BranchList
     }
 
     Ok(BranchList {
-        current: info.current_branch,
-        is_detached: info.is_detached,
+        current,
+        is_detached,
         local,
         remote,
     })
@@ -2236,14 +2341,78 @@ fn ensure_clean_for_replay(repo: &Repository) -> AppResult<()> {
     Ok(())
 }
 
+fn cached_ahead_behind(repo: &Repository, local: Oid, upstream: Oid) -> Option<(usize, usize)> {
+    struct Entry {
+        local: Oid,
+        upstream: Oid,
+        ahead: usize,
+        behind: usize,
+    }
+    static CACHE: OnceLock<Mutex<Vec<Entry>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(Vec::new()));
+    if let Ok(guard) = cache.lock() {
+        if let Some(hit) = guard
+            .iter()
+            .find(|entry| entry.local == local && entry.upstream == upstream)
+        {
+            return Some((hit.ahead, hit.behind));
+        }
+    }
+    let (ahead, behind) = repo.graph_ahead_behind(local, upstream).ok()?;
+    if let Ok(mut guard) = cache.lock() {
+        guard.retain(|entry| entry.local != local || entry.upstream != upstream);
+        guard.push(Entry {
+            local,
+            upstream,
+            ahead,
+            behind,
+        });
+        if guard.len() > 8 {
+            let extra = guard.len() - 8;
+            guard.drain(0..extra);
+        }
+    }
+    Some((ahead, behind))
+}
+
+fn snapshot_mutex(root: &Path) -> Arc<Mutex<()>> {
+    static GATES: OnceLock<Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>> = OnceLock::new();
+    let gates = GATES.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut map = gates.lock().unwrap_or_else(|err| err.into_inner());
+    map.entry(root.to_path_buf())
+        .or_insert_with(|| Arc::new(Mutex::new(())))
+        .clone()
+}
+
 pub fn snapshot(repo: &mut Repository) -> AppResult<WorkspaceSnapshot> {
+    let root = workdir(repo)?.to_path_buf();
+    let gate = snapshot_mutex(&root);
+    let _guard = gate.lock().unwrap_or_else(|err| err.into_inner());
+    let status_root = root.clone();
+    let status_task = thread::spawn(move || status_from_git(&status_root));
+    let built: AppResult<_> = (|| {
+        let info = repo_info(repo)?;
+        let branches = branch_list(repo, false, info.current_branch.clone(), info.is_detached)?;
+        let remotes = list_remotes(repo)?;
+        let stashes = list_stashes(repo)?;
+        Ok((info, branches, remotes, stashes, head_commit(repo)))
+    })();
+    let status_result = match status_task.join() {
+        Ok(result) => result,
+        Err(_) => Err(AppError::msg("Could not read status")),
+    };
+    let (info, branches, remotes, stashes, head) = built?;
+    let status = match status_result {
+        Ok(status) => status,
+        Err(_) => status_from_libgit2(repo)?,
+    };
     Ok(WorkspaceSnapshot {
-        repo: repo_info(repo)?,
-        status: status_snapshot(repo)?,
-        branches: branches(repo, false)?,
-        remotes: list_remotes(repo)?,
-        stashes: list_stashes(repo)?,
-        head_commit: head_commit(repo),
+        repo: info,
+        status,
+        branches,
+        remotes,
+        stashes,
+        head_commit: head,
     })
 }
 
