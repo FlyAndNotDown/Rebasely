@@ -2238,7 +2238,20 @@ pub fn list_remotes(repo: &Repository) -> AppResult<Vec<RemoteInfo>> {
             push_url: remote.pushurl().map(str::to_string),
         });
     }
-    remotes.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    remotes.sort_by(|left, right| {
+        fn rank(name: &str) -> u8 {
+            if name.eq_ignore_ascii_case("origin") {
+                0
+            } else {
+                1
+            }
+        }
+        rank(&left.name).cmp(&rank(&right.name)).then_with(|| {
+            left.name
+                .to_lowercase()
+                .cmp(&right.name.to_lowercase())
+        })
+    });
     Ok(remotes)
 }
 
