@@ -428,22 +428,47 @@ pub fn fetch_remote(
 
 pub fn pull_remote(
     repo: &mut Repository,
+    remote: Option<&str>,
     on_progress: impl FnMut(&str) + Send,
 ) -> AppResult<WorkspaceSnapshot> {
-    run_git_ok_progress(workdir(repo)?, &["pull", "--progress"], on_progress)?;
+    let mut args = vec!["pull".to_string(), "--progress".to_string()];
+    if let Some(remote) = remote.map(str::trim).filter(|name| !name.is_empty()) {
+        let branch = repo_info(repo)?
+            .current_branch
+            .filter(|name| !name.is_empty())
+            .ok_or_else(|| AppError::msg("Cannot pull while HEAD is detached"))?;
+        args.push(remote.to_string());
+        args.push(branch);
+    }
+    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    run_git_ok_progress(workdir(repo)?, &arg_refs, on_progress)?;
     snapshot(repo)
 }
 
 pub fn push_remote(
     repo: &mut Repository,
+    remote: Option<&str>,
     force: bool,
+    set_upstream: bool,
     on_progress: impl FnMut(&str) + Send,
 ) -> AppResult<WorkspaceSnapshot> {
-    let mut args = vec!["push", "--progress"];
+    let branch = repo_info(repo)?
+        .current_branch
+        .filter(|name| !name.is_empty())
+        .ok_or_else(|| AppError::msg("Cannot push while HEAD is detached"))?;
+    let mut args = vec!["push".to_string(), "--progress".to_string()];
     if force {
-        args.insert(1, "--force-with-lease");
+        args.push("--force-with-lease".to_string());
     }
-    run_git_ok_progress(workdir(repo)?, &args, on_progress)?;
+    if set_upstream {
+        args.push("--set-upstream".to_string());
+    }
+    if let Some(remote) = remote.map(str::trim).filter(|name| !name.is_empty()) {
+        args.push(remote.to_string());
+        args.push(branch);
+    }
+    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    run_git_ok_progress(workdir(repo)?, &arg_refs, on_progress)?;
     snapshot(repo)
 }
 

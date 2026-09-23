@@ -36,7 +36,7 @@ export type ResetMode = "soft" | "mixed" | "hard" | "merge" | "keep";
 export const WELCOME_TAB_ID = "welcome";
 export const COMMIT_PAGE = 80;
 
-function defaultFetchRemote(snapshot: WorkspaceSnapshot | null | undefined) {
+export function defaultFetchRemote(snapshot: WorkspaceSnapshot | null | undefined) {
   const names = snapshot?.remotes.map((remote) => remote.name) ?? [];
   const upstream = snapshot?.repo.upstream;
   if (upstream) {
@@ -49,6 +49,16 @@ function defaultFetchRemote(snapshot: WorkspaceSnapshot | null | undefined) {
   }
   return names.includes("origin") ? "origin" : undefined;
 }
+
+export function primaryRemote(snapshot: WorkspaceSnapshot | null | undefined) {
+  const names = snapshot?.remotes.map((remote) => remote.name) ?? [];
+  return names.find((name) => name === "origin") ?? names[0];
+}
+
+export type PublishPrompt = {
+  branch: string;
+  remote: string;
+};
 
 export type WelcomeTab = { id: typeof WELCOME_TAB_ID; kind: "welcome" };
 export type RepoTab = {
@@ -287,8 +297,11 @@ interface GitContextValue {
   checkoutBranch: (name: string) => Promise<void>;
   fetchRemote: (remote?: string) => Promise<void>;
   fetchAllRemotes: () => Promise<void>;
-  pullRemote: () => Promise<void>;
-  pushRemote: (force?: boolean) => Promise<void>;
+  pullRemote: (remote?: string) => Promise<void>;
+  pushRemote: (options?: { remote?: string; force?: boolean; setUpstream?: boolean }) => Promise<boolean>;
+  publishPrompt: PublishPrompt | null;
+  dismissPublish: () => void;
+  confirmPublish: () => Promise<void>;
   createBranch: (name: string, switchTo: boolean, start?: string) => Promise<boolean>;
   deleteBranch: (name: string) => Promise<boolean>;
   revertCommit: (oid: string) => Promise<boolean>;
@@ -316,6 +329,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [opening, setOpening] = useState(false);
   const [activities, setActivities] = useState<Activity[]>([]);
+  const [publishPrompt, setPublishPrompt] = useState<PublishPrompt | null>(null);
   const [prefs, setPrefs] = useState<AppPrefs>(defaultPrefs);
   const restoredRef = useRef(false);
   const prefsRef = useRef(prefs);
@@ -1403,23 +1417,66 @@ export function GitProvider({ children }: { children: ReactNode }) {
     await refreshAfterFetch(ok);
   }, [refreshAfterFetch, runMutation]);
 
-  const pullRemote = useCallback(async () => {
+  const pullRemote = useCallback(async (remote?: string) => {
+    const snapshot = sessionsRef.current[activeTabIdRef.current]?.snapshot;
+    const target = remote?.trim() || primaryRemote(snapshot);
+    if (!target) {
+      toast.error("Add a remote before pulling");
+      return;
+    }
     const ok = await runMutation(
-      "Pulling",
-      (repoPath, activityId) => gitApi.pullRemote(repoPath, activityId),
-      "Pulled",
+      `Pulling from ${target}`,
+      (repoPath, activityId) => gitApi.pullRemote(repoPath, activityId, target),
+      `Pulled from ${target}`,
     );
     await ensureBranches(true);
     if (ok) invalidateHistory(activeTabIdRef.current, sessionsRef.current[activeTabIdRef.current]?.view === "history");
   }, [ensureBranches, invalidateHistory, runMutation]);
 
-  const pushRemote = useCallback(async (force = false) => {
-    await runMutation(
-      force ? "Force pushing" : "Pushing",
-      (repoPath, activityId) => gitApi.pushRemote(repoPath, activityId, force),
-      force ? "Force pushed" : "Pushed",
-    );
-  }, [runMutation]);
+  const pushRemote = useCallback(
+    async (options?: { remote?: string; force?: boolean; setUpstream?: boolean }) => {
+      const snapshot = sessionsRef.current[activeTabIdRef.current]?.snapshot;
+      if (!snapshot) return false;
+      const remote = options?.remote?.trim() || primaryRemote(snapshot);
+      if (!remote) {
+        toast.error("Add a remote before pushing");
+        return false;
+      }
+      const branch = snapshot.repo.currentBranch;
+      if (!branch) {
+        toast.error("Cannot push while HEAD is detached");
+        return false;
+      }
+      if (!snapshot.repo.upstream && !options?.setUpstream) {
+        setPublishPrompt({ branch, remote });
+        return false;
+      }
+      const publishing = Boolean(options?.setUpstream);
+      const force = Boolean(options?.force) && !publishing;
+      const label = force ? "Force pushing" : publishing ? `Publishing to ${remote}` : `Pushing to ${remote}`;
+      const success = force ? "Force pushed" : publishing ? `Published to ${remote}` : `Pushed to ${remote}`;
+      return runMutation(
+        label,
+        (repoPath, activityId) =>
+          gitApi.pushRemote(repoPath, activityId, {
+            remote,
+            force,
+            setUpstream: publishing,
+          }),
+        success,
+      );
+    },
+    [runMutation],
+  );
+
+  const dismissPublish = useCallback(() => setPublishPrompt(null), []);
+
+  const confirmPublish = useCallback(async () => {
+    const prompt = publishPrompt;
+    if (!prompt) return;
+    setPublishPrompt(null);
+    await pushRemote({ remote: prompt.remote, setUpstream: true });
+  }, [publishPrompt, pushRemote]);
 
   const createBranch = useCallback(
     async (name: string, switchTo: boolean, start?: string) => {
@@ -1777,6 +1834,9 @@ export function GitProvider({ children }: { children: ReactNode }) {
       fetchAllRemotes,
       pullRemote,
       pushRemote,
+      publishPrompt,
+      dismissPublish,
+      confirmPublish,
       createBranch,
       deleteBranch,
       revertCommit,
@@ -1833,6 +1893,9 @@ export function GitProvider({ children }: { children: ReactNode }) {
       fetchAllRemotes,
       pullRemote,
       pushRemote,
+      publishPrompt,
+      dismissPublish,
+      confirmPublish,
       createBranch,
       deleteBranch,
       revertCommit,

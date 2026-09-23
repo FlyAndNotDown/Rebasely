@@ -204,11 +204,16 @@ async fn fetch_remote(
 #[tauri::command]
 async fn pull_remote(
     repo_path: String,
+    remote: Option<String>,
     activity_id: Option<String>,
     app: AppHandle,
 ) -> AppResult<WorkspaceSnapshot> {
     with_repo_async(repo_path, move |repo| {
-        git::pull_remote(repo, progress_sink(&app, activity_id.as_deref()))
+        git::pull_remote(
+            repo,
+            remote.as_deref(),
+            progress_sink(&app, activity_id.as_deref()),
+        )
     })
     .await
 }
@@ -216,13 +221,22 @@ async fn pull_remote(
 #[tauri::command]
 async fn push_remote(
     repo_path: String,
+    remote: Option<String>,
     force: Option<bool>,
+    set_upstream: Option<bool>,
     activity_id: Option<String>,
     app: AppHandle,
 ) -> AppResult<WorkspaceSnapshot> {
     let force = force.unwrap_or(false);
+    let set_upstream = set_upstream.unwrap_or(false);
     with_repo_async(repo_path, move |repo| {
-        git::push_remote(repo, force, progress_sink(&app, activity_id.as_deref()))
+        git::push_remote(
+            repo,
+            remote.as_deref(),
+            force,
+            set_upstream,
+            progress_sink(&app, activity_id.as_deref()),
+        )
     })
     .await
 }

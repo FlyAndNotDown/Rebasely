@@ -26,59 +26,115 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { useGit } from "@/state/git-context";
+import { defaultFetchRemote, primaryRemote, useGit } from "@/state/git-context";
 
 export function AppToolbar() {
-  const { snapshot, fetchRemote, fetchAllRemotes, pullRemote, pushRemote, applyPatch } = useGit();
+  const {
+    snapshot,
+    fetchRemote,
+    fetchAllRemotes,
+    pullRemote,
+    pushRemote,
+    publishPrompt,
+    dismissPublish,
+    confirmPublish,
+    applyPatch,
+  } = useGit();
   const [repoSettingsOpen, setRepoSettingsOpen] = useState(false);
   const [forcePushOpen, setForcePushOpen] = useState(false);
   if (!snapshot) return null;
 
   const ahead = snapshot.repo.ahead ?? 0;
   const behind = snapshot.repo.behind ?? 0;
+  const primary = primaryRemote(snapshot);
+  const fetchTarget = defaultFetchRemote(snapshot) ?? primary;
 
   return (
     <>
       <div className="flex h-7 shrink-0 items-center gap-1.5 rounded-[min(var(--radius-md),12px)] border border-input bg-secondary px-0.5">
         <SplitAction
           label="Fetch"
+          hint={fetchTarget ? `Fetch from ${fetchTarget}` : "Fetch"}
           onClick={() => void fetchRemote()}
           menuLabel="Fetch options"
           menu={
-            <DropdownMenuContent align="start" className="min-w-36">
+            <DropdownMenuContent align="start" className="min-w-max">
               {snapshot.remotes.map((remote) => (
                 <DropdownMenuItem
                   key={remote.name}
-                  className="font-mono"
                   onClick={() => void fetchRemote(remote.name)}
                 >
-                  {remote.name}
+                  Fetch from <span className="font-mono">'{remote.name}'</span>
                 </DropdownMenuItem>
               ))}
               {snapshot.remotes.length > 0 ? <DropdownMenuSeparator /> : null}
-              <DropdownMenuItem onClick={() => void fetchAllRemotes()}>All remotes</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => void fetchAllRemotes()}>
+                Fetch all remotes
+              </DropdownMenuItem>
             </DropdownMenuContent>
           }
         >
           <ArrowDownFromLineIcon className="size-4" />
         </SplitAction>
-        <ToolbarAction
+        <SplitAction
           label="Pull"
-          hint={behind > 0 ? `Pull · ${behind} behind` : "Pull"}
+          hint={
+            primary
+              ? behind > 0
+                ? `Pull from ${primary} · ${behind} behind`
+                : `Pull from ${primary}`
+              : "Pull"
+          }
           badge={behind > 0 ? behind : undefined}
           onClick={() => void pullRemote()}
+          menuLabel="Pull options"
+          menu={
+            <DropdownMenuContent align="start" className="min-w-max">
+              {snapshot.remotes.map((remote) => (
+                <DropdownMenuItem
+                  key={remote.name}
+                  onClick={() => void pullRemote(remote.name)}
+                >
+                  Pull from <span className="font-mono">'{remote.name}'</span>
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          }
         >
           <ArrowDownToLineIcon className="size-4" />
-        </ToolbarAction>
+        </SplitAction>
         <SplitAction
           label="Push"
-          hint={ahead > 0 ? `Push · ${ahead} ahead` : "Push"}
+          hint={
+            primary
+              ? ahead > 0
+                ? `Push to ${primary} · ${ahead} ahead`
+                : `Push to ${primary}`
+              : "Push"
+          }
           badge={ahead > 0 ? ahead : undefined}
           onClick={() => void pushRemote()}
           menuLabel="Push options"
           menu={
-            <DropdownMenuContent align="start" className="min-w-36">
-              <DropdownMenuItem onClick={() => setForcePushOpen(true)}>
+            <DropdownMenuContent align="start" className="min-w-max">
+              {snapshot.remotes.map((remote) => (
+                <DropdownMenuItem
+                  key={remote.name}
+                  onClick={() => void pushRemote({ remote: remote.name })}
+                >
+                  Push to <span className="font-mono">'{remote.name}'</span>
+                </DropdownMenuItem>
+              ))}
+              {snapshot.remotes.length > 0 ? <DropdownMenuSeparator /> : null}
+              <DropdownMenuItem
+                onClick={() => {
+                  if (!snapshot.repo.upstream) {
+                    void pushRemote();
+                    return;
+                  }
+                  setForcePushOpen(true);
+                }}
+              >
                 Force push
               </DropdownMenuItem>
             </DropdownMenuContent>
@@ -100,8 +156,14 @@ export function AppToolbar() {
           <DialogHeader>
             <DialogTitle>Force push?</DialogTitle>
             <DialogDescription>
-              This overwrites the remote branch with your local history. Anyone else who pushed to
-              this branch may need to recover their work.
+              This overwrites{" "}
+              <span className="font-mono">
+                {primary && snapshot.repo.currentBranch
+                  ? `${primary}/${snapshot.repo.currentBranch}`
+                  : "the remote branch"}
+              </span>{" "}
+              with your local history. Anyone else who pushed to this branch may need to recover
+              their work.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -112,11 +174,34 @@ export function AppToolbar() {
               variant="destructive"
               onClick={() => {
                 setForcePushOpen(false);
-                void pushRemote(true);
+                void pushRemote({ force: true });
               }}
             >
               Force push
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={!!publishPrompt}
+        onOpenChange={(open) => {
+          if (!open) dismissPublish();
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Publish branch?</DialogTitle>
+            <DialogDescription>
+              <span className="font-mono">{publishPrompt?.branch}</span> does not track a remote
+              branch. Publish it to <span className="font-mono">{publishPrompt?.remote}</span> and
+              set that as the upstream?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={dismissPublish}>
+              Cancel
+            </Button>
+            <Button onClick={() => void confirmPublish()}>Publish</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

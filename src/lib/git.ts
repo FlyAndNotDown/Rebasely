@@ -98,10 +98,24 @@ export const gitApi = {
     invoke<WorkspaceSnapshot>("delete_remote", { repoPath, name }),
   probeRemoteUrl: (repoPath: string, url: string) =>
     invoke<RemoteProbe>("probe_remote_url", { repoPath, url }),
-  pullRemote: (repoPath: string, activityId?: string) =>
-    invoke<WorkspaceSnapshot>("pull_remote", { repoPath, activityId }),
-  pushRemote: (repoPath: string, activityId?: string, force = false) =>
-    invoke<WorkspaceSnapshot>("push_remote", { repoPath, activityId, force }),
+  pullRemote: (repoPath: string, activityId?: string, remote?: string) =>
+    invoke<WorkspaceSnapshot>("pull_remote", {
+      repoPath,
+      activityId,
+      remote: remote || null,
+    }),
+  pushRemote: (
+    repoPath: string,
+    activityId?: string,
+    options?: { remote?: string; force?: boolean; setUpstream?: boolean },
+  ) =>
+    invoke<WorkspaceSnapshot>("push_remote", {
+      repoPath,
+      activityId,
+      remote: options?.remote || null,
+      force: options?.force ?? false,
+      setUpstream: options?.setUpstream ?? false,
+    }),
   createBranch: (repoPath: string, name: string, switchTo: boolean, start?: string) =>
     invoke<WorkspaceSnapshot>("create_branch", {
       repoPath,
