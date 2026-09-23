@@ -271,6 +271,18 @@ async fn cherry_pick_commit(repo_path: String, oid: String) -> AppResult<Workspa
 }
 
 #[tauri::command]
+async fn reset_to_commit(
+    repo_path: String,
+    oid: String,
+    mode: String,
+) -> AppResult<WorkspaceSnapshot> {
+    with_repo_async(repo_path, move |repo| {
+        git::reset_to_commit(repo, &oid, &mode)
+    })
+    .await
+}
+
+#[tauri::command]
 async fn write_commit_patch(repo_path: String, oid: String, dest: String) -> AppResult<()> {
     with_repo_async(repo_path, move |repo| git::write_commit_patch(repo, &oid, &dest)).await
 }
@@ -505,6 +517,7 @@ pub fn run() {
             delete_branch,
             revert_commit,
             cherry_pick_commit,
+            reset_to_commit,
             write_commit_patch,
             apply_patch,
             add_remote,

@@ -47,6 +47,7 @@ export interface CommitSummary {
   parents: string[];
   refs: CommitRef[];
   onCurrentBranch: boolean;
+  onTrackingBranch: boolean;
 }
 
 export interface DiffLine {

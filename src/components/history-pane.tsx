@@ -7,6 +7,7 @@ import {
   HashIcon,
   MailIcon,
   MessageSquareTextIcon,
+  RotateCcwIcon,
   SearchIcon,
   Undo2Icon,
   UserIcon,
@@ -39,7 +40,7 @@ import { formatAbsoluteTime } from "@/lib/format";
 import { errorMessage, expandHistoryRevs, gitApi } from "@/lib/git";
 import { graphWidth, laneColor, layoutCommitGraph, type GraphRow } from "@/lib/commit-graph";
 import { cn } from "@/lib/utils";
-import { COMMIT_PAGE, useGit } from "@/state/git-context";
+import { COMMIT_PAGE, useGit, type ResetMode } from "@/state/git-context";
 import type { AvatarProvider, CommitRef, CommitSummary } from "@/types/git";
 import { toast } from "sonner";
 
@@ -48,7 +49,55 @@ type CommitRowAction =
   | { type: "branch"; commit: CommitSummary }
   | { type: "revert"; commit: CommitSummary }
   | { type: "cherry-pick"; commit: CommitSummary }
+  | { type: "reset"; commit: CommitSummary }
   | { type: "patch"; commit: CommitSummary };
+
+function commitSubject(summary: string) {
+  return summary.split(/\r?\n/, 1)[0]?.replace(/\s+/g, " ").trim() ?? "";
+}
+
+function CommitLine({ commit }: { commit?: { shortId: string; summary: string } | null }) {
+  if (!commit) return null;
+  const subject = commitSubject(commit.summary);
+  return (
+    <div className="mt-2 flex w-full min-w-0 items-baseline gap-2 font-mono text-xs">
+      <span className="shrink-0 text-foreground">{commit.shortId}</span>
+      {subject ? (
+        <span className="min-w-0 truncate text-muted-foreground" title={subject}>
+          {subject}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+const RESET_MODES: { id: ResetMode; label: string; detail: string }[] = [
+  {
+    id: "soft",
+    label: "Soft",
+    detail: "Move the branch. Staged and unstaged changes stay.",
+  },
+  {
+    id: "mixed",
+    label: "Mixed",
+    detail: "Move the branch and unstage. Working tree changes stay. This is the default.",
+  },
+  {
+    id: "hard",
+    label: "Hard",
+    detail: "Move the branch and discard tracked changes in the index and working tree.",
+  },
+  {
+    id: "merge",
+    label: "Merge",
+    detail: "Move the branch. Stops if an unstaged edit overlaps a file that would change.",
+  },
+  {
+    id: "keep",
+    label: "Keep",
+    detail: "Move the branch. Stops if a file that would change has local edits.",
+  },
+];
 
 const ROW_HEIGHT = 32;
 const LANE_GAP = 14;
@@ -71,6 +120,7 @@ export function HistoryPane() {
     createBranch,
     revertCommit,
     cherryPickCommit,
+    resetCommit,
     createPatch,
   } = useGit();
   const [query, setQuery] = useState("");
@@ -84,6 +134,10 @@ export function HistoryPane() {
   const [confirm, setConfirm] = useState<{ kind: "revert" | "cherry-pick"; commit: CommitSummary } | null>(
     null,
   );
+  const [resetTarget, setResetTarget] = useState<CommitSummary | null>(null);
+  const [resetMode, setResetMode] = useState<ResetMode>("mixed");
+  const canResetBranch = Boolean(snapshot?.repo.currentBranch) && !snapshot?.repo.isDetached;
+  const currentBranch = snapshot?.repo.currentBranch;
   const selectedId = historySelection?.id ?? null;
   const searchRevs = useMemo(
     () => expandHistoryRevs(historyRevs, snapshot?.branches.local),
@@ -113,6 +167,10 @@ export function HistoryPane() {
           break;
         case "cherry-pick":
           setConfirm({ kind: "cherry-pick", commit: action.commit });
+          break;
+        case "reset":
+          setResetMode("mixed");
+          setResetTarget(action.commit);
           break;
         case "patch":
           void createPatch(action.commit);
@@ -227,6 +285,7 @@ export function HistoryPane() {
               loading={loading}
               searchingMode={searchingMode}
               hasMore={hasMore}
+              canResetBranch={canResetBranch}
               onAction={onRowAction}
             />
           </>
@@ -240,6 +299,7 @@ export function HistoryPane() {
       >
         <DialogContent>
           <form
+            className="min-w-0"
             onSubmit={(event) => {
               event.preventDefault();
               const name = branchName.trim();
@@ -250,13 +310,11 @@ export function HistoryPane() {
               });
             }}
           >
-            <DialogHeader>
+            <DialogHeader className="min-w-0">
               <DialogTitle>Create branch</DialogTitle>
-              <DialogDescription>
-                Starts at {branchCommit?.shortId}
-                {branchCommit?.summary ? ` — ${branchCommit.summary}` : ""}.
-              </DialogDescription>
+              <DialogDescription>Starts a branch at this commit.</DialogDescription>
             </DialogHeader>
+            <CommitLine commit={branchCommit} />
             <Input
               className="mt-3 font-mono"
               autoFocus
@@ -284,20 +342,17 @@ export function HistoryPane() {
       </Dialog>
       <Dialog open={Boolean(confirm)} onOpenChange={(open) => !open && setConfirm(null)}>
         <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{confirm?.kind === "revert" ? "Revert this commit?" : "Cherry-pick this commit?"}</DialogTitle>
+          <DialogHeader className="min-w-0">
+            <DialogTitle>
+              {confirm?.kind === "revert" ? "Revert this commit?" : "Cherry-pick this commit?"}
+            </DialogTitle>
             <DialogDescription>
               {confirm?.kind === "revert"
                 ? "Creates a new commit that undoes this change on the current branch."
-                : "Applies this commit onto the current branch."}{" "}
-              {confirm ? (
-                <span className="font-mono text-foreground">
-                  {confirm.commit.shortId}
-                  {confirm.commit.summary ? ` — ${confirm.commit.summary}` : ""}
-                </span>
-              ) : null}
+                : "Applies this commit onto the current branch."}
             </DialogDescription>
           </DialogHeader>
+          <CommitLine commit={confirm?.commit} />
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setConfirm(null)}>
               Cancel
@@ -318,6 +373,61 @@ export function HistoryPane() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <Dialog
+        open={Boolean(resetTarget)}
+        onOpenChange={(open) => {
+          if (!open) setResetTarget(null);
+        }}
+      >
+        <DialogContent className="overflow-hidden sm:max-w-md">
+          <form
+            className="min-w-0"
+            onSubmit={(event) => {
+              event.preventDefault();
+              const commit = resetTarget;
+              if (!commit) return;
+              setResetTarget(null);
+              void resetCommit(commit.id, resetMode);
+            }}
+          >
+            <DialogHeader className="min-w-0 pr-6">
+              <DialogTitle className="truncate">Reset {currentBranch ?? "branch"}?</DialogTitle>
+              <DialogDescription>Moves this branch to the selected commit.</DialogDescription>
+            </DialogHeader>
+            <CommitLine commit={resetTarget} />
+            <div className="mt-3 flex flex-col gap-1">
+              {RESET_MODES.map((mode) => {
+                const selected = resetMode === mode.id;
+                return (
+                  <button
+                    key={mode.id}
+                    type="button"
+                    aria-pressed={selected}
+                    className={cn(
+                      "rounded-md border px-2.5 py-2 text-left",
+                      selected
+                        ? "border-foreground/30 bg-muted"
+                        : "border-transparent hover:bg-muted/60",
+                    )}
+                    onClick={() => setResetMode(mode.id)}
+                  >
+                    <span className="text-sm font-medium">{mode.label}</span>
+                    <span className="mt-0.5 block text-xs text-muted-foreground">{mode.detail}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <DialogFooter className="mt-4">
+              <Button type="button" variant="outline" onClick={() => setResetTarget(null)}>
+                Cancel
+              </Button>
+              <Button type="submit" variant={resetMode === "hard" ? "destructive" : "default"}>
+                {resetMode === "hard" ? "Hard reset" : "Reset"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -331,6 +441,7 @@ const CommitList = memo(function CommitList({
   loading,
   searchingMode,
   hasMore,
+  canResetBranch,
   onAction,
 }: {
   commits: CommitSummary[];
@@ -341,6 +452,7 @@ const CommitList = memo(function CommitList({
   loading: boolean;
   searchingMode: boolean;
   hasMore: boolean;
+  canResetBranch: boolean;
   onAction: (action: CommitRowAction) => void;
 }) {
   const rows = useMemo(
@@ -368,6 +480,7 @@ const CommitList = memo(function CommitList({
           selected={selectedId === row.commit.id}
           avatarProvider={avatarProvider}
           graph={row.graph}
+          canResetBranch={canResetBranch}
           onAction={onAction}
         />
       ))}
@@ -390,15 +503,19 @@ const CommitRow = memo(function CommitRow({
   selected,
   avatarProvider,
   graph,
+  canResetBranch,
   onAction,
 }: {
   commit: CommitSummary;
   selected: boolean;
   avatarProvider: AvatarProvider;
   graph: { width: number; row: GraphRow; previous?: GraphRow } | null;
+  canResetBranch: boolean;
   onAction: (action: CommitRowAction) => void;
 }) {
   const message = [commit.summary, commit.body].filter(Boolean).join("\n\n");
+  const canReset =
+    canResetBranch && (commit.onCurrentBranch || commit.onTrackingBranch);
 
   async function copyText(value: string, success: string) {
     if (!value) {
@@ -475,6 +592,13 @@ const CommitRow = memo(function CommitRow({
             Cherry-pick
           </ContextMenuItem>
         )}
+        <ContextMenuItem
+          disabled={!canReset}
+          onClick={() => onAction({ type: "reset", commit })}
+        >
+          <RotateCcwIcon />
+          Reset
+        </ContextMenuItem>
         <ContextMenuItem onClick={() => onAction({ type: "patch", commit })}>
           <FileDiffIcon />
           Create patch

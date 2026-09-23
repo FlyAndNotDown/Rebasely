@@ -57,6 +57,7 @@ pub struct CommitSummary {
     pub parents: Vec<String>,
     pub refs: Vec<CommitRefLabel>,
     pub on_current_branch: bool,
+    pub on_tracking_branch: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -988,6 +989,7 @@ fn summarize_oid(repo: &Repository, oid: Oid) -> AppResult<CommitSummary> {
         parents: commit.parent_ids().map(|id| id.to_string()).collect(),
         refs: Vec::new(),
         on_current_branch: true,
+        on_tracking_branch: false,
     })
 }
 
@@ -1177,6 +1179,7 @@ fn parse_search_record(bytes: &[u8]) -> Option<CommitSummary> {
             .collect(),
         refs: Vec::new(),
         on_current_branch: true,
+        on_tracking_branch: false,
     })
 }
 
@@ -1273,6 +1276,7 @@ fn parse_git_log(bytes: &[u8]) -> AppResult<Vec<CommitSummary>> {
             },
             refs: Vec::new(),
             on_current_branch: true,
+            on_tracking_branch: false,
         });
     }
     Ok(items)
@@ -1285,24 +1289,47 @@ fn decorate_commits(repo: &Repository, commits: &mut [CommitSummary]) {
 }
 
 fn mark_on_current_branch(repo: &Repository, commits: &mut [CommitSummary]) {
-    let head_oid = match repo.head() {
-        Ok(head) => head.target(),
-        Err(_) => None,
-    };
-    let Some(head_oid) = head_oid else {
-        return;
-    };
-    let head_id = head_oid.to_string();
+    let head = repo.head().ok();
+    let head_oid = head.as_ref().and_then(|head| head.target());
+    let upstream_oid = head.as_ref().and_then(|head| upstream_oid_of(repo, head));
+    let head_id = head_oid.map(|oid| oid.to_string());
+    let upstream_id = upstream_oid.map(|oid| oid.to_string());
     for commit in commits {
-        if commit.id == head_id {
-            commit.on_current_branch = true;
-            continue;
-        }
         let Ok(oid) = Oid::from_str(&commit.id) else {
+            commit.on_current_branch = head_id.as_deref() == Some(commit.id.as_str());
+            commit.on_tracking_branch = upstream_id.as_deref() == Some(commit.id.as_str());
             continue;
         };
-        commit.on_current_branch = repo.graph_descendant_of(head_oid, oid).unwrap_or(false);
+        commit.on_current_branch = contains_commit(repo, head_oid, &head_id, oid, &commit.id);
+        commit.on_tracking_branch =
+            contains_commit(repo, upstream_oid, &upstream_id, oid, &commit.id);
     }
+}
+
+fn upstream_oid_of(repo: &Repository, head: &git2::Reference) -> Option<Oid> {
+    if !head.is_branch() {
+        return None;
+    }
+    let branch = repo
+        .find_branch(head.shorthand()?, BranchType::Local)
+        .ok()?;
+    branch.upstream().ok()?.get().target()
+}
+
+fn contains_commit(
+    repo: &Repository,
+    tip: Option<Oid>,
+    tip_id: &Option<String>,
+    oid: Oid,
+    id: &str,
+) -> bool {
+    if tip_id.as_deref() == Some(id) {
+        return true;
+    }
+    let Some(tip) = tip else {
+        return false;
+    };
+    repo.graph_descendant_of(tip, oid).unwrap_or(false)
 }
 
 fn apply_ref_labels(
@@ -1994,6 +2021,68 @@ pub fn revert_commit(repo: &mut Repository, spec: &str) -> AppResult<WorkspaceSn
         run_git_stdout(root, &["revert", "--no-edit", &oid])?;
     }
     snapshot(repo)
+}
+
+pub fn reset_to_commit(
+    repo: &mut Repository,
+    spec: &str,
+    mode: &str,
+) -> AppResult<WorkspaceSnapshot> {
+    let flag = reset_flag(mode)?;
+    let oid = peel_commit(repo, spec)?.id();
+    ensure_reset_target(repo, oid)?;
+    let oid = oid.to_string();
+    run_git_stdout(workdir(repo)?, &["reset", flag, &oid])?;
+    snapshot(repo)
+}
+
+fn reset_flag(mode: &str) -> AppResult<&'static str> {
+    match mode.trim() {
+        "soft" => Ok("--soft"),
+        "mixed" => Ok("--mixed"),
+        "hard" => Ok("--hard"),
+        "merge" => Ok("--merge"),
+        "keep" => Ok("--keep"),
+        _ => Err(AppError::msg(
+            "Choose a reset mode: soft, mixed, hard, merge, or keep",
+        )),
+    }
+}
+
+fn ensure_reset_target(repo: &Repository, target: Oid) -> AppResult<()> {
+    let head = repo
+        .head()
+        .map_err(|_| AppError::msg("Reset needs a checked-out branch"))?;
+    if !head.is_branch() {
+        return Err(AppError::msg(
+            "Reset is only available on the current local branch",
+        ));
+    }
+    let head_oid = head
+        .target()
+        .ok_or_else(|| AppError::msg("Reset needs a checked-out branch"))?;
+    if target == head_oid || repo.graph_descendant_of(head_oid, target).unwrap_or(false) {
+        return Ok(());
+    }
+    let name = head
+        .shorthand()
+        .ok_or_else(|| AppError::msg("Reset needs a checked-out branch"))?;
+    if let Ok(branch) = repo.find_branch(name, BranchType::Local) {
+        if let Ok(upstream) = branch.upstream() {
+            if let Some(upstream_oid) = upstream.get().target() {
+                if target == upstream_oid
+                    || repo
+                        .graph_descendant_of(upstream_oid, target)
+                        .unwrap_or(false)
+                {
+                    return Ok(());
+                }
+            }
+        }
+    }
+    Err(AppError::msg(
+        "Reset is only available for commits on the current branch or its upstream",
+    ))
 }
 
 pub fn cherry_pick_commit(repo: &mut Repository, spec: &str) -> AppResult<WorkspaceSnapshot> {

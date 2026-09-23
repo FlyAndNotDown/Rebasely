@@ -112,6 +112,8 @@ export const gitApi = {
     invoke<WorkspaceSnapshot>("revert_commit", { repoPath, oid }),
   cherryPickCommit: (repoPath: string, oid: string) =>
     invoke<WorkspaceSnapshot>("cherry_pick_commit", { repoPath, oid }),
+  resetToCommit: (repoPath: string, oid: string, mode: string) =>
+    invoke<WorkspaceSnapshot>("reset_to_commit", { repoPath, oid, mode }),
   writeCommitPatch: (repoPath: string, oid: string, dest: string) =>
     invoke<void>("write_commit_patch", { repoPath, oid, dest }),
   applyPatch: (repoPath: string, patchPath: string) =>

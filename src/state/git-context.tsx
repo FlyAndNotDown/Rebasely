@@ -31,6 +31,7 @@ import type {
 } from "@/types/git";
 
 export type View = "changes" | "history" | "stash";
+export type ResetMode = "soft" | "mixed" | "hard" | "merge" | "keep";
 export const WELCOME_TAB_ID = "welcome";
 export const COMMIT_PAGE = 80;
 
@@ -273,6 +274,7 @@ interface GitContextValue {
   deleteBranch: (name: string) => Promise<boolean>;
   revertCommit: (oid: string) => Promise<boolean>;
   cherryPickCommit: (oid: string) => Promise<boolean>;
+  resetCommit: (oid: string, mode: ResetMode) => Promise<boolean>;
   createPatch: (commit: CommitSummary) => Promise<void>;
   applyPatch: () => Promise<void>;
   addRemote: (name: string, url: string) => Promise<boolean>;
@@ -1355,6 +1357,18 @@ export function GitProvider({ children }: { children: ReactNode }) {
     [refreshAfterReplay, runMutation],
   );
 
+  const resetCommit = useCallback(
+    async (oid: string, mode: ResetMode) => {
+      const shortId = oid.slice(0, 7);
+      return runMutation(
+        `Resetting to ${shortId}`,
+        (repoPath) => gitApi.resetToCommit(repoPath, oid, mode),
+        `Reset ${mode} to ${shortId}`,
+      );
+    },
+    [runMutation],
+  );
+
   const createPatch = useCallback(
     async (commit: CommitSummary) => {
       const repoPath = activeRepoPath();
@@ -1594,6 +1608,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       deleteBranch,
       revertCommit,
       cherryPickCommit,
+      resetCommit,
       createPatch,
       applyPatch,
       addRemote,
@@ -1646,6 +1661,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       deleteBranch,
       revertCommit,
       cherryPickCommit,
+      resetCommit,
       createPatch,
       applyPatch,
       addRemote,
