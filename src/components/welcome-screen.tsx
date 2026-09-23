@@ -1,5 +1,7 @@
-import { FolderOpenIcon, XIcon } from "lucide-react";
+import { useState } from "react";
+import { DownloadIcon, FolderOpenIcon, XIcon } from "lucide-react";
 import { AppMark } from "@/components/app-mark";
+import { CloneRepositoryDialog } from "@/components/clone-repository-dialog";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { disambiguateRepoLabels, displayPath, formatRelativeTime } from "@/lib/format";
@@ -7,6 +9,7 @@ import { useGit } from "@/state/git-context";
 
 export function WelcomeScreen() {
   const { recents, openFolder, openPath, forgetRecent } = useGit();
+  const [cloneOpen, setCloneOpen] = useState(false);
   const labels = disambiguateRepoLabels(recents);
 
   return (
@@ -17,15 +20,23 @@ export function WelcomeScreen() {
           <div>
             <h1 className="text-2xl font-medium tracking-tight">Rebasely</h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              Open a local Git repository to inspect changes, review history, and commit.
+              Open a local Git repository, or clone one, to inspect changes, review history, and commit.
             </p>
           </div>
         </div>
 
-        <Button onClick={() => void openFolder()} className="w-full shrink-0">
-          <FolderOpenIcon data-icon="inline-start" />
-          Open repository
-        </Button>
+        <div className="flex shrink-0 flex-col gap-4">
+          <Button onClick={() => void openFolder()} className="w-full">
+            <FolderOpenIcon data-icon="inline-start" />
+            Open repository
+          </Button>
+          <Button variant="outline" className="w-full" onClick={() => setCloneOpen(true)}>
+            <DownloadIcon data-icon="inline-start" />
+            Clone repository
+          </Button>
+        </div>
+
+        <CloneRepositoryDialog open={cloneOpen} onOpenChange={setCloneOpen} />
 
         {recents.length > 0 ? (
           <div className="mt-8 flex min-h-0 flex-col overflow-hidden">

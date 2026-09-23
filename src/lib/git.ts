@@ -51,6 +51,12 @@ export const gitApi = {
   saveSession: (session: AppSession) => invoke<AppSession>("save_session", { session }),
   openRepository: (path: string) =>
     invoke<WorkspaceSnapshot>("open_repository", { path }),
+  cloneRepository: (url: string, destination: string, activityId?: string) =>
+    invoke<string>("clone_repository", {
+      url,
+      destination,
+      activityId: activityId || null,
+    }),
   refreshWorkspace: (repoPath: string) =>
     invoke<WorkspaceSnapshot>("refresh_workspace", { repoPath }),
   getCommits: (repoPath: string, limit = 80, skip = 0, query?: string, revs?: string[] | null) =>

@@ -62,6 +62,20 @@ fn save_session(session: AppSession, app: AppHandle) -> AppResult<AppSession> {
 }
 
 #[tauri::command]
+async fn clone_repository(
+    url: String,
+    destination: String,
+    activity_id: Option<String>,
+    app: AppHandle,
+) -> AppResult<String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        git::clone_repository(&url, &destination, progress_sink(&app, activity_id.as_deref()))
+    })
+    .await
+    .map_err(|err| AppError::msg(err.to_string()))?
+}
+
+#[tauri::command]
 async fn open_repository(path: String, app: AppHandle) -> AppResult<WorkspaceSnapshot> {
     tauri::async_runtime::spawn_blocking(move || {
         let mut repo = git::discover(&path)?;
@@ -498,6 +512,7 @@ pub fn run() {
             forget_recent,
             load_session,
             save_session,
+            clone_repository,
             open_repository,
             refresh_workspace,
             get_commits,

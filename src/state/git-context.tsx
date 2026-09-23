@@ -249,6 +249,7 @@ interface GitContextValue {
   reorderTabs: (fromId: string, toId: string, place: "before" | "after") => void;
   openFolder: () => Promise<void>;
   openPath: (path: string) => Promise<void>;
+  cloneRepository: (url: string, destination: string) => Promise<boolean>;
   revealRepo: () => Promise<void>;
   openTerminal: () => Promise<void>;
   ensureBranches: () => Promise<void>;
@@ -623,6 +624,22 @@ export function GitProvider({ children }: { children: ReactNode }) {
       await openPath(selected);
     }
   }, [openPath]);
+
+  const cloneRepository = useCallback(
+    async (url: string, destination: string) => {
+      try {
+        const path = await runActivity("Cloning repository", url.trim(), (activityId) =>
+          gitApi.cloneRepository(url, destination, activityId),
+        );
+        await openPath(path);
+        return true;
+      } catch (error) {
+        toast.error(errorMessage(error));
+        return false;
+      }
+    },
+    [openPath, runActivity],
+  );
 
   const forgetRecent = useCallback(async (path: string) => {
     try {
@@ -1583,6 +1600,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       reorderTabs,
       openFolder,
       openPath,
+      cloneRepository,
       revealRepo,
       openTerminal,
       ensureBranches,
@@ -1636,6 +1654,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       reorderTabs,
       openFolder,
       openPath,
+      cloneRepository,
       revealRepo,
       openTerminal,
       ensureBranches,

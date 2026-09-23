@@ -463,14 +463,64 @@ fn run_git(root: &Path, args: &[&str]) -> AppResult<std::process::Output> {
         .map_err(|err| AppError::msg(err.to_string()))
 }
 
+pub fn clone_repository(
+    url: &str,
+    destination: &str,
+    on_progress: impl FnMut(&str) + Send,
+) -> AppResult<String> {
+    let url = url.trim();
+    if url.is_empty() {
+        return Err(AppError::msg("A repository URL is required"));
+    }
+    let dest = PathBuf::from(destination.trim());
+    if dest.as_os_str().is_empty() {
+        return Err(AppError::msg("A destination folder is required"));
+    }
+    let parent = dest
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .ok_or_else(|| AppError::msg("A destination folder is required"))?;
+    if !parent.is_dir() {
+        return Err(AppError::msg("The parent folder does not exist"));
+    }
+    if dest.exists() {
+        if !dest.is_dir() {
+            return Err(AppError::msg("Destination already exists"));
+        }
+        let mut entries = fs::read_dir(&dest).map_err(|err| AppError::msg(err.to_string()))?;
+        if entries.next().is_some() {
+            return Err(AppError::msg("Destination already exists and is not empty"));
+        }
+    }
+    let dest_arg = dest.to_string_lossy().into_owned();
+    run_git_progress(
+        None,
+        &["clone", "--progress", "--", url, &dest_arg],
+        on_progress,
+    )?;
+    let canonical = dest.canonicalize().unwrap_or(dest);
+    Ok(strip_verbatim_prefix(&canonical.to_string_lossy()))
+}
+
 fn run_git_ok_progress(
     root: &Path,
+    args: &[&str],
+    on_progress: impl FnMut(&str) + Send,
+) -> AppResult<()> {
+    run_git_progress(Some(root), args, on_progress)
+}
+
+fn run_git_progress(
+    root: Option<&Path>,
     args: &[&str],
     mut on_progress: impl FnMut(&str) + Send,
 ) -> AppResult<()> {
     let git = find_git().ok_or_else(|| AppError::msg("Git executable was not found"))?;
     let mut command = Command::new(git);
-    command.arg("-C").arg(root).args(args);
+    if let Some(root) = root {
+        command.arg("-C").arg(root);
+    }
+    command.args(args);
     command.env("GIT_TERMINAL_PROMPT", "0");
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
     #[cfg(windows)]
