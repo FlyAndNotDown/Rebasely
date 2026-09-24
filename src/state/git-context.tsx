@@ -35,7 +35,7 @@ import type {
   WorkspaceSnapshot,
 } from "@/types/git";
 
-export type View = "changes" | "history" | "stash";
+export type View = "changes" | "history" | "stash" | "files";
 export type ResetMode = "soft" | "mixed" | "hard" | "merge" | "keep";
 export const WELCOME_TAB_ID = "welcome";
 export const COMMIT_PAGE = 80;
@@ -400,6 +400,8 @@ interface GitContextValue {
   loading: boolean;
   busy: boolean;
   setView: (view: View) => void;
+  beginActivity: (label: string, detail?: string) => string;
+  endActivity: (id: string) => void;
   setActiveTab: (id: string) => void;
   closeTab: (id: string) => void;
   reorderTabs: (fromId: string, toId: string, place: "before" | "after") => void;
@@ -2261,6 +2263,8 @@ export function GitProvider({ children }: { children: ReactNode }) {
       loading,
       busy: opening || activities.length > 0,
       setView,
+      beginActivity,
+      endActivity,
       setActiveTab,
       closeTab,
       reorderTabs,
@@ -2337,6 +2341,8 @@ export function GitProvider({ children }: { children: ReactNode }) {
       loading,
       opening,
       setView,
+      beginActivity,
+      endActivity,
       setActiveTab,
       closeTab,
       reorderTabs,

@@ -5,6 +5,7 @@ import { RebaseBanner } from "@/components/rebase-dialog";
 import { CommitFiles } from "@/components/commit-files";
 import { DiffViewer } from "@/components/diff-viewer";
 import { HistoryBranches } from "@/components/history-branches";
+import { FilesBrowser } from "@/components/files-browser";
 import { HistoryPane } from "@/components/history-pane";
 import { StashFiles } from "@/components/stash-files";
 import { StashComposer, StashPane } from "@/components/stash-pane";
@@ -188,14 +189,17 @@ export function Workspace() {
   const [visited, setVisited] = useState({
     history: view === "history",
     stash: view === "stash",
+    files: view === "files",
   });
   const showHistory = visited.history || view === "history";
   const showStash = visited.stash || view === "stash";
+  const showFiles = visited.files || view === "files";
 
   useEffect(() => {
     setVisited((current) => {
       if (view === "history" && !current.history) return { ...current, history: true };
       if (view === "stash" && !current.stash) return { ...current, stash: true };
+      if (view === "files" && !current.files) return { ...current, files: true };
       return current;
     });
   }, [view]);
@@ -209,6 +213,11 @@ export function Workspace() {
       {showStash ? (
         <StackedPane active={view === "stash"}>
           <StashWorkspace />
+        </StackedPane>
+      ) : null}
+      {showFiles ? (
+        <StackedPane active={view === "files"}>
+          <FilesBrowser />
         </StackedPane>
       ) : null}
       {showHistory ? (

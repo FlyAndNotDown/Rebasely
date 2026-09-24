@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ArchiveIcon, CircleDotIcon, HistoryIcon, SettingsIcon } from "lucide-react";
+import { ArchiveIcon, CircleDotIcon, FolderTreeIcon, HistoryIcon, SettingsIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SettingsDialog } from "@/components/settings-dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -11,6 +11,7 @@ const itemMeta: Record<View, { label: string; icon: typeof CircleDotIcon }> = {
   changes: { label: "Changes", icon: CircleDotIcon },
   history: { label: "History", icon: HistoryIcon },
   stash: { label: "Stash", icon: ArchiveIcon },
+  files: { label: "Files", icon: FolderTreeIcon },
 };
 
 export function AppSidebar() {

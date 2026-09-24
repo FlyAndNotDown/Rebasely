@@ -1,6 +1,6 @@
 import type { AppPrefs, PanelLayout, PanelLayouts } from "@/types/git";
 
-export const SIDEBAR_VIEWS = ["changes", "history", "stash"] as const;
+export const SIDEBAR_VIEWS = ["changes", "history", "stash", "files"] as const;
 
 export const DEFAULT_PANEL_LAYOUTS: PanelLayouts = {
   historyShell: { "history-branches": 15, "history-main": 85 },
@@ -9,6 +9,8 @@ export const DEFAULT_PANEL_LAYOUTS: PanelLayouts = {
   changes: { "changes-files": 36, "changes-diff": 64 },
   stash: { "stash-side": 30, "stash-main": 70 },
   stashDetails: { "stash-files": 28, "stash-diff": 72 },
+  files: { "files-tree": 22, "files-main": 78 },
+  fileHistory: { "file-commits": 42, "file-diff": 58 },
 };
 
 export const defaultPrefs: AppPrefs = {
@@ -82,6 +84,8 @@ export function normalizePanelLayouts(value?: Partial<PanelLayouts> | null): Pan
     changes: normalizeLayout(value?.changes, DEFAULT_PANEL_LAYOUTS.changes),
     stash: normalizeLayout(value?.stash, DEFAULT_PANEL_LAYOUTS.stash),
     stashDetails: normalizeLayout(value?.stashDetails, DEFAULT_PANEL_LAYOUTS.stashDetails),
+    files: normalizeLayout(value?.files, DEFAULT_PANEL_LAYOUTS.files),
+    fileHistory: normalizeLayout(value?.fileHistory, DEFAULT_PANEL_LAYOUTS.fileHistory),
   };
 }
 

@@ -21,6 +21,10 @@ pub struct PanelLayouts {
     pub stash: HashMap<String, f64>,
     #[serde(default)]
     pub stash_details: HashMap<String, f64>,
+    #[serde(default)]
+    pub files: HashMap<String, f64>,
+    #[serde(default)]
+    pub file_history: HashMap<String, f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -51,6 +55,7 @@ fn default_sidebar_order() -> Vec<String> {
         "changes".to_string(),
         "history".to_string(),
         "stash".to_string(),
+        "files".to_string(),
     ]
 }
 

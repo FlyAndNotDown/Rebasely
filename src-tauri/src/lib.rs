@@ -17,7 +17,8 @@ const APP_ICON_PNG: &[u8] = include_bytes!("../icons/icon.png");
 
 use error::{AppError, AppResult};
 use git::{
-    BranchList, CommitDetails, CommitFile, CommitSummary, FileDiff, GitIdentity, RebaseCommit,
+    BlameHunk, BranchList, CommitDetails, CommitFile, CommitSummary, DirEntry, FileDiff, FileText,
+    GitIdentity, RebaseCommit,
     RebaseStep, RemoteProbe, StashDetails, WorkspaceSnapshot,
 };
 use prefs::AppPrefs;
@@ -121,6 +122,31 @@ async fn get_branches(repo_path: String) -> AppResult<BranchList> {
 #[tauri::command]
 async fn get_workdir_diff(repo_path: String, path: String, staged: bool) -> AppResult<FileDiff> {
     with_repo_async(repo_path, move |repo| git::workdir_diff(repo, &path, staged)).await
+}
+
+#[tauri::command]
+async fn list_directory(repo_path: String, path: String) -> AppResult<Vec<DirEntry>> {
+    with_repo_async(repo_path, move |repo| git::list_directory(repo, &path)).await
+}
+
+#[tauri::command]
+async fn read_file(repo_path: String, path: String) -> AppResult<FileText> {
+    with_repo_async(repo_path, move |repo| git::read_file(repo, &path)).await
+}
+
+#[tauri::command]
+async fn file_blame(repo_path: String, path: String) -> AppResult<Vec<BlameHunk>> {
+    with_repo_async(repo_path, move |repo| git::file_blame(repo, &path)).await
+}
+
+#[tauri::command]
+async fn file_commits(
+    repo_path: String,
+    path: String,
+    limit: usize,
+    skip: usize,
+) -> AppResult<Vec<CommitSummary>> {
+    with_repo_async(repo_path, move |repo| git::file_commits(repo, &path, limit, skip)).await
 }
 
 #[tauri::command]
@@ -685,6 +711,10 @@ pub fn run() {
             get_branches,
             get_workdir_diff,
             get_commit_details,
+            list_directory,
+            read_file,
+            file_blame,
+            file_commits,
             get_commit_diff,
             compare_revisions,
             compare_file_diff,

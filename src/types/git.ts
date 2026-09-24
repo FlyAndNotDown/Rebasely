@@ -166,7 +166,9 @@ export type PanelLayoutId =
   | "historyDetails"
   | "changes"
   | "stash"
-  | "stashDetails";
+  | "stashDetails"
+  | "files"
+  | "fileHistory";
 
 export interface PanelLayouts {
   historyShell: PanelLayout;
@@ -175,6 +177,27 @@ export interface PanelLayouts {
   changes: PanelLayout;
   stash: PanelLayout;
   stashDetails: PanelLayout;
+  files: PanelLayout;
+  fileHistory: PanelLayout;
+}
+
+export interface DirEntry {
+  name: string;
+  path: string;
+  dir: boolean;
+}
+
+export interface FileText {
+  binary: boolean;
+  text: string;
+}
+
+export interface BlameHunk {
+  start: number;
+  count: number;
+  commitId: string;
+  author: string;
+  time: number;
 }
 
 export interface AppPrefs {

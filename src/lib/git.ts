@@ -7,6 +7,9 @@ import type {
   CommitDetails,
   CommitFile,
   CommitSummary,
+  DirEntry,
+  FileText,
+  BlameHunk,
   ConflictView,
   RebaseCommit,
   RebaseStep,
@@ -75,6 +78,12 @@ export const gitApi = {
   getBranches: (repoPath: string) => invoke<BranchList>("get_branches", { repoPath }),
   getWorkdirDiff: (repoPath: string, path: string, staged: boolean) =>
     invoke<FileDiff>("get_workdir_diff", { repoPath, path, staged }),
+  listDirectory: (repoPath: string, path: string) =>
+    invoke<DirEntry[]>("list_directory", { repoPath, path }),
+  readFile: (repoPath: string, path: string) => invoke<FileText>("read_file", { repoPath, path }),
+  fileBlame: (repoPath: string, path: string) => invoke<BlameHunk[]>("file_blame", { repoPath, path }),
+  fileCommits: (repoPath: string, path: string, limit: number, skip: number) =>
+    invoke<CommitSummary[]>("file_commits", { repoPath, path, limit, skip }),
   getCommitDetails: (repoPath: string, oid: string) =>
     invoke<CommitDetails>("get_commit_details", { repoPath, oid }),
   getCommitDiff: (repoPath: string, oid: string, path: string) =>
