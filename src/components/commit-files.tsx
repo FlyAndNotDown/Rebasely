@@ -1,4 +1,5 @@
 import { memo, useCallback } from "react";
+import { ArrowLeftRightIcon, XIcon } from "lucide-react";
 import { toast } from "sonner";
 import { AuthorAvatar } from "@/components/author-avatar";
 import { CommitFilesSkeleton } from "@/components/skeletons";
@@ -10,8 +11,17 @@ import { useGit } from "@/state/git-context";
 import type { CommitFile } from "@/types/git";
 
 export function CommitFiles() {
-  const { commitDetails, historySelection, selectCommitFile, prefs } = useGit();
-  const selectedPath = historySelection?.path;
+  const {
+    commitDetails,
+    historySelection,
+    selectCommitFile,
+    prefs,
+    comparison,
+    swapComparison,
+    closeComparison,
+    selectCompareFile,
+  } = useGit();
+  const selectedPath = comparison ? comparison.path : historySelection?.path;
   const onSelect = useCallback(
     (path: string) => {
       if (!commitDetails) return;
@@ -19,6 +29,61 @@ export function CommitFiles() {
     },
     [commitDetails, selectCommitFile],
   );
+  if (comparison) {
+    return (
+      <div className="flex h-full min-h-0 flex-col">
+        <div className="flex shrink-0 items-center gap-2 px-3 py-2">
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-medium">Compare</div>
+            <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
+              <span className="min-w-0 truncate font-mono" title={comparison.base.rev}>
+                {comparison.base.label}
+              </span>
+              <button
+                type="button"
+                title="Swap sides"
+                className="flex size-5 shrink-0 items-center justify-center rounded-sm hover:bg-muted hover:text-foreground"
+                onClick={swapComparison}
+              >
+                <ArrowLeftRightIcon className="size-3.5" />
+              </button>
+              <span className="min-w-0 truncate font-mono" title={comparison.head.rev}>
+                {comparison.head.label}
+              </span>
+            </div>
+          </div>
+          <button
+            type="button"
+            title="Close compare"
+            className="flex size-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+            onClick={closeComparison}
+          >
+            <XIcon className="size-3.5" />
+          </button>
+        </div>
+        {comparison.files === null ? (
+          <CommitFilesSkeleton />
+        ) : comparison.files.length === 0 ? (
+          <div className="flex min-h-0 flex-1 items-center justify-center border-t p-4 text-sm text-muted-foreground">
+            No differences
+          </div>
+        ) : (
+          <ScrollArea className="min-h-0 flex-1 border-t">
+            <ul className="px-1 py-1">
+              {comparison.files.map((file) => (
+                <CommitFileRow
+                  key={file.path}
+                  file={file}
+                  selected={selectedPath === file.path}
+                  onSelect={selectCompareFile}
+                />
+              ))}
+            </ul>
+          </ScrollArea>
+        )}
+      </div>
+    );
+  }
   if (!commitDetails) {
     return (
       historySelection ? (

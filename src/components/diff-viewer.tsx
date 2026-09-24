@@ -18,9 +18,18 @@ export function DiffViewer() {
     commitDetails,
     stashDetails,
     snapshot,
+    comparison,
   } = useGit();
-  const selection =
-    view === "changes" ? changeSelection : view === "stash" ? stashSelection : historySelection;
+  const comparing = view === "history" && comparison != null;
+  const selection = comparing
+    ? comparison.path
+      ? { type: "commit" as const, id: comparison.head.rev, path: comparison.path }
+      : null
+    : view === "changes"
+      ? changeSelection
+      : view === "stash"
+        ? stashSelection
+        : historySelection;
   const diff = view === "changes" ? changeDiff : view === "stash" ? stashDiff : historyDiff;
   const title =
     selection?.type === "change"
@@ -51,6 +60,14 @@ export function DiffViewer() {
         </div>
       );
     }
+  } else if (comparing && comparison.files === null) {
+    return <DiffSkeleton label="Loading files" />;
+  } else if (comparing && !comparison.path) {
+    return (
+      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+        {comparison.files?.length ? "Select a file to see its diff" : "No differences"}
+      </div>
+    );
   } else if (!selection || (selection.type === "commit" && !selection.path)) {
     const loadingFiles =
       selection?.type === "commit" &&

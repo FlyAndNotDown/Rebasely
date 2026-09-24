@@ -16,10 +16,10 @@ use tauri::{AppHandle, Emitter, Manager, State};
 const APP_ICON_PNG: &[u8] = include_bytes!("../icons/icon.png");
 
 use error::{AppError, AppResult};
-use     git::{
-        BranchList, CommitDetails, CommitSummary, FileDiff, GitIdentity, RebaseCommit, RebaseStep,
-        RemoteProbe, StashDetails, WorkspaceSnapshot,
-    };
+use git::{
+    BranchList, CommitDetails, CommitFile, CommitSummary, FileDiff, GitIdentity, RebaseCommit,
+    RebaseStep, RemoteProbe, StashDetails, WorkspaceSnapshot,
+};
 use prefs::AppPrefs;
 use recents::RecentRepo;
 use session::AppSession;
@@ -131,6 +131,28 @@ async fn get_commit_details(repo_path: String, oid: String) -> AppResult<CommitD
 #[tauri::command]
 async fn get_commit_diff(repo_path: String, oid: String, path: String) -> AppResult<FileDiff> {
     with_repo_async(repo_path, move |repo| git::commit_file_diff(repo, &oid, &path)).await
+}
+
+#[tauri::command]
+async fn compare_revisions(
+    repo_path: String,
+    base: String,
+    head: String,
+) -> AppResult<Vec<CommitFile>> {
+    with_repo_async(repo_path, move |repo| git::compare_files(repo, &base, &head)).await
+}
+
+#[tauri::command]
+async fn compare_file_diff(
+    repo_path: String,
+    base: String,
+    head: String,
+    path: String,
+) -> AppResult<FileDiff> {
+    with_repo_async(repo_path, move |repo| {
+        git::compare_file_diff(repo, &base, &head, &path)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -664,6 +686,8 @@ pub fn run() {
             get_workdir_diff,
             get_commit_details,
             get_commit_diff,
+            compare_revisions,
+            compare_file_diff,
             stage_paths,
             unstage_paths,
             discard_paths,

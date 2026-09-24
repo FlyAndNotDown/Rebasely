@@ -1982,6 +1982,90 @@ fn commit_files_from_git2(repo: &Repository, oid: Oid) -> AppResult<Vec<CommitFi
     Ok(files)
 }
 
+pub fn compare_files(repo: &Repository, base: &str, head: &str) -> AppResult<Vec<CommitFile>> {
+    let base = base.trim();
+    let head = head.trim();
+    if base.is_empty() || head.is_empty() {
+        return Err(AppError::msg("Two revisions are required"));
+    }
+    let base_commit = peel_commit(repo, base)?;
+    let head_commit = peel_commit(repo, head)?;
+    if let Ok(root) = workdir(repo) {
+        if let Ok(files) = compare_files_from_git(root, base, head) {
+            return Ok(files);
+        }
+    }
+    compare_files_from_git2(repo, &base_commit, &head_commit)
+}
+
+fn compare_files_from_git(root: &Path, base: &str, head: &str) -> AppResult<Vec<CommitFile>> {
+    let stdout = run_git_stdout(
+        root,
+        &[
+            "diff",
+            "--name-status",
+            "-z",
+            "--find-renames",
+            base,
+            head,
+        ],
+    )?;
+    parse_name_status_z(&stdout)
+}
+
+fn compare_files_from_git2(
+    repo: &Repository,
+    base: &git2::Commit<'_>,
+    head: &git2::Commit<'_>,
+) -> AppResult<Vec<CommitFile>> {
+    let base_tree = base.tree()?;
+    let head_tree = head.tree()?;
+    let mut opts = DiffOptions::new();
+    opts.skip_binary_check(true);
+    let diff = repo.diff_tree_to_tree(Some(&base_tree), Some(&head_tree), Some(&mut opts))?;
+    let mut files = Vec::new();
+    diff.foreach(
+        &mut |delta, _| {
+            let path = delta
+                .new_file()
+                .path()
+                .or_else(|| delta.old_file().path())
+                .map(|item| item.to_string_lossy().replace('\\', "/"))
+                .unwrap_or_default();
+            let old_path = delta
+                .old_file()
+                .path()
+                .map(|item| item.to_string_lossy().replace('\\', "/"))
+                .filter(|old| old != &path);
+            files.push(CommitFile {
+                binary: looks_binary_path(&path),
+                path,
+                old_path,
+                kind: delta_kind(delta.status()).to_string(),
+            });
+            true
+        },
+        None,
+        None,
+        None,
+    )?;
+    Ok(files)
+}
+
+pub fn compare_file_diff(
+    repo: &Repository,
+    base: &str,
+    head: &str,
+    path: &str,
+) -> AppResult<FileDiff> {
+    let base_tree = peel_commit(repo, base.trim())?.tree()?;
+    let head_tree = peel_commit(repo, head.trim())?.tree()?;
+    let rel = to_git_path(path);
+    let mut opts = diff_options_for(&rel, false);
+    let diff = repo.diff_tree_to_tree(Some(&base_tree), Some(&head_tree), Some(&mut opts))?;
+    collect_patch(diff, &rel)
+}
+
 pub fn commit_file_diff(repo: &Repository, oid: &str, path: &str) -> AppResult<FileDiff> {
     let oid = Oid::from_str(oid.trim())?;
     let commit = repo.find_commit(oid)?;

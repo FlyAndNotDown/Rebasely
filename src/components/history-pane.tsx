@@ -1,5 +1,6 @@
-import { memo, useCallback, useEffect, useMemo, useState, type UIEvent } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type UIEvent } from "react";
 import {
+  ArrowLeftRightIcon,
   CopyIcon,
   CopyPlusIcon,
   FileDiffIcon,
@@ -51,6 +52,10 @@ type CommitRowAction =
   | { type: "select"; id: string }
   | { type: "branch"; commit: CommitSummary }
   | { type: "tag"; commit: CommitSummary }
+  | { type: "compare"; commits: CommitSummary[] }
+  | { type: "revert-many"; commits: CommitSummary[] }
+  | { type: "cherry-pick-many"; commits: CommitSummary[] }
+  | { type: "copy-hashes"; commits: CommitSummary[] }
   | { type: "revert"; commit: CommitSummary }
   | { type: "cherry-pick"; commit: CommitSummary }
   | { type: "reset"; commit: CommitSummary }
@@ -130,6 +135,7 @@ export function HistoryPane() {
     cherryPickCommit,
     resetCommit,
     createPatch,
+    openComparison,
   } = useGit();
   const [query, setQuery] = useState("");
   const [applied, setApplied] = useState("");
@@ -142,9 +148,11 @@ export function HistoryPane() {
   const [tagMessage, setTagMessage] = useState("");
   const [branchName, setBranchName] = useState("");
   const [checkoutNew, setCheckoutNew] = useState(true);
-  const [confirm, setConfirm] = useState<{ kind: "revert" | "cherry-pick"; commit: CommitSummary } | null>(
+  const [confirm, setConfirm] = useState<{ kind: "revert" | "cherry-pick"; commits: CommitSummary[] } | null>(
     null,
   );
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const selectAnchor = useRef<string | null>(null);
   const [resetTarget, setResetTarget] = useState<CommitSummary | null>(null);
   const [resetMode, setResetMode] = useState<ResetMode>("mixed");
   const [rebaseTarget, setRebaseTarget] = useState<CommitSummary | null>(null);
@@ -182,11 +190,38 @@ export function HistoryPane() {
           setTagName("");
           setTagMessage("");
           break;
+        case "compare": {
+          const [older, newer] = [...action.commits].sort((left, right) => left.timestamp - right.timestamp);
+          if (!older || !newer) break;
+          openComparison(
+            { rev: older.id, label: older.shortId },
+            { rev: newer.id, label: newer.shortId },
+          );
+          break;
+        }
         case "revert":
-          setConfirm({ kind: "revert", commit: action.commit });
+          setConfirm({ kind: "revert", commits: [action.commit] });
+          break;
+        case "revert-many":
+          setConfirm({
+            kind: "revert",
+            commits: [...action.commits].sort((left, right) => right.timestamp - left.timestamp),
+          });
           break;
         case "cherry-pick":
-          setConfirm({ kind: "cherry-pick", commit: action.commit });
+          setConfirm({ kind: "cherry-pick", commits: [action.commit] });
+          break;
+        case "cherry-pick-many":
+          setConfirm({
+            kind: "cherry-pick",
+            commits: [...action.commits].sort((left, right) => left.timestamp - right.timestamp),
+          });
+          break;
+        case "copy-hashes":
+          void navigator.clipboard.writeText(action.commits.map((commit) => commit.id).join("\n")).then(
+            () => toast.success(action.commits.length === 1 ? "Copied commit hash" : "Copied commit hashes"),
+            () => toast.error("Could not copy"),
+          );
           break;
         case "reset":
           setResetMode("mixed");
@@ -206,7 +241,38 @@ export function HistoryPane() {
           break;
       }
     },
-    [createPatch, selectCommit],
+    [createPatch, openComparison, selectCommit],
+  );
+
+  const selectRows = useCallback(
+    (id: string, mode: "single" | "toggle" | "range") => {
+      const ids = visible.map((commit) => commit.id);
+      const base = selectedIds.length > 0 ? selectedIds : selectedId ? [selectedId] : [];
+      if (mode === "toggle") {
+        const next = base.includes(id) ? base.filter((item) => item !== id) : [...base, id];
+        setSelectedIds(next);
+        if (next.length === 1) {
+          const only = next[0];
+          if (only) void selectCommit(only);
+        }
+        selectAnchor.current = id;
+        return;
+      }
+      const anchor = selectAnchor.current ?? selectedId;
+      if (mode === "range" && anchor) {
+        const start = ids.indexOf(anchor);
+        const end = ids.indexOf(id);
+        if (start >= 0 && end >= 0) {
+          const [from, to] = start < end ? [start, end] : [end, start];
+          setSelectedIds(ids.slice(from, to + 1));
+          return;
+        }
+      }
+      setSelectedIds([id]);
+      selectAnchor.current = id;
+      void selectCommit(id);
+    },
+    [selectCommit, selectedId, selectedIds, visible],
   );
 
   useEffect(() => {
@@ -309,13 +375,14 @@ export function HistoryPane() {
               commits={visible}
               graph={graph}
               showGraph={!searchingMode}
-              selectedId={selectedId}
+              selectedIds={selectedIds.length > 0 ? selectedIds : selectedId ? [selectedId] : []}
               avatarProvider={prefs.avatarProvider}
               loading={loading}
               searchingMode={searchingMode}
               hasMore={hasMore}
               canResetBranch={canResetBranch}
               canRebase={canRebase}
+              onSelect={selectRows}
               onAction={onRowAction}
             />
           </>
@@ -422,15 +489,33 @@ export function HistoryPane() {
         <DialogContent>
           <DialogHeader className="min-w-0">
             <DialogTitle>
-              {confirm?.kind === "revert" ? "Revert this commit?" : "Cherry-pick this commit?"}
+              {confirm?.kind === "revert"
+                ? confirm.commits.length > 1
+                  ? `Revert ${confirm.commits.length} commits?`
+                  : "Revert this commit?"
+                : confirm && confirm.commits.length > 1
+                  ? `Cherry-pick ${confirm.commits.length} commits?`
+                  : "Cherry-pick this commit?"}
             </DialogTitle>
             <DialogDescription>
               {confirm?.kind === "revert"
-                ? "Creates a new commit that undoes this change on the current branch."
-                : "Applies this commit onto the current branch."}
+                ? confirm.commits.length > 1
+                  ? "Creates new commits that undo these changes, newest first."
+                  : "Creates a new commit that undoes this change on the current branch."
+                : confirm && confirm.commits.length > 1
+                  ? "Applies these commits onto the current branch, oldest first."
+                  : "Applies this commit onto the current branch."}
             </DialogDescription>
           </DialogHeader>
-          <CommitLine commit={confirm?.commit} />
+          {confirm && confirm.commits.length > 1 ? (
+            <div className="mt-2 space-y-1">
+              {confirm.commits.map((commit) => (
+                <CommitLine key={commit.id} commit={commit} />
+              ))}
+            </div>
+          ) : (
+            <CommitLine commit={confirm?.commits[0]} />
+          )}
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setConfirm(null)}>
               Cancel
@@ -442,8 +527,15 @@ export function HistoryPane() {
                 const next = confirm;
                 if (!next) return;
                 setConfirm(null);
-                if (next.kind === "revert") void revertCommit(next.commit.id);
-                else void cherryPickCommit(next.commit.id);
+                void (async () => {
+                  for (const commit of next.commits) {
+                    const ok =
+                      next.kind === "revert"
+                        ? await revertCommit(commit.id)
+                        : await cherryPickCommit(commit.id);
+                    if (!ok) break;
+                  }
+                })();
               }}
             >
               {confirm?.kind === "revert" ? "Revert" : "Cherry-pick"}
@@ -540,25 +632,27 @@ const CommitList = memo(function CommitList({
   commits,
   graph,
   showGraph,
-  selectedId,
+  selectedIds,
   avatarProvider,
   loading,
   searchingMode,
   hasMore,
   canResetBranch,
   canRebase,
+  onSelect,
   onAction,
 }: {
   commits: CommitSummary[];
   graph: GraphRow[];
   showGraph: boolean;
-  selectedId: string | null;
+  selectedIds: string[];
   avatarProvider: AvatarProvider;
   loading: boolean;
   searchingMode: boolean;
   hasMore: boolean;
   canResetBranch: boolean;
   canRebase: boolean;
+  onSelect: (id: string, mode: "single" | "toggle" | "range") => void;
   onAction: (action: CommitRowAction) => void;
 }) {
   const rows = useMemo(
@@ -583,11 +677,17 @@ const CommitList = memo(function CommitList({
         <CommitRow
           key={row.commit.id}
           commit={row.commit}
-          selected={selectedId === row.commit.id}
+          selected={selectedIds.includes(row.commit.id)}
+          group={
+            selectedIds.includes(row.commit.id) && selectedIds.length > 1
+              ? commits.filter((commit) => selectedIds.includes(commit.id))
+              : [row.commit]
+          }
           avatarProvider={avatarProvider}
           graph={row.graph}
           canResetBranch={canResetBranch}
           canRebase={canRebase}
+          onSelect={onSelect}
           onAction={onAction}
         />
       ))}
@@ -608,18 +708,22 @@ const CommitList = memo(function CommitList({
 const CommitRow = memo(function CommitRow({
   commit,
   selected,
+  group,
   avatarProvider,
   graph,
   canResetBranch,
   canRebase,
+  onSelect,
   onAction,
 }: {
   commit: CommitSummary;
   selected: boolean;
+  group: CommitSummary[];
   avatarProvider: AvatarProvider;
   graph: { width: number; row: GraphRow; previous?: GraphRow } | null;
   canResetBranch: boolean;
   canRebase: boolean;
+  onSelect: (id: string, mode: "single" | "toggle" | "range") => void;
   onAction: (action: CommitRowAction) => void;
 }) {
   const message = [commit.summary, commit.body].filter(Boolean).join("\n\n");
@@ -646,7 +750,12 @@ const CommitRow = memo(function CommitRow({
             "flex h-8 w-full items-center gap-2 px-2 text-left hover:bg-muted/70",
             selected && "bg-muted",
           )}
-          onClick={() => onAction({ type: "select", id: commit.id })}
+          onClick={(event) =>
+            onSelect(commit.id, event.shiftKey ? "range" : event.ctrlKey || event.metaKey ? "toggle" : "single")
+          }
+          onContextMenu={() => {
+            if (!selected) onSelect(commit.id, "single");
+          }}
         >
           {graph ? (
             <GraphCell
@@ -684,6 +793,10 @@ const CommitRow = memo(function CommitRow({
         </button>
       </ContextMenuTrigger>
       <ContextMenuContent className="w-48">
+        {group.length > 1 ? (
+          <MultiCommitMenu commits={group} onAction={onAction} />
+        ) : (
+        <>
         {canResetBranch ? (
           <ContextMenuItem onClick={() => onAction({ type: "reset", commit })}>
             <RotateCcwIcon />
@@ -761,10 +874,50 @@ const CommitRow = memo(function CommitRow({
             ) : null}
           </ContextMenuSubContent>
         </ContextMenuSub>
+        </>
+        )}
       </ContextMenuContent>
     </ContextMenu>
   );
 });
+
+function MultiCommitMenu({
+  commits,
+  onAction,
+}: {
+  commits: CommitSummary[];
+  onAction: (action: CommitRowAction) => void;
+}) {
+  const canCherryPick = commits.every((commit) => !commit.onCurrentBranch);
+  const canRevert = commits.every((commit) => commit.onCurrentBranch);
+  return (
+    <>
+      {commits.length === 2 ? (
+        <ContextMenuItem onClick={() => onAction({ type: "compare", commits })}>
+          <ArrowLeftRightIcon />
+          Compare
+        </ContextMenuItem>
+      ) : null}
+      {canCherryPick ? (
+        <ContextMenuItem onClick={() => onAction({ type: "cherry-pick-many", commits })}>
+          <CopyPlusIcon />
+          Cherry-pick
+        </ContextMenuItem>
+      ) : null}
+      {canRevert ? (
+        <ContextMenuItem onClick={() => onAction({ type: "revert-many", commits })}>
+          <Undo2Icon />
+          Revert
+        </ContextMenuItem>
+      ) : null}
+      <ContextMenuSeparator />
+      <ContextMenuItem onClick={() => onAction({ type: "copy-hashes", commits })}>
+        <HashIcon />
+        Copy hashes
+      </ContextMenuItem>
+    </>
+  );
+}
 
 function CommitRefs({ refs }: { refs: CommitRef[] }) {
   if (refs.length === 0) return null;

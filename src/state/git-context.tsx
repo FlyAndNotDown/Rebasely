@@ -23,6 +23,8 @@ import type {
   PanelLayoutId,
   CommitDetails,
   CommitSummary,
+  CompareRevision,
+  RevisionComparison,
   FileDiff,
   FileStatus,
   RecentRepo,
@@ -97,6 +99,7 @@ interface RepoSession {
   changeDiff: FileDiff | null;
   historyDiff: FileDiff | null;
   commitDetails: CommitDetails | null;
+  comparison: RevisionComparison | null;
   stashSelection: StashSelection | null;
   stashDetails: StashDetails | null;
   stashDiff: FileDiff | null;
@@ -126,6 +129,7 @@ function emptySession(
     changeDiff: null,
     historyDiff: null,
     commitDetails: null,
+    comparison: null,
     stashSelection: null,
     stashDetails: null,
     stashDiff: null,
@@ -386,6 +390,7 @@ interface GitContextValue {
   changeDiff: FileDiff | null;
   historyDiff: FileDiff | null;
   commitDetails: CommitDetails | null;
+  comparison: RevisionComparison | null;
   stashSelection: StashSelection | null;
   stashDetails: StashDetails | null;
   stashDiff: FileDiff | null;
@@ -413,6 +418,10 @@ interface GitContextValue {
   selectChange: (path: string, staged: boolean) => Promise<void>;
   selectCommit: (id: string) => Promise<void>;
   selectCommitFile: (id: string, path: string) => Promise<void>;
+  openComparison: (base: CompareRevision, head: CompareRevision) => void;
+  swapComparison: () => void;
+  closeComparison: () => void;
+  selectCompareFile: (path: string) => Promise<void>;
   selectStash: (stash: StashInfo) => Promise<void>;
   selectStashFile: (id: string, path: string) => Promise<void>;
   stage: (paths: string[]) => Promise<void>;
@@ -481,6 +490,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
   const historyRevsMapRef = useRef<Record<string, string[]>>({});
   const historyExpandedMapRef = useRef<Record<string, string[]>>({});
   const historyLoadGen = useRef(0);
+  const compareLoadGen = useRef(0);
   const stashLoadGen = useRef(0);
   tabsRef.current = tabs;
   sessionsRef.current = sessions;
@@ -1196,6 +1206,10 @@ export function GitProvider({ children }: { children: ReactNode }) {
       const repoPath = activeRepoPath();
       const tabId = activeTabIdRef.current;
       if (!repoPath) return;
+      if (sessionsRef.current[tabId]?.comparison) {
+        patchSession(tabId, { view: "history", historySelection: { type: "commit", id } });
+        return;
+      }
       const current = sessionsRef.current[tabId];
       const shown = current?.commitDetails;
       const selectedPath = current?.historySelection?.path;
@@ -1340,6 +1354,95 @@ export function GitProvider({ children }: { children: ReactNode }) {
       }
     },
     [activeRepoPath, beginActivity, endActivity, patchActivity, patchSession],
+  );
+
+  const loadComparison = useCallback(
+    async (base: CompareRevision, head: CompareRevision) => {
+      const repoPath = activeRepoPath();
+      const tabId = activeTabIdRef.current;
+      if (!repoPath) return;
+      const generation = ++compareLoadGen.current;
+      patchSession(tabId, {
+        view: "history",
+        comparison: { base, head, files: null, path: null },
+        historyDiff: null,
+      });
+      try {
+        const files = await gitApi.compareRevisions(repoPath, base.rev, head.rev);
+        if (compareLoadGen.current !== generation) return;
+        const first = files[0];
+        patchSession(tabId, {
+          comparison: { base, head, files, path: first?.path ?? null },
+          historyDiff: first?.binary ? emptyBinaryDiff(first.path, first.oldPath) : null,
+        });
+        if (!first || first.binary) return;
+        const historyDiff = await gitApi.compareFileDiff(repoPath, base.rev, head.rev, first.path);
+        if (compareLoadGen.current !== generation) return;
+        patchSession(tabId, { historyDiff });
+      } catch (error) {
+        if (compareLoadGen.current !== generation) return;
+        patchSession(tabId, { comparison: null, historyDiff: null });
+        toast.error(errorMessage(error));
+      }
+    },
+    [activeRepoPath, patchSession],
+  );
+
+  const openComparison = useCallback(
+    (base: CompareRevision, head: CompareRevision) => {
+      void loadComparison(base, head);
+    },
+    [loadComparison],
+  );
+
+  const swapComparison = useCallback(() => {
+    const current = sessionsRef.current[activeTabIdRef.current]?.comparison;
+    if (!current) return;
+    void loadComparison(current.head, current.base);
+  }, [loadComparison]);
+
+  const closeComparison = useCallback(() => {
+    const tabId = activeTabIdRef.current;
+    compareLoadGen.current += 1;
+    const selected = sessionsRef.current[tabId]?.historySelection;
+    patchSession(tabId, {
+      comparison: null,
+      historyDiff: null,
+      historySelection: selected ? { type: "commit", id: selected.id } : null,
+    });
+    if (selected) void selectCommit(selected.id);
+  }, [patchSession, selectCommit]);
+
+  const selectCompareFile = useCallback(
+    async (path: string) => {
+      const repoPath = activeRepoPath();
+      const tabId = activeTabIdRef.current;
+      const current = sessionsRef.current[tabId]?.comparison;
+      if (!repoPath || !current?.files) return;
+      const file = current.files.find((item) => item.path === path);
+      if (!file) return;
+      const generation = ++compareLoadGen.current;
+      patchSession(tabId, {
+        comparison: { ...current, path },
+        historyDiff: file.binary ? emptyBinaryDiff(path, file.oldPath) : null,
+      });
+      if (file.binary) return;
+      try {
+        const historyDiff = await gitApi.compareFileDiff(
+          repoPath,
+          current.base.rev,
+          current.head.rev,
+          path,
+        );
+        if (compareLoadGen.current !== generation) return;
+        patchSession(tabId, { historyDiff });
+      } catch (error) {
+        if (compareLoadGen.current !== generation) return;
+        patchSession(tabId, { historyDiff: null });
+        toast.error(errorMessage(error));
+      }
+    },
+    [activeRepoPath, patchSession],
   );
 
   const selectStash = useCallback(
@@ -2148,6 +2251,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       changeDiff: session?.changeDiff ?? null,
       historyDiff: session?.historyDiff ?? null,
       commitDetails: session?.commitDetails ?? null,
+      comparison: session?.comparison ?? null,
       stashSelection: session?.stashSelection ?? null,
       stashDetails: session?.stashDetails ?? null,
       stashDiff: session?.stashDiff ?? null,
@@ -2175,6 +2279,10 @@ export function GitProvider({ children }: { children: ReactNode }) {
       selectChange,
       selectCommit,
       selectCommitFile,
+      openComparison,
+      swapComparison,
+      closeComparison,
+      selectCompareFile,
       selectStash,
       selectStashFile,
       stage,
@@ -2247,6 +2355,10 @@ export function GitProvider({ children }: { children: ReactNode }) {
       selectChange,
       selectCommit,
       selectCommitFile,
+      openComparison,
+      swapComparison,
+      closeComparison,
+      selectCompareFile,
       selectStash,
       selectStashFile,
       stage,

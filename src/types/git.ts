@@ -114,6 +114,18 @@ export interface CommitDetails {
   files: CommitFile[];
 }
 
+export interface CompareRevision {
+  rev: string;
+  label: string;
+}
+
+export interface RevisionComparison {
+  base: CompareRevision;
+  head: CompareRevision;
+  files: CommitFile[] | null;
+  path: string | null;
+}
+
 export interface BranchInfo {
   name: string;
   isHead: boolean;

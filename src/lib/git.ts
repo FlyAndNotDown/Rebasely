@@ -5,6 +5,7 @@ import type {
   BranchInfo,
   BranchList,
   CommitDetails,
+  CommitFile,
   CommitSummary,
   ConflictView,
   RebaseCommit,
@@ -78,6 +79,10 @@ export const gitApi = {
     invoke<CommitDetails>("get_commit_details", { repoPath, oid }),
   getCommitDiff: (repoPath: string, oid: string, path: string) =>
     invoke<FileDiff>("get_commit_diff", { repoPath, oid, path }),
+  compareRevisions: (repoPath: string, base: string, head: string) =>
+    invoke<CommitFile[]>("compare_revisions", { repoPath, base, head }),
+  compareFileDiff: (repoPath: string, base: string, head: string, path: string) =>
+    invoke<FileDiff>("compare_file_diff", { repoPath, base, head, path }),
   stagePaths: (repoPath: string, paths: string[]) =>
     invoke<WorkspaceSnapshot>("stage_paths", { repoPath, paths }),
   unstagePaths: (repoPath: string, paths: string[]) =>

@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { ChevronRightIcon, EyeIcon, GitBranchIcon, PlusIcon, SearchIcon, TagIcon } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ArrowLeftRightIcon, ChevronRightIcon, EyeIcon, GitBranchIcon, PlusIcon, SearchIcon, TagIcon } from "lucide-react";
 import { AddRemoteDialog } from "@/components/add-remote-dialog";
 import { MergeDialog, RebaseOntoDialog } from "@/components/rebase-dialog";
 import { Button } from "@/components/ui/button";
@@ -54,6 +54,7 @@ export function HistoryBranches() {
     createTag,
     deleteTag,
     pushTag,
+    openComparison,
   } = useGit();
   const [query, setQuery] = useState("");
   const [needle, setNeedle] = useState("");
@@ -70,6 +71,9 @@ export function HistoryBranches() {
   const [tagName, setTagName] = useState("");
   const [tagMessage, setTagMessage] = useState("");
   const [deletingTag, setDeletingTag] = useState<string | null>(null);
+  const [selectedNames, setSelectedNames] = useState<string[]>([]);
+  const [deletingMany, setDeletingMany] = useState<BranchInfo[] | null>(null);
+  const branchAnchor = useRef<string | null>(null);
   const canRebase =
     Boolean(snapshot?.repo.currentBranch) && !snapshot?.repo.isDetached && !snapshot?.repo.operation;
   const branches = snapshot?.branches;
@@ -141,6 +145,28 @@ export function HistoryBranches() {
     setHistoryExpanded([...next]);
   }
 
+  function selectBranches(name: string, mode: "single" | "toggle" | "range") {
+    if (mode === "toggle") {
+      setSelectedNames((current) =>
+        current.includes(name) ? current.filter((item) => item !== name) : [...current, name],
+      );
+      branchAnchor.current = name;
+      return;
+    }
+    if (mode === "range" && branchAnchor.current) {
+      const names = visibleBranches.map((branch) => branch.name);
+      const start = names.indexOf(branchAnchor.current);
+      const end = names.indexOf(name);
+      if (start >= 0 && end >= 0) {
+        const [from, to] = start < end ? [start, end] : [end, start];
+        setSelectedNames(names.slice(from, to + 1));
+        return;
+      }
+    }
+    setSelectedNames([name]);
+    branchAnchor.current = name;
+  }
+
   function toggleWatch(name: string) {
     if (watched.has(name)) {
       setHistoryRevs(historyRevs.filter((rev) => rev !== name));
@@ -157,6 +183,20 @@ export function HistoryBranches() {
       return;
     }
     if (result === true && remote) await deleteBranch(remote);
+  }
+
+  async function deleteMany(branches: BranchInfo[]) {
+    for (const branch of branches) {
+      if (branch.isHead) continue;
+      const result = await deleteBranch(branch.name);
+      if (result === "unmerged") {
+        setPendingRemote(null);
+        setForceDeleting(branch);
+        return;
+      }
+      if (result !== true) return;
+    }
+    setSelectedNames([]);
   }
 
   function requestDelete(branch: BranchInfo) {
@@ -203,6 +243,8 @@ export function HistoryBranches() {
       ? [{ id: "section:tags", label: "Tags", children: tagTree }]
       : []),
   ];
+  const visibleBranches = collectBranches(root, expanded, forceOpen);
+  const allBranches = collectAllBranches(root);
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
@@ -257,6 +299,26 @@ export function HistoryBranches() {
             onDeleteTag={setDeletingTag}
             onPushTag={(remote, name) => void pushTag(remote, name)}
             remotes={snapshot?.remotes.map((remote) => remote.name) ?? []}
+            selectedNames={selectedNames}
+            selectedBranches={selectedNames
+              .map((name) => visibleBranches.find((branch) => branch.name === name) ?? allBranches.find((branch) => branch.name === name))
+              .filter((branch): branch is BranchInfo => Boolean(branch))}
+            onSelectBranch={selectBranches}
+            onCompareBranches={(branches) => {
+              const [base, head] = branches;
+              if (!base || !head) return;
+              openComparison({ rev: base.name, label: base.name }, { rev: head.name, label: head.name });
+            }}
+            onShowBranches={(names) => {
+              const next = new Set(historyRevs);
+              for (const name of names) next.add(name);
+              setHistoryRevs([...next]);
+            }}
+            onHideBranches={(names) => {
+              const hide = new Set(names);
+              setHistoryRevs(historyRevs.filter((rev) => !hide.has(rev)));
+            }}
+            onDeleteBranches={setDeletingMany}
           />
         )}
       </ScrollArea>
@@ -468,6 +530,44 @@ export function HistoryBranches() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <Dialog open={Boolean(deletingMany)} onOpenChange={(open) => !open && setDeletingMany(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              Delete {deletingMany?.length === 1 ? "this branch?" : `${deletingMany?.length ?? 0} branches?`}
+            </DialogTitle>
+            <DialogDescription>
+              {deletingMany?.some((branch) => !branch.isRemote && branch.upstream)
+                ? "Remote branches that track these are left in place."
+                : "This cannot be undone from the sidebar."}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-1">
+            {deletingMany?.map((branch) => (
+              <div key={branch.name} className="truncate font-mono text-xs">
+                {branch.name}
+              </div>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setDeletingMany(null)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => {
+                const branches = deletingMany;
+                if (!branches) return;
+                setDeletingMany(null);
+                void deleteMany(branches);
+              }}
+            >
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <Dialog open={Boolean(deletingRemote)} onOpenChange={(open) => !open && setDeletingRemote(null)}>
         <DialogContent>
           <DialogHeader>
@@ -520,6 +620,13 @@ function TreeRows({
   onDeleteTag,
   onPushTag,
   remotes,
+  selectedNames,
+  selectedBranches,
+  onSelectBranch,
+  onCompareBranches,
+  onShowBranches,
+  onHideBranches,
+  onDeleteBranches,
 }: {
   nodes: BranchTreeNode[];
   depth: number;
@@ -539,6 +646,13 @@ function TreeRows({
   onDeleteTag?: (name: string) => void;
   onPushTag?: (remote: string, name: string) => void;
   remotes?: string[];
+  selectedNames?: string[];
+  selectedBranches?: BranchInfo[];
+  onSelectBranch?: (name: string, mode: "single" | "toggle" | "range") => void;
+  onCompareBranches?: (branches: BranchInfo[]) => void;
+  onShowBranches?: (names: string[]) => void;
+  onHideBranches?: (names: string[]) => void;
+  onDeleteBranches?: (branches: BranchInfo[]) => void;
 }) {
   return (
     <>
@@ -590,12 +704,28 @@ function TreeRows({
         if (node.branch) {
           const branch = node.branch;
           const active = watched.has(branch.name);
+          const picked =
+            selectedNames?.includes(branch.name) && (selectedBranches?.length ?? 0) > 1
+              ? selectedBranches ?? null
+              : null;
           return (
             <ContextMenu key={node.id}>
               <ContextMenuTrigger asChild>
                 <div
-                  className="flex h-7 items-center gap-1 pr-1 text-muted-foreground hover:bg-muted/70"
+                  className={cn(
+                    "flex h-7 items-center gap-1 pr-1 text-muted-foreground hover:bg-muted/70",
+                    selectedNames?.includes(branch.name) && "bg-muted text-foreground",
+                  )}
                   style={{ paddingLeft: 8 + depth * 12 }}
+                  onClick={(event) =>
+                    onSelectBranch?.(
+                      branch.name,
+                      event.shiftKey ? "range" : event.ctrlKey || event.metaKey ? "toggle" : "single",
+                    )
+                  }
+                  onContextMenu={() => {
+                    if (!selectedNames?.includes(branch.name)) onSelectBranch?.(branch.name, "single");
+                  }}
                 >
                   <GitBranchIcon
                     className={cn(
@@ -614,11 +744,25 @@ function TreeRows({
                   <WatchButton
                     active={active}
                     title={active ? "Remove this branch from History" : "Add this branch to History"}
-                    onClick={() => onToggleWatch(branch.name)}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onToggleWatch(branch.name);
+                    }}
                   />
                 </div>
               </ContextMenuTrigger>
-              <ContextMenuContent className="w-44">
+              <ContextMenuContent className="w-48">
+                {picked && onCompareBranches && onShowBranches && onHideBranches && onDeleteBranches ? (
+                  <MultiBranchMenu
+                    branches={picked}
+                    watched={watched}
+                    onCompare={onCompareBranches}
+                    onShow={onShowBranches}
+                    onHide={onHideBranches}
+                    onDelete={onDeleteBranches}
+                  />
+                ) : (
+                <>
                 <ContextMenuItem disabled={branch.isHead} onClick={() => onCheckout(branch)}>
                   Checkout
                 </ContextMenuItem>
@@ -639,6 +783,8 @@ function TreeRows({
                 >
                   Delete
                 </ContextMenuItem>
+                </>
+                )}
               </ContextMenuContent>
             </ContextMenu>
           );
@@ -731,6 +877,13 @@ function TreeRows({
                 onDeleteTag={onDeleteTag}
                 onPushTag={onPushTag}
                 remotes={remotes}
+                selectedNames={selectedNames}
+                selectedBranches={selectedBranches}
+                onSelectBranch={onSelectBranch}
+                onCompareBranches={onCompareBranches}
+                onShowBranches={onShowBranches}
+                onHideBranches={onHideBranches}
+                onDeleteBranches={onDeleteBranches}
               />
             ) : null}
           </div>
@@ -740,6 +893,75 @@ function TreeRows({
   );
 }
 
+function MultiBranchMenu({
+  branches,
+  watched,
+  onCompare,
+  onShow,
+  onHide,
+  onDelete,
+}: {
+  branches: BranchInfo[];
+  watched: Set<string>;
+  onCompare: (branches: BranchInfo[]) => void;
+  onShow: (names: string[]) => void;
+  onHide: (names: string[]) => void;
+  onDelete: (branches: BranchInfo[]) => void;
+}) {
+  const names = branches.map((branch) => branch.name);
+  const hidden = names.filter((name) => !watched.has(name));
+  const shown = names.filter((name) => watched.has(name));
+  const deletable = branches.filter((branch) => !branch.isHead);
+  return (
+    <>
+      {branches.length === 2 ? (
+        <ContextMenuItem onClick={() => onCompare(branches)}>
+          <ArrowLeftRightIcon />
+          Compare
+        </ContextMenuItem>
+      ) : null}
+      {hidden.length > 0 ? (
+        <ContextMenuItem onClick={() => onShow(hidden)}>
+          <EyeIcon />
+          Show in history
+        </ContextMenuItem>
+      ) : null}
+      {shown.length > 0 ? (
+        <ContextMenuItem onClick={() => onHide(shown)}>
+          <EyeIcon />
+          Hide from history
+        </ContextMenuItem>
+      ) : null}
+      {deletable.length > 0 ? (
+        <ContextMenuItem variant="destructive" onClick={() => onDelete(deletable)}>
+          Delete
+        </ContextMenuItem>
+      ) : null}
+    </>
+  );
+}
+
+function collectBranches(nodes: BranchTreeNode[], expanded: Set<string>, forceOpen: boolean): BranchInfo[] {
+  const branches: BranchInfo[] = [];
+  for (const node of nodes) {
+    if (node.branch) branches.push(node.branch);
+    const folder = !node.branch && !node.tag;
+    if (!folder || forceOpen || expanded.has(node.id)) {
+      branches.push(...collectBranches(node.children, expanded, forceOpen));
+    }
+  }
+  return branches;
+}
+
+function collectAllBranches(nodes: BranchTreeNode[]): BranchInfo[] {
+  const branches: BranchInfo[] = [];
+  for (const node of nodes) {
+    if (node.branch) branches.push(node.branch);
+    branches.push(...collectAllBranches(node.children));
+  }
+  return branches;
+}
+
 function WatchButton({
   active,
   title,
@@ -747,7 +969,7 @@ function WatchButton({
 }: {
   active: boolean;
   title: string;
-  onClick: () => void;
+  onClick: (event: { stopPropagation: () => void }) => void;
 }) {
   return (
     <button
