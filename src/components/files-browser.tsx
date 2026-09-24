@@ -16,7 +16,7 @@ import { cn } from "@/lib/utils";
 import { useGitPick, useGitSelect } from "@/state/git-context";
 import { usePanelGroupLayout } from "@/state/use-panel-group-layout";
 import { useRepoChanged } from "@/state/use-repo-changed";
-import type { AvatarProvider, BlameHunk, CommitSummary, DirEntry, FileDiff } from "@/types/git";
+import type { BlameHunk, CommitSummary, DirEntry, FileDiff } from "@/types/git";
 
 const PAGE = 80;
 
@@ -247,7 +247,6 @@ function FileBrowsePane({
 /** One file's commit history and the selected commit's diff. Keyed by path and pin. */
 function FileHistoryPane({ repoPath, path, pin }: { repoPath: string; path: string; pin: string | null }) {
   const layout = usePanelGroupLayout("fileHistory");
-  const avatarProvider = useGitSelect((state) => state.prefs.avatarProvider);
   const { beginActivity, endActivity } = useGitPick(["beginActivity", "endActivity"]);
   const [commits, setCommits] = useState<CommitSummary[]>([]);
   // Commits read from the log so far; the pinned commit may be extra.
@@ -342,7 +341,6 @@ function FileHistoryPane({ repoPath, path, pin }: { repoPath: string; path: stri
           loading={loading}
           hasMore={hasMore}
           selectedId={selectedId}
-          avatarProvider={avatarProvider}
           onSelect={setSelectedId}
           onLoadMore={() => void loadMore()}
         />
@@ -554,7 +552,6 @@ function FileHistory({
   loading,
   hasMore,
   selectedId,
-  avatarProvider,
   onSelect,
   onLoadMore,
 }: {
@@ -562,7 +559,6 @@ function FileHistory({
   loading: boolean;
   hasMore: boolean;
   selectedId: string | null;
-  avatarProvider: AvatarProvider;
   onSelect: (id: string) => void;
   onLoadMore: () => void;
 }) {
@@ -591,7 +587,7 @@ function FileHistory({
           <span className="shrink-0 whitespace-nowrap font-mono text-[11px] text-muted-foreground">{commit.shortId}</span>
           <span className="min-w-0 flex-1 truncate text-sm">{commit.summary || "(no message)"}</span>
           <span className="flex w-28 shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground">
-            <AuthorAvatar name={commit.authorName} email={commit.authorEmail} provider={avatarProvider} />
+            <AuthorAvatar name={commit.authorName} email={commit.authorEmail} />
             <span className="truncate">{commit.authorName}</span>
           </span>
           <span className="w-[7.25rem] shrink-0 text-right text-[11px] tabular-nums text-muted-foreground">

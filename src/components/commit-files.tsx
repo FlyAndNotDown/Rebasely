@@ -15,7 +15,6 @@ export function CommitFiles() {
     commitDetails,
     historySelection,
     selectCommitFile,
-    prefs,
     comparison,
     swapComparison,
     closeComparison,
@@ -24,7 +23,6 @@ export function CommitFiles() {
     "commitDetails",
     "historySelection",
     "selectCommitFile",
-    "prefs",
     "comparison",
     "swapComparison",
     "closeComparison",
@@ -129,7 +127,6 @@ export function CommitFiles() {
             <AuthorAvatar
               name={commit.authorName}
               email={commit.authorEmail}
-              provider={prefs.avatarProvider}
             />
             {commit.authorName}
           </button>

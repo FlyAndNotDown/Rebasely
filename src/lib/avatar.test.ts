@@ -1,13 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { avatarHue, avatarInitial, avatarSeed, normalizeAvatarProvider } from "./avatar";
+import { avatarHue, avatarInitial, avatarSeed } from "./avatar";
 
 describe("avatar", () => {
-  it("defaults to local initials, including the value older builds always stored", () => {
-    expect(normalizeAvatarProvider(undefined)).toBe("initials");
-    expect(normalizeAvatarProvider("dicebear")).toBe("initials");
-    expect(normalizeAvatarProvider("dicebear-online")).toBe("dicebear-online");
-  });
-
   it("falls back from name to email to a placeholder", () => {
     expect(avatarSeed(" Ada ", "ada@example.com")).toBe("Ada");
     expect(avatarSeed("", "ada@example.com")).toBe("ada@example.com");

@@ -158,8 +158,6 @@ export interface TerminalOption {
   available: boolean;
 }
 
-export type AvatarProvider = "initials" | "dicebear-online";
-
 export type PanelLayout = Record<string, number>;
 
 export type PanelLayoutId =
@@ -204,7 +202,6 @@ export interface BlameHunk {
 
 export interface AppPrefs {
   terminalId: string;
-  avatarProvider: AvatarProvider;
   sidebarOrder: string[];
   panelLayouts: PanelLayouts;
   pullRebase: boolean;

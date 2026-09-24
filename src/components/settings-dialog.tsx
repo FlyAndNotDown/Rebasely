@@ -20,12 +20,11 @@ import {
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Label } from "@/components/ui/label";
-import { AVATAR_PROVIDERS } from "@/lib/avatar";
 import { errorMessage, gitApi } from "@/lib/git";
 import { normalizePrefs } from "@/lib/prefs";
 import { cn } from "@/lib/utils";
 import { useGitPick } from "@/state/git-context";
-import type { AvatarProvider, TerminalOption } from "@/types/git";
+import type { TerminalOption } from "@/types/git";
 
 type SettingsSection = "git" | "general";
 type ThemeChoice = "dark" | "light" | "system";
@@ -60,7 +59,6 @@ function SettingsForm({ onOpenChange }: { onOpenChange: (open: boolean) => void 
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [terminalId, setTerminalId] = useState("auto");
-  const [avatarProvider, setAvatarProvider] = useState<AvatarProvider>(prefs.avatarProvider);
   const [terminals, setTerminals] = useState<TerminalOption[]>([]);
   const [themeChoice, setThemeChoice] = useState<ThemeChoice>(() =>
     theme === "light" || theme === "dark" || theme === "system" ? theme : "dark",
@@ -74,7 +72,6 @@ function SettingsForm({ onOpenChange }: { onOpenChange: (open: boolean) => void 
         setName(identity.name);
         setEmail(identity.email);
         setTerminalId(prefs.terminalId);
-        setAvatarProvider(prefs.avatarProvider);
         setTerminals(options);
       })
       .catch((error) => toast.error(errorMessage(error)));
@@ -85,11 +82,7 @@ function SettingsForm({ onOpenChange }: { onOpenChange: (open: boolean) => void 
     try {
       await Promise.all([
         gitApi.setGitIdentity({ name: name.trim(), email: email.trim() }),
-        updatePrefs({
-          ...prefs,
-          terminalId,
-          avatarProvider,
-        }),
+        updatePrefs({ ...prefs, terminalId }),
       ]);
       setTheme(themeChoice);
       toast.success("Saved settings");
@@ -148,9 +141,7 @@ function SettingsForm({ onOpenChange }: { onOpenChange: (open: boolean) => void 
             <>
               <DialogHeader>
                 <DialogTitle>General</DialogTitle>
-                <DialogDescription>
-                  Theme, author avatars, and the terminal used to open a repository.
-                </DialogDescription>
+                <DialogDescription>Theme and the terminal used to open a repository.</DialogDescription>
               </DialogHeader>
               <div className="mt-6 grid gap-8">
                 <FieldGroup title="Appearance">
@@ -160,13 +151,6 @@ function SettingsForm({ onOpenChange }: { onOpenChange: (open: boolean) => void 
                     value={themeChoice}
                     options={themeOptions}
                     onChange={setThemeChoice}
-                  />
-                  <SelectField
-                    id="avatar-provider"
-                    label="Avatar provider"
-                    value={avatarProvider}
-                    options={AVATAR_PROVIDERS}
-                    onChange={setAvatarProvider}
                   />
                 </FieldGroup>
                 <FieldGroup title="Terminal">

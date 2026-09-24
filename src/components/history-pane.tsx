@@ -56,7 +56,7 @@ import { graphWidth, laneColor, layoutCommitGraph, type GraphRow } from "@/lib/c
 import { useWindowedRows } from "@/lib/use-windowed-rows";
 import { cn } from "@/lib/utils";
 import { COMMIT_PAGE, useGitPick, type ResetMode } from "@/state/git-context";
-import type { AvatarProvider, CommitRef, CommitSummary } from "@/types/git";
+import type { CommitRef, CommitSummary } from "@/types/git";
 import { toast } from "sonner";
 
 type CommitRowAction =
@@ -120,7 +120,6 @@ export function HistoryPane() {
     ensureHistory,
     loadMoreCommits,
     historyRevs,
-    prefs,
     snapshot,
     revertCommit,
     cherryPickCommit,
@@ -136,7 +135,6 @@ export function HistoryPane() {
     "ensureHistory",
     "loadMoreCommits",
     "historyRevs",
-    "prefs",
     "snapshot",
     "revertCommit",
     "cherryPickCommit",
@@ -399,7 +397,6 @@ export function HistoryPane() {
             end={rows.end}
             before={rows.before}
             after={rows.after}
-            avatarProvider={prefs.avatarProvider}
             loading={loading}
             searchingMode={searchingMode}
             hasMore={hasMore}
@@ -577,7 +574,6 @@ const CommitList = memo(function CommitList({
   end,
   before,
   after,
-  avatarProvider,
   loading,
   searchingMode,
   hasMore,
@@ -595,7 +591,6 @@ const CommitList = memo(function CommitList({
   end: number;
   before: number;
   after: number;
-  avatarProvider: AvatarProvider;
   loading: boolean;
   searchingMode: boolean;
   hasMore: boolean;
@@ -630,7 +625,6 @@ const CommitList = memo(function CommitList({
           commit={commit}
           selected={selected.has(commit.id)}
           multi={multi && selected.has(commit.id)}
-          avatarProvider={avatarProvider}
           graph={graphCells[start + offset]}
           canResetBranch={canResetBranch}
           canRebase={canRebase}
@@ -658,7 +652,6 @@ const CommitRow = memo(function CommitRow({
   commit,
   selected,
   multi,
-  avatarProvider,
   graph,
   canResetBranch,
   canRebase,
@@ -669,7 +662,6 @@ const CommitRow = memo(function CommitRow({
   commit: CommitSummary;
   selected: boolean;
   multi: boolean;
-  avatarProvider: AvatarProvider;
   graph: { width: number; row: GraphRow; previous?: GraphRow } | null;
   canResetBranch: boolean;
   canRebase: boolean;
@@ -731,7 +723,6 @@ const CommitRow = memo(function CommitRow({
             <AuthorAvatar
               name={commit.authorName}
               email={commit.authorEmail}
-              provider={avatarProvider}
             />
             <span className="truncate">{commit.authorName}</span>
           </span>

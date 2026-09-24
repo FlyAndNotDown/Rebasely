@@ -32,8 +32,6 @@ pub struct PanelLayouts {
 pub struct AppPrefs {
     #[serde(default = "default_terminal_id")]
     pub terminal_id: String,
-    #[serde(default = "default_avatar_provider")]
-    pub avatar_provider: String,
     #[serde(default = "default_sidebar_order")]
     pub sidebar_order: Vec<String>,
     #[serde(default)]
@@ -44,10 +42,6 @@ pub struct AppPrefs {
 
 fn default_terminal_id() -> String {
     "auto".to_string()
-}
-
-fn default_avatar_provider() -> String {
-    "initials".to_string()
 }
 
 fn default_sidebar_order() -> Vec<String> {
@@ -63,7 +57,6 @@ impl Default for AppPrefs {
     fn default() -> Self {
         Self {
             terminal_id: default_terminal_id(),
-            avatar_provider: default_avatar_provider(),
             sidebar_order: default_sidebar_order(),
             panel_layouts: PanelLayouts::default(),
             pull_rebase: false,
