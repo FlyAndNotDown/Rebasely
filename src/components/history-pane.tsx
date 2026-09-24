@@ -553,8 +553,6 @@ const CommitRow = memo(function CommitRow({
   onAction: (action: CommitRowAction) => void;
 }) {
   const message = [commit.summary, commit.body].filter(Boolean).join("\n\n");
-  const canReset =
-    canResetBranch && (commit.onCurrentBranch || commit.onTrackingBranch);
 
   async function copyText(value: string, success: string) {
     if (!value) {
@@ -616,44 +614,53 @@ const CommitRow = memo(function CommitRow({
         </button>
       </ContextMenuTrigger>
       <ContextMenuContent className="w-48">
-        <ContextMenuItem onClick={() => onAction({ type: "branch", commit })}>
-          <GitBranchIcon />
-          Create branch
-        </ContextMenuItem>
-        {commit.onCurrentBranch ? (
-          <ContextMenuItem onClick={() => onAction({ type: "revert", commit })}>
-            <Undo2Icon />
-            Revert
-          </ContextMenuItem>
-        ) : (
-          <ContextMenuItem onClick={() => onAction({ type: "cherry-pick", commit })}>
-            <CopyPlusIcon />
-            Cherry-pick
-          </ContextMenuItem>
-        )}
         <ContextMenuItem
-          disabled={!canReset}
+          disabled={!canResetBranch}
           onClick={() => onAction({ type: "reset", commit })}
         >
           <RotateCcwIcon />
           Reset
         </ContextMenuItem>
+        <ContextMenuItem
+          disabled={commit.onCurrentBranch}
+          onClick={() => onAction({ type: "cherry-pick", commit })}
+        >
+          <CopyPlusIcon />
+          Cherry-pick
+        </ContextMenuItem>
+        <ContextMenuItem
+          disabled={!commit.onCurrentBranch}
+          onClick={() => onAction({ type: "revert", commit })}
+        >
+          <Undo2Icon />
+          Revert
+        </ContextMenuItem>
+        <ContextMenuItem
+          disabled={!canRebase || commit.onCurrentBranch}
+          onClick={() => onAction({ type: "rebase", commit })}
+        >
+          <GitBranchIcon />
+          Rebase onto
+        </ContextMenuItem>
+        <ContextMenuItem
+          disabled={
+            !canRebase ||
+            !commit.onCurrentBranch ||
+            commit.refs.some((ref) => ref.kind === "head")
+          }
+          onClick={() => onAction({ type: "interactive", commit })}
+        >
+          <ListOrderedIcon />
+          Interactive rebase
+        </ContextMenuItem>
+        <ContextMenuItem onClick={() => onAction({ type: "branch", commit })}>
+          <GitBranchIcon />
+          Create branch
+        </ContextMenuItem>
         <ContextMenuItem onClick={() => onAction({ type: "patch", commit })}>
           <FileDiffIcon />
           Create patch
         </ContextMenuItem>
-        {canRebase && !commit.onCurrentBranch ? (
-          <ContextMenuItem onClick={() => onAction({ type: "rebase", commit })}>
-            <GitBranchIcon />
-            Rebase onto
-          </ContextMenuItem>
-        ) : null}
-        {canRebase && commit.onCurrentBranch && !commit.refs.some((ref) => ref.kind === "head") ? (
-          <ContextMenuItem onClick={() => onAction({ type: "interactive", commit })}>
-            <ListOrderedIcon />
-            Interactive rebase
-          </ContextMenuItem>
-        ) : null}
         <ContextMenuSeparator />
         <ContextMenuSub>
           <ContextMenuSubTrigger>

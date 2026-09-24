@@ -2267,7 +2267,7 @@ fn reset_flag(mode: &str) -> AppResult<&'static str> {
     }
 }
 
-fn ensure_reset_target(repo: &Repository, target: Oid) -> AppResult<()> {
+fn ensure_reset_target(repo: &Repository, _target: Oid) -> AppResult<()> {
     let head = repo
         .head()
         .map_err(|_| AppError::msg("Reset needs a checked-out branch"))?;
@@ -2276,31 +2276,7 @@ fn ensure_reset_target(repo: &Repository, target: Oid) -> AppResult<()> {
             "Reset is only available on the current local branch",
         ));
     }
-    let head_oid = head
-        .target()
-        .ok_or_else(|| AppError::msg("Reset needs a checked-out branch"))?;
-    if target == head_oid || repo.graph_descendant_of(head_oid, target).unwrap_or(false) {
-        return Ok(());
-    }
-    let name = head
-        .shorthand()
-        .ok_or_else(|| AppError::msg("Reset needs a checked-out branch"))?;
-    if let Ok(branch) = repo.find_branch(name, BranchType::Local) {
-        if let Ok(upstream) = branch.upstream() {
-            if let Some(upstream_oid) = upstream.get().target() {
-                if target == upstream_oid
-                    || repo
-                        .graph_descendant_of(upstream_oid, target)
-                        .unwrap_or(false)
-                {
-                    return Ok(());
-                }
-            }
-        }
-    }
-    Err(AppError::msg(
-        "Reset is only available for commits on the current branch or its upstream",
-    ))
+    Ok(())
 }
 
 pub fn cherry_pick_commit(repo: &mut Repository, spec: &str) -> AppResult<WorkspaceSnapshot> {
@@ -3387,6 +3363,31 @@ mod tests {
         assert!(rebase_progress(&repo).is_none());
         assert_eq!(head_summary(&repo), "right");
         assert_eq!(fs::read_to_string(root.join("file.txt")).unwrap(), "both\n");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn reset_can_move_to_a_commit_on_another_branch() {
+        let (root, mut repo) = temp_repo();
+        commit_file(&mut repo, &root, "file.txt", "base\n", "base");
+        let current = repo.head().unwrap().name().unwrap().to_string();
+        repo.branch("other", &repo.head().unwrap().peel_to_commit().unwrap(), false)
+            .unwrap();
+        commit_file(&mut repo, &root, "file.txt", "left\n", "left");
+        let other_tip = {
+            repo.set_head("refs/heads/other").unwrap();
+            repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+                .unwrap();
+            commit_file(&mut repo, &root, "other.txt", "side\n", "side");
+            let tip = repo.head().unwrap().target().unwrap();
+            repo.set_head(&current).unwrap();
+            repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+                .unwrap();
+            tip
+        };
+        reset_to_commit(&mut repo, &other_tip.to_string(), "hard").unwrap();
+        assert_eq!(repo.head().unwrap().target().unwrap(), other_tip);
+        assert_eq!(head_summary(&repo), "side");
         let _ = fs::remove_dir_all(&root);
     }
 }
