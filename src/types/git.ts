@@ -50,6 +50,12 @@ export interface RebaseStep {
   message: string;
 }
 
+export interface ConflictView {
+  path: string;
+  binary: boolean;
+  text: string;
+}
+
 export interface FileStatus {
   path: string;
   oldPath: string | null;

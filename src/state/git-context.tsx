@@ -436,6 +436,7 @@ interface GitContextValue {
   operationContinue: () => Promise<boolean>;
   operationAbort: () => Promise<boolean>;
   resolveConflict: (path: string, side: "ours" | "theirs" | "both") => Promise<boolean>;
+  saveConflict: (path: string, text: string) => Promise<boolean>;
   resetCommit: (oid: string, mode: ResetMode) => Promise<boolean>;
   createPatch: (commit: CommitSummary) => Promise<void>;
   applyPatch: () => Promise<void>;
@@ -1834,6 +1835,17 @@ export function GitProvider({ children }: { children: ReactNode }) {
     [runMutation],
   );
 
+  const saveConflict = useCallback(
+    async (path: string, text: string) => {
+      return runMutation(
+        "Saving resolution",
+        (repoPath) => gitApi.saveConflict(repoPath, path, text),
+        "Conflict resolved",
+      );
+    },
+    [runMutation],
+  );
+
   const cherryPickCommit = useCallback(
     async (oid: string) => {
       const ok = await runMutation(
@@ -2116,6 +2128,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       operationContinue,
       operationAbort,
       resolveConflict,
+      saveConflict,
       resetCommit,
       createPatch,
       applyPatch,
@@ -2184,6 +2197,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       operationContinue,
       operationAbort,
       resolveConflict,
+      saveConflict,
       resetCommit,
       createPatch,
       applyPatch,

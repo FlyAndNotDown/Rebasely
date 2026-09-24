@@ -361,6 +361,16 @@ async fn resolve_conflict(
 }
 
 #[tauri::command]
+async fn conflict_view(repo_path: String, path: String) -> AppResult<git::ConflictView> {
+    with_repo_async(repo_path, move |repo| git::conflict_view(repo, &path)).await
+}
+
+#[tauri::command]
+async fn save_conflict(repo_path: String, path: String, text: String) -> AppResult<WorkspaceSnapshot> {
+    with_repo_async(repo_path, move |repo| git::save_conflict(repo, &path, &text)).await
+}
+
+#[tauri::command]
 async fn reset_to_commit(
     repo_path: String,
     oid: String,
@@ -628,6 +638,8 @@ pub fn run() {
             operation_continue,
             operation_abort,
             resolve_conflict,
+            conflict_view,
+            save_conflict,
             reset_to_commit,
             write_commit_patch,
             apply_patch,

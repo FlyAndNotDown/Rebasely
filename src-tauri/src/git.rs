@@ -2406,6 +2406,97 @@ pub fn operation_abort(repo: &mut Repository) -> AppResult<WorkspaceSnapshot> {
     run_operation(repo, &[flag, "--abort"])
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConflictView {
+    pub path: String,
+    pub binary: bool,
+    pub text: String,
+}
+
+pub fn conflict_view(repo: &Repository, path: &str) -> AppResult<ConflictView> {
+    let path = to_git_path(path);
+    if path.is_empty() {
+        return Err(AppError::msg("A file path is required"));
+    }
+    if let Ok(abs) = ensure_inside_workdir(repo, &path) {
+        if abs.is_file() {
+            let bytes = fs::read(&abs)?;
+            if bytes.contains(&0) {
+                return Ok(ConflictView {
+                    path,
+                    binary: true,
+                    text: String::new(),
+                });
+            }
+            let text = String::from_utf8_lossy(&bytes).into_owned();
+            if text.contains("<<<<<<<") {
+                return Ok(ConflictView {
+                    path,
+                    binary: false,
+                    text,
+                });
+            }
+        }
+    }
+    let ours = stage_text(repo, &path, 2);
+    let theirs = stage_text(repo, &path, 3);
+    if ours.is_none() && theirs.is_none() {
+        return Ok(ConflictView {
+            path,
+            binary: true,
+            text: String::new(),
+        });
+    }
+    let ours = with_trailing_newline(ours.unwrap_or_default());
+    let theirs = with_trailing_newline(theirs.unwrap_or_default());
+    Ok(ConflictView {
+        path,
+        binary: false,
+        text: format!("<<<<<<< Current\n{ours}=======\n{theirs}>>>>>>> Incoming\n"),
+    })
+}
+
+pub fn save_conflict(repo: &mut Repository, path: &str, text: &str) -> AppResult<WorkspaceSnapshot> {
+    if git_operation(repo).is_none() {
+        return Err(AppError::msg("No conflicted operation is in progress"));
+    }
+    let path = to_git_path(path);
+    if path.is_empty() {
+        return Err(AppError::msg("A file path is required"));
+    }
+    if text.contains("<<<<<<<") || text.contains(">>>>>>>") {
+        return Err(AppError::msg("Conflict markers are still in the file"));
+    }
+    let abs = ensure_inside_workdir(repo, &path)?;
+    if let Some(parent) = abs.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(&abs, text)?;
+    let root = workdir(repo)?.to_path_buf();
+    run_git_stdout(&root, &["add", "--", &path])?;
+    snapshot(repo)
+}
+
+fn with_trailing_newline(text: String) -> String {
+    if text.is_empty() || text.ends_with('\n') {
+        text
+    } else {
+        format!("{text}\n")
+    }
+}
+
+fn stage_text(repo: &Repository, path: &str, stage: i32) -> Option<String> {
+    let index = repo.index().ok()?;
+    let entry = index.get_path(Path::new(path), stage)?;
+    let blob = repo.find_blob(entry.id).ok()?;
+    let bytes = blob.content();
+    if bytes.contains(&0) {
+        return None;
+    }
+    Some(String::from_utf8_lossy(bytes).into_owned())
+}
+
 pub fn resolve_conflict(repo: &mut Repository, path: &str, side: &str) -> AppResult<WorkspaceSnapshot> {
     if git_operation(repo).is_none() {
         return Err(AppError::msg("No conflicted operation is in progress"));

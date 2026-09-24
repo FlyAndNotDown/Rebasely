@@ -6,6 +6,7 @@ import type {
   BranchList,
   CommitDetails,
   CommitSummary,
+  ConflictView,
   RebaseCommit,
   RebaseStep,
   FileDiff,
@@ -153,6 +154,10 @@ export const gitApi = {
     invoke<WorkspaceSnapshot>("operation_abort", { repoPath }),
   resolveConflict: (repoPath: string, path: string, side: "ours" | "theirs" | "both") =>
     invoke<WorkspaceSnapshot>("resolve_conflict", { repoPath, path, side }),
+  conflictView: (repoPath: string, path: string) =>
+    invoke<ConflictView>("conflict_view", { repoPath, path }),
+  saveConflict: (repoPath: string, path: string, text: string) =>
+    invoke<WorkspaceSnapshot>("save_conflict", { repoPath, path, text }),
   resetToCommit: (repoPath: string, oid: string, mode: string) =>
     invoke<WorkspaceSnapshot>("reset_to_commit", { repoPath, oid, mode }),
   writeCommitPatch: (repoPath: string, oid: string, dest: string) =>

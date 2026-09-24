@@ -1,6 +1,6 @@
 import { useMemo } from "react";
+import { ConflictEditor } from "@/components/conflict-editor";
 import { DiffSkeleton } from "@/components/skeletons";
-import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { diffLineSpans, type TextSpan } from "@/lib/diff-text";
 import { cn } from "@/lib/utils";
@@ -18,7 +18,6 @@ export function DiffViewer() {
     commitDetails,
     stashDetails,
     snapshot,
-    resolveConflict,
   } = useGit();
   const selection =
     view === "changes" ? changeSelection : view === "stash" ? stashSelection : historySelection;
@@ -30,6 +29,9 @@ export function DiffViewer() {
         ? selection.path
         : "Diff";
   const lineSpans = useMemo(() => (diff ? diffLineSpans(diff.lines) : []), [diff]);
+  const conflicted =
+    selection?.type === "change" &&
+    snapshot?.status.unstaged.some((file) => file.path === selection.path && file.kind === "conflicted");
 
   if (view === "stash") {
     if (!stashSelection) {
@@ -80,15 +82,13 @@ export function DiffViewer() {
           </span>
         ) : null}
       </div>
-      {selection.type === "change" &&
-      snapshot?.status.unstaged.some(
-        (file) => file.path === selection.path && file.kind === "conflicted",
-      ) ? (
-        <ConflictActions
-          rebasing={snapshot.repo.operation?.kind === "rebase"}
-          onResolve={(side) => void resolveConflict(selection.path, side)}
+      {conflicted && selection.type === "change" ? (
+        <ConflictEditor
+          repoPath={snapshot?.repo.path ?? ""}
+          path={selection.path}
+          rebasing={snapshot?.repo.operation?.kind === "rebase"}
         />
-      ) : null}
+      ) : (
       <ScrollArea className="min-h-0 flex-1">
         {diff?.binary ? (
           <p className="p-4 text-sm text-muted-foreground">Binary file</p>
@@ -130,6 +130,7 @@ export function DiffViewer() {
           </pre>
         )}
       </ScrollArea>
+      )}
     </div>
   );
 }
@@ -148,27 +149,3 @@ function DiffLineText({ spans, kind }: { spans: TextSpan[]; kind: string }) {
   return <span className="whitespace-pre">{body.every((part) => part === null) ? " " : body}</span>;
 }
 
-function ConflictActions({
-  rebasing,
-  onResolve,
-}: {
-  rebasing: boolean;
-  onResolve: (side: "ours" | "theirs" | "both") => void;
-}) {
-  const current = rebasing ? "Target" : "Current";
-  const incoming = rebasing ? "Replaying" : "Incoming";
-  return (
-    <div className="flex shrink-0 flex-wrap items-center gap-2 border-b px-3 py-2">
-      <span className="text-xs text-muted-foreground">Resolve</span>
-      <Button type="button" size="xs" variant="outline" onClick={() => onResolve("ours")}>
-        {current}
-      </Button>
-      <Button type="button" size="xs" variant="outline" onClick={() => onResolve("theirs")}>
-        {incoming}
-      </Button>
-      <Button type="button" size="xs" variant="outline" onClick={() => onResolve("both")}>
-        Both
-      </Button>
-    </div>
-  );
-}
