@@ -2207,6 +2207,7 @@ fn split_remote_branch(repo: &Repository, name: &str) -> AppResult<(String, Stri
 pub fn delete_branch(
     repo: &mut Repository,
     name: &str,
+    force: bool,
     on_progress: impl FnMut(&str) + Send,
 ) -> AppResult<WorkspaceSnapshot> {
     let name = name.trim();
@@ -2222,7 +2223,8 @@ pub fn delete_branch(
         {
             return Err(AppError::msg("Cannot delete the current branch"));
         }
-        run_git_stdout(workdir(repo)?, &["branch", "-d", name])?;
+        let flag = if force { "-D" } else { "-d" };
+        run_git_stdout(workdir(repo)?, &["branch", flag, name])?;
         return snapshot(repo);
     }
     if repo.find_branch(name, BranchType::Remote).is_ok() {

@@ -126,10 +126,11 @@ export const gitApi = {
       switch: switchTo,
       start: start || null,
     }),
-  deleteBranch: (repoPath: string, name: string, activityId?: string) =>
+  deleteBranch: (repoPath: string, name: string, activityId?: string, force = false) =>
     invoke<WorkspaceSnapshot>("delete_branch", {
       repoPath,
       name,
+      force,
       activityId: activityId || null,
     }),
   revertCommit: (repoPath: string, oid: string) =>

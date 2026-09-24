@@ -424,7 +424,7 @@ interface GitContextValue {
   dismissPublish: () => void;
   confirmPublish: () => Promise<void>;
   createBranch: (name: string, switchTo: boolean, start?: string) => Promise<boolean>;
-  deleteBranch: (name: string) => Promise<boolean>;
+  deleteBranch: (name: string, force?: boolean) => Promise<boolean | "unmerged">;
   revertCommit: (oid: string) => Promise<boolean>;
   cherryPickCommit: (oid: string) => Promise<boolean>;
   rebaseOnto: (onto: string, label: string) => Promise<boolean>;
@@ -1693,24 +1693,35 @@ export function GitProvider({ children }: { children: ReactNode }) {
   );
 
   const deleteBranch = useCallback(
-    async (name: string) => {
+    async (name: string, force = false) => {
+      const repoPath = activeRepoPath();
       const tabId = activeTabIdRef.current;
+      if (!repoPath) return false;
       const current = sessionsRef.current[tabId];
       const wasRemote = current?.snapshot?.branches.remote.some((branch) => branch.name === name) ?? false;
-      const ok = await runMutation(
-        `Deleting ${name}`,
-        (repoPath, activityId) => gitApi.deleteBranch(repoPath, name, activityId),
-        `Deleted ${name}`,
-      );
-      if (!ok) return false;
-      const next = sessionsRef.current[tabId];
-      if (next?.historyRevs.includes(name)) {
-        setHistoryRevs(next.historyRevs.filter((rev) => rev !== name));
+      try {
+        const snapshot = keepRemoteBranches(
+          current?.snapshot,
+          await runActivity(`Deleting ${name}`, current?.snapshot?.repo.name, (activityId) =>
+            gitApi.deleteBranch(repoPath, name, activityId, force),
+          ),
+        );
+        patchSession(tabId, { snapshot });
+        const next = sessionsRef.current[tabId];
+        if (next?.historyRevs.includes(name)) {
+          setHistoryRevs(next.historyRevs.filter((rev) => rev !== name));
+        }
+        if (wasRemote) await ensureBranches(true);
+        toast.success(`Deleted ${name}`);
+        return true;
+      } catch (error) {
+        const message = errorMessage(error);
+        if (!force && /not fully merged/i.test(message)) return "unmerged";
+        toast.error(message);
+        return false;
       }
-      if (wasRemote) await ensureBranches(true);
-      return true;
     },
-    [ensureBranches, runMutation, setHistoryRevs],
+    [activeRepoPath, ensureBranches, patchSession, runActivity, setHistoryRevs],
   );
 
   const refreshAfterReplay = useCallback(async () => {

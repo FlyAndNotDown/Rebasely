@@ -280,11 +280,13 @@ async fn create_branch(
 async fn delete_branch(
     repo_path: String,
     name: String,
+    force: Option<bool>,
     activity_id: Option<String>,
     app: AppHandle,
 ) -> AppResult<WorkspaceSnapshot> {
+    let force = force.unwrap_or(false);
     with_repo_async(repo_path, move |repo| {
-        git::delete_branch(repo, &name, progress_sink(&app, activity_id.as_deref()))
+        git::delete_branch(repo, &name, force, progress_sink(&app, activity_id.as_deref()))
     })
     .await
 }

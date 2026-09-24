@@ -51,6 +51,7 @@ export function HistoryBranches() {
   const [needle, setNeedle] = useState("");
   const [addOpen, setAddOpen] = useState(false);
   const [deleting, setDeleting] = useState<BranchInfo | null>(null);
+  const [forceDeleting, setForceDeleting] = useState<BranchInfo | null>(null);
   const [deletingRemote, setDeletingRemote] = useState<string | null>(null);
   const [rebasing, setRebasing] = useState<BranchInfo | null>(null);
   const [merging, setMerging] = useState<BranchInfo | null>(null);
@@ -120,13 +121,14 @@ export function HistoryBranches() {
     setHistoryRevs([...historyRevs, name]);
   }
 
-  function requestDelete(branch: BranchInfo) {
+  async function requestDelete(branch: BranchInfo) {
     if (branch.isHead) return;
     if (branch.isRemote) {
       setDeleting(branch);
       return;
     }
-    void deleteBranch(branch.name);
+    const result = await deleteBranch(branch.name);
+    if (result === "unmerged") setForceDeleting(branch);
   }
 
   async function handleAddRemote(name: string, url: string) {
@@ -248,6 +250,35 @@ export function HistoryBranches() {
               }}
             >
               Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={Boolean(forceDeleting)} onOpenChange={(open) => !open && setForceDeleting(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete unmerged branch?</DialogTitle>
+            <DialogDescription>
+              <span className="font-mono text-foreground">{forceDeleting?.name}</span> is not fully
+              merged into the current branch. Deleting it drops commits that exist only on this
+              branch.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setForceDeleting(null)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => {
+                const branch = forceDeleting;
+                if (!branch) return;
+                setForceDeleting(null);
+                void deleteBranch(branch.name, true);
+              }}
+            >
+              Delete anyway
             </Button>
           </DialogFooter>
         </DialogContent>
