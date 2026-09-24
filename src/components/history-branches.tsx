@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ChevronRightIcon, EyeIcon, GitBranchIcon, PlusIcon, SearchIcon } from "lucide-react";
 import { AddRemoteDialog } from "@/components/add-remote-dialog";
+import { RebaseOntoDialog } from "@/components/rebase-dialog";
 import { Button } from "@/components/ui/button";
 import {
   ContextMenu,
@@ -51,6 +52,8 @@ export function HistoryBranches() {
   const [addOpen, setAddOpen] = useState(false);
   const [deleting, setDeleting] = useState<BranchInfo | null>(null);
   const [deletingRemote, setDeletingRemote] = useState<string | null>(null);
+  const [rebasing, setRebasing] = useState<BranchInfo | null>(null);
+  const canRebase = Boolean(snapshot?.repo.currentBranch) && !snapshot?.repo.isDetached && !snapshot?.repo.rebase;
   const branches = snapshot?.branches;
   const watched = useMemo(() => new Set(historyRevs), [historyRevs]);
   const expanded = useMemo(
@@ -192,12 +195,19 @@ export function HistoryBranches() {
             onToggleWatch={toggleWatch}
             onCheckout={(branch) => void checkoutBranch(branch.name)}
             onDelete={requestDelete}
+            onRebase={canRebase ? setRebasing : undefined}
             onDeleteRemote={setDeletingRemote}
             onFetchRemote={(name) => void fetchRemote(name)}
             onAddRemote={() => setAddOpen(true)}
           />
         )}
       </ScrollArea>
+      <RebaseOntoDialog
+        target={rebasing ? { onto: rebasing.name, label: rebasing.name } : null}
+        onOpenChange={(open) => {
+          if (!open) setRebasing(null);
+        }}
+      />
       <AddRemoteDialog
         open={addOpen}
         onOpenChange={setAddOpen}
@@ -276,6 +286,7 @@ function TreeRows({
   onToggleWatch,
   onCheckout,
   onDelete,
+  onRebase,
   onDeleteRemote,
   onFetchRemote,
   onAddRemote,
@@ -289,6 +300,7 @@ function TreeRows({
   onToggleWatch: (name: string) => void;
   onCheckout: (branch: BranchInfo) => void;
   onDelete: (branch: BranchInfo) => void;
+  onRebase?: (branch: BranchInfo) => void;
   onDeleteRemote?: (name: string) => void;
   onFetchRemote?: (name: string) => void;
   onAddRemote?: () => void;
@@ -331,6 +343,11 @@ function TreeRows({
                 <ContextMenuItem disabled={branch.isHead} onClick={() => onCheckout(branch)}>
                   Checkout
                 </ContextMenuItem>
+                {onRebase ? (
+                  <ContextMenuItem disabled={branch.isHead} onClick={() => onRebase(branch)}>
+                    Rebase onto
+                  </ContextMenuItem>
+                ) : null}
                 <ContextMenuItem
                   variant="destructive"
                   disabled={branch.isHead}
@@ -410,6 +427,7 @@ function TreeRows({
                 onToggleWatch={onToggleWatch}
                 onCheckout={onCheckout}
                 onDelete={onDelete}
+                onRebase={onRebase}
                 onDeleteRemote={onDeleteRemote}
                 onFetchRemote={onFetchRemote}
                 onAddRemote={onAddRemote}

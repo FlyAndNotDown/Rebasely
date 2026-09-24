@@ -26,6 +26,7 @@ import type {
   FileDiff,
   FileStatus,
   RecentRepo,
+  RebaseStep,
   Selection,
   StashDetails,
   StashInfo,
@@ -244,6 +245,10 @@ function sameSnapshot(previous: WorkspaceSnapshot | null | undefined, next: Work
     before.ahead !== after.ahead ||
     before.behind !== after.behind ||
     before.upstream !== after.upstream ||
+    before.rebase?.onto !== after.rebase?.onto ||
+    before.rebase?.headName !== after.rebase?.headName ||
+    before.rebase?.step !== after.rebase?.step ||
+    before.rebase?.total !== after.rebase?.total ||
     (previous.headCommit?.id ?? null) !== (next.headCommit?.id ?? null)
   ) {
     return false;
@@ -418,6 +423,11 @@ interface GitContextValue {
   deleteBranch: (name: string) => Promise<boolean>;
   revertCommit: (oid: string) => Promise<boolean>;
   cherryPickCommit: (oid: string) => Promise<boolean>;
+  rebaseOnto: (onto: string, label: string) => Promise<boolean>;
+  rebaseInteractive: (onto: string, steps: RebaseStep[]) => Promise<boolean>;
+  rebaseContinue: () => Promise<boolean>;
+  rebaseSkip: () => Promise<boolean>;
+  rebaseAbort: () => Promise<boolean>;
   resetCommit: (oid: string, mode: ResetMode) => Promise<boolean>;
   createPatch: (commit: CommitSummary) => Promise<void>;
   applyPatch: () => Promise<void>;
@@ -1716,6 +1726,60 @@ export function GitProvider({ children }: { children: ReactNode }) {
     [refreshAfterReplay, runMutation],
   );
 
+  const rebaseOnto = useCallback(
+    async (onto: string, label: string) => {
+      const ok = await runMutation(
+        `Rebasing onto ${label}`,
+        (repoPath) => gitApi.rebaseOnto(repoPath, onto),
+        `Rebased onto ${label}`,
+      );
+      if (!ok) await refreshAfterReplay();
+      return ok;
+    },
+    [refreshAfterReplay, runMutation],
+  );
+
+  const rebaseInteractive = useCallback(
+    async (onto: string, steps: RebaseStep[]) => {
+      const ok = await runMutation(
+        "Rebasing commits",
+        (repoPath) => gitApi.rebaseInteractive(repoPath, onto, steps),
+        "Rebased commits",
+      );
+      if (!ok) await refreshAfterReplay();
+      return ok;
+    },
+    [refreshAfterReplay, runMutation],
+  );
+
+  const rebaseContinue = useCallback(async () => {
+    const ok = await runMutation(
+      "Continuing rebase",
+      (repoPath) => gitApi.rebaseContinue(repoPath),
+      "Rebase finished",
+    );
+    if (!ok) await refreshAfterReplay();
+    return ok;
+  }, [refreshAfterReplay, runMutation]);
+
+  const rebaseSkip = useCallback(async () => {
+    const ok = await runMutation(
+      "Skipping commit",
+      (repoPath) => gitApi.rebaseSkip(repoPath),
+      "Skipped commit",
+    );
+    if (!ok) await refreshAfterReplay();
+    return ok;
+  }, [refreshAfterReplay, runMutation]);
+
+  const rebaseAbort = useCallback(async () => {
+    return runMutation(
+      "Aborting rebase",
+      (repoPath) => gitApi.rebaseAbort(repoPath),
+      "Rebase aborted",
+    );
+  }, [runMutation]);
+
   const cherryPickCommit = useCallback(
     async (oid: string) => {
       const ok = await runMutation(
@@ -1989,6 +2053,11 @@ export function GitProvider({ children }: { children: ReactNode }) {
       deleteBranch,
       revertCommit,
       cherryPickCommit,
+      rebaseOnto,
+      rebaseInteractive,
+      rebaseContinue,
+      rebaseSkip,
+      rebaseAbort,
       resetCommit,
       createPatch,
       applyPatch,
@@ -2048,6 +2117,11 @@ export function GitProvider({ children }: { children: ReactNode }) {
       deleteBranch,
       revertCommit,
       cherryPickCommit,
+      rebaseOnto,
+      rebaseInteractive,
+      rebaseContinue,
+      rebaseSkip,
+      rebaseAbort,
       resetCommit,
       createPatch,
       applyPatch,

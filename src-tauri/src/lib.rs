@@ -16,10 +16,10 @@ use tauri::{AppHandle, Emitter, Manager, State};
 const APP_ICON_PNG: &[u8] = include_bytes!("../icons/icon.png");
 
 use error::{AppError, AppResult};
-use git::{
-    BranchList, CommitDetails, CommitSummary, FileDiff, GitIdentity, RemoteProbe, StashDetails,
-    WorkspaceSnapshot,
-};
+use     git::{
+        BranchList, CommitDetails, CommitSummary, FileDiff, GitIdentity, RebaseCommit, RebaseStep,
+        RemoteProbe, StashDetails, WorkspaceSnapshot,
+    };
 use prefs::AppPrefs;
 use recents::RecentRepo;
 use session::AppSession;
@@ -300,6 +300,43 @@ async fn cherry_pick_commit(repo_path: String, oid: String) -> AppResult<Workspa
 }
 
 #[tauri::command]
+async fn rebase_plan(repo_path: String, onto: String) -> AppResult<Vec<RebaseCommit>> {
+    with_repo_async(repo_path, move |repo| git::rebase_plan(repo, &onto)).await
+}
+
+#[tauri::command]
+async fn rebase_onto(repo_path: String, onto: String) -> AppResult<WorkspaceSnapshot> {
+    with_repo_async(repo_path, move |repo| git::rebase_onto(repo, &onto)).await
+}
+
+#[tauri::command]
+async fn rebase_interactive(
+    repo_path: String,
+    onto: String,
+    steps: Vec<RebaseStep>,
+) -> AppResult<WorkspaceSnapshot> {
+    with_repo_async(repo_path, move |repo| {
+        git::rebase_interactive(repo, &onto, &steps)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn rebase_continue(repo_path: String) -> AppResult<WorkspaceSnapshot> {
+    with_repo_async(repo_path, |repo| git::rebase_continue(repo)).await
+}
+
+#[tauri::command]
+async fn rebase_skip(repo_path: String) -> AppResult<WorkspaceSnapshot> {
+    with_repo_async(repo_path, |repo| git::rebase_skip(repo)).await
+}
+
+#[tauri::command]
+async fn rebase_abort(repo_path: String) -> AppResult<WorkspaceSnapshot> {
+    with_repo_async(repo_path, |repo| git::rebase_abort(repo)).await
+}
+
+#[tauri::command]
 async fn reset_to_commit(
     repo_path: String,
     oid: String,
@@ -557,6 +594,12 @@ pub fn run() {
             delete_branch,
             revert_commit,
             cherry_pick_commit,
+            rebase_plan,
+            rebase_onto,
+            rebase_interactive,
+            rebase_continue,
+            rebase_skip,
+            rebase_abort,
             reset_to_commit,
             write_commit_patch,
             apply_patch,

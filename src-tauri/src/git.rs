@@ -27,6 +27,32 @@ pub struct RepoInfo {
     pub ahead: Option<usize>,
     pub behind: Option<usize>,
     pub upstream: Option<String>,
+    pub rebase: Option<RebaseProgress>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RebaseProgress {
+    pub onto: Option<String>,
+    pub head_name: Option<String>,
+    pub step: Option<u32>,
+    pub total: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RebaseCommit {
+    pub id: String,
+    pub short_id: String,
+    pub summary: String,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RebaseStep {
+    pub id: String,
+    pub action: String,
+    pub message: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -343,6 +369,7 @@ pub fn repo_info(repo: &Repository) -> AppResult<RepoInfo> {
         ahead,
         behind,
         upstream,
+        rebase: rebase_progress(repo),
     })
 }
 
@@ -474,10 +501,21 @@ pub fn push_remote(
 }
 
 fn run_git(root: &Path, args: &[&str]) -> AppResult<std::process::Output> {
+    run_git_env(root, args, &[])
+}
+
+fn run_git_env(
+    root: &Path,
+    args: &[&str],
+    env: &[(&str, &str)],
+) -> AppResult<std::process::Output> {
     let git = find_git().ok_or_else(|| AppError::msg("Git executable was not found"))?;
     let mut command = Command::new(git);
     command.arg("-C").arg(root).args(args);
     command.env("GIT_TERMINAL_PROMPT", "0");
+    for (key, value) in env {
+        command.env(key, value);
+    }
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -2280,6 +2318,351 @@ pub fn cherry_pick_commit(repo: &mut Repository, spec: &str) -> AppResult<Worksp
     snapshot(repo)
 }
 
+pub fn rebase_plan(repo: &Repository, onto: &str) -> AppResult<Vec<RebaseCommit>> {
+    ensure_rebase_ready(repo)?;
+    let onto_id = peel_commit(repo, onto)?.id().to_string();
+    commits_to_replay(repo, &onto_id)
+}
+
+pub fn rebase_onto(repo: &mut Repository, onto: &str) -> AppResult<WorkspaceSnapshot> {
+    ensure_rebase_ready(repo)?;
+    let onto_id = peel_commit(repo, onto)?.id().to_string();
+    let commits = commits_to_replay(repo, &onto_id)?;
+    if commits.is_empty() {
+        return Err(AppError::msg("Already up to date"));
+    }
+    let root = workdir(repo)?.to_path_buf();
+    if let Err(err) = run_git_stdout(&root, &["rebase", &onto_id]) {
+        return Err(rebase_stop_error(repo, err));
+    }
+    snapshot(repo)
+}
+
+pub fn rebase_interactive(
+    repo: &mut Repository,
+    onto: &str,
+    steps: &[RebaseStep],
+) -> AppResult<WorkspaceSnapshot> {
+    ensure_rebase_ready(repo)?;
+    let onto_id = peel_commit(repo, onto)?.id().to_string();
+    let commits = commits_to_replay(repo, &onto_id)?;
+    if commits.is_empty() {
+        return Err(AppError::msg("Nothing to rebase"));
+    }
+    let todo = rebase_todo(&commits, steps)?;
+    let root = workdir(repo)?.to_path_buf();
+    let scratch = rebase_scratch_dir()?;
+    let result = run_interactive_rebase(&root, &onto_id, &scratch, &todo);
+    let _ = fs::remove_dir_all(&scratch);
+    if let Err(err) = result {
+        return Err(rebase_stop_error(repo, err));
+    }
+    snapshot(repo)
+}
+
+pub fn rebase_continue(repo: &mut Repository) -> AppResult<WorkspaceSnapshot> {
+    rebase_control(repo, "--continue")
+}
+
+pub fn rebase_skip(repo: &mut Repository) -> AppResult<WorkspaceSnapshot> {
+    rebase_control(repo, "--skip")
+}
+
+pub fn rebase_abort(repo: &mut Repository) -> AppResult<WorkspaceSnapshot> {
+    rebase_control(repo, "--abort")
+}
+
+fn rebase_control(repo: &mut Repository, flag: &str) -> AppResult<WorkspaceSnapshot> {
+    if rebase_progress(repo).is_none() {
+        return Err(AppError::msg("No rebase is in progress"));
+    }
+    let root = workdir(repo)?.to_path_buf();
+    let scratch = rebase_scratch_dir()?;
+    let editor = noop_editor(&scratch)?;
+    let result = run_git_env(
+        &root,
+        &["rebase", flag],
+        &[("GIT_EDITOR", editor.as_str())],
+    );
+    let _ = fs::remove_dir_all(&scratch);
+    match result {
+        Ok(output) if output.status.success() => snapshot(repo),
+        Ok(output) => Err(rebase_stop_error(repo, git_output_error(output))),
+        Err(err) => Err(rebase_stop_error(repo, err)),
+    }
+}
+
+fn commits_to_replay(repo: &Repository, onto: &str) -> AppResult<Vec<RebaseCommit>> {
+    let spec = format!("{onto}..HEAD");
+    let bytes = run_git_stdout(
+        workdir(repo)?,
+        &["rev-list", "--reverse", "--no-merges", &spec],
+    )?;
+    let mut commits = Vec::new();
+    for line in String::from_utf8_lossy(&bytes).lines() {
+        let id = line.trim();
+        if id.is_empty() {
+            continue;
+        }
+        let commit = peel_commit(repo, id)?;
+        let summary = commit.summary().unwrap_or("").trim().to_string();
+        commits.push(RebaseCommit {
+            id: commit.id().to_string(),
+            short_id: short_id(&commit.id().to_string()),
+            summary,
+        });
+    }
+    Ok(commits)
+}
+
+fn rebase_todo(commits: &[RebaseCommit], steps: &[RebaseStep]) -> AppResult<RebaseTodo> {
+    if steps.len() != commits.len() {
+        return Err(AppError::msg(
+            "The rebase plan does not match the commits on this branch",
+        ));
+    }
+    let mut seen = HashSet::new();
+    let mut lines = Vec::new();
+    let mut messages = Vec::new();
+    for step in steps {
+        let action = step.action.trim().to_ascii_lowercase();
+        if !matches!(action.as_str(), "pick" | "reword" | "squash" | "fixup" | "drop") {
+            return Err(AppError::msg(format!("Unknown rebase action: {action}")));
+        }
+        if matches!(action.as_str(), "squash" | "fixup")
+            && !lines.iter().any(|line: &String| !line.starts_with("drop "))
+        {
+            return Err(AppError::msg(
+                "Squash and fixup need a picked or reworded commit before them",
+            ));
+        }
+        let id = step.id.trim();
+        if !seen.insert(id.to_string()) {
+            return Err(AppError::msg("Each commit can appear only once"));
+        }
+        let commit = commits
+            .iter()
+            .find(|commit| commit.id == id)
+            .ok_or_else(|| AppError::msg("The rebase plan includes a commit outside this range"))?;
+        let subject = commit.summary.replace(['\r', '\n'], " ");
+        lines.push(format!("{action} {id} {subject}"));
+        if matches!(action.as_str(), "reword" | "squash") {
+            let message = step.message.trim();
+            if message.is_empty() {
+                return Err(AppError::msg("Reword and squash need a commit message"));
+            }
+            messages.push(message.to_string());
+        }
+    }
+    if seen.len() != commits.len() {
+        return Err(AppError::msg(
+            "The rebase plan does not match the commits on this branch",
+        ));
+    }
+    if lines.iter().all(|line| line.starts_with("drop ")) {
+        return Err(AppError::msg("Dropping every commit leaves nothing to rebase"));
+    }
+    Ok(RebaseTodo { lines, messages })
+}
+
+struct RebaseTodo {
+    lines: Vec<String>,
+    messages: Vec<String>,
+}
+
+fn run_interactive_rebase(
+    root: &Path,
+    onto: &str,
+    scratch: &Path,
+    todo: &RebaseTodo,
+) -> AppResult<()> {
+    let sequence = sequence_editor(scratch, &todo.lines)?;
+    let message = message_editor(scratch, &todo.messages)?;
+    let output = run_git_env(
+        root,
+        &["rebase", "-i", onto],
+        &[
+            ("GIT_SEQUENCE_EDITOR", sequence.as_str()),
+            ("GIT_EDITOR", message.as_str()),
+        ],
+    )?;
+    if output.status.success() {
+        return Ok(());
+    }
+    Err(git_output_error(output))
+}
+
+fn rebase_scratch_dir() -> AppResult<PathBuf> {
+    let dir = std::env::temp_dir().join(format!(
+        "rebasely-rebase-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&dir)?;
+    Ok(dir)
+}
+
+fn sequence_editor(scratch: &Path, lines: &[String]) -> AppResult<String> {
+    let todo = scratch.join("todo");
+    let mut body = lines.join("\n");
+    body.push('\n');
+    fs::write(&todo, body)?;
+    write_copy_editor(scratch, "sequence-editor", &todo)
+}
+
+fn message_editor(scratch: &Path, messages: &[String]) -> AppResult<String> {
+    for (index, message) in messages.iter().enumerate() {
+        let mut body = message.trim().to_string();
+        body.push('\n');
+        fs::write(scratch.join(format!("msg-{index}")), body)?;
+    }
+    fs::write(scratch.join("counter"), "0")?;
+    if cfg!(windows) {
+        let script = scratch.join("message-editor.ps1");
+        let dir = scratch.to_string_lossy().replace('\'', "''");
+        fs::write(
+            &script,
+            format!(
+                "$dest = $args[$args.Length - 1]\n$dir = '{dir}'\n$n = [int](Get-Content -LiteralPath (Join-Path $dir 'counter'))\n$src = Join-Path $dir (\"msg-$n\")\nif (Test-Path -LiteralPath $src) {{ Copy-Item -LiteralPath $src -Destination $dest -Force }}\nSet-Content -LiteralPath (Join-Path $dir 'counter') -Value ($n + 1) -NoNewline\nexit 0\n"
+            ),
+        )?;
+        Ok(format!(
+            "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"{}\"",
+            script.display()
+        ))
+    } else {
+        let script = scratch.join("message-editor");
+        fs::write(
+            &script,
+            "#!/bin/sh\ndir=$(dirname \"$0\")\nn=$(cat \"$dir/counter\")\nif [ -f \"$dir/msg-$n\" ]; then cp \"$dir/msg-$n\" \"$1\"; fi\necho $((n + 1)) > \"$dir/counter\"\nexit 0\n",
+        )?;
+        make_executable(&script)?;
+        Ok(script.to_string_lossy().into_owned())
+    }
+}
+
+fn noop_editor(scratch: &Path) -> AppResult<String> {
+    if cfg!(windows) {
+        let script = scratch.join("noop-editor.ps1");
+        fs::write(&script, "exit 0\n")?;
+        Ok(format!(
+            "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"{}\"",
+            script.display()
+        ))
+    } else {
+        let script = scratch.join("noop-editor");
+        fs::write(&script, "#!/bin/sh\nexit 0\n")?;
+        make_executable(&script)?;
+        Ok(script.to_string_lossy().into_owned())
+    }
+}
+
+fn write_copy_editor(scratch: &Path, name: &str, source: &Path) -> AppResult<String> {
+    if cfg!(windows) {
+        let script = scratch.join(format!("{name}.ps1"));
+        let from = source.to_string_lossy().replace('\'', "''");
+        fs::write(
+            &script,
+            format!(
+                "$dest = $args[$args.Length - 1]\nCopy-Item -LiteralPath '{from}' -Destination $dest -Force\nexit 0\n"
+            ),
+        )?;
+        Ok(format!(
+            "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"{}\"",
+            script.display()
+        ))
+    } else {
+        let script = scratch.join(name);
+        let from = source.to_string_lossy().replace('\'', "'\\''");
+        fs::write(
+            &script,
+            format!("#!/bin/sh\ncp '{from}' \"$1\"\nexit 0\n"),
+        )?;
+        make_executable(&script)?;
+        Ok(script.to_string_lossy().into_owned())
+    }
+}
+
+fn make_executable(path: &Path) -> AppResult<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = fs::metadata(path)?.permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(path, permissions)?;
+    }
+    let _ = path;
+    Ok(())
+}
+
+fn rebase_progress(repo: &Repository) -> Option<RebaseProgress> {
+    let git_dir = repo.path();
+    let dir = ["rebase-merge", "rebase-apply"]
+        .into_iter()
+        .map(|name| git_dir.join(name))
+        .find(|path| path.is_dir())?;
+    let read = |name: &str| {
+        fs::read_to_string(dir.join(name))
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+    };
+    Some(RebaseProgress {
+        onto: read("onto"),
+        head_name: read("head-name").map(|name| {
+            name.trim_start_matches("refs/heads/")
+                .trim_start_matches("refs/remotes/")
+                .to_string()
+        }),
+        step: read("msgnum").and_then(|value| value.parse().ok()),
+        total: read("end").and_then(|value| value.parse().ok()),
+    })
+}
+
+fn ensure_rebase_ready(repo: &Repository) -> AppResult<()> {
+    if rebase_progress(repo).is_some() {
+        return Err(AppError::msg("A rebase is already in progress"));
+    }
+    let head = repo
+        .head()
+        .map_err(|_| AppError::msg("Rebase needs a checked-out branch"))?;
+    if !head.is_branch() {
+        return Err(AppError::msg("Rebase needs a checked-out branch"));
+    }
+    ensure_clean_for_replay(repo)
+}
+
+fn rebase_stop_error(repo: &Repository, err: AppError) -> AppError {
+    if rebase_progress(repo).is_none() {
+        return err;
+    }
+    AppError::msg(format!(
+        "Rebase stopped with conflicts. Resolve them, then continue or abort.\n{err}"
+    ))
+}
+
+fn git_output_error(output: std::process::Output) -> AppError {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let message = [stderr.trim(), stdout.trim()]
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    AppError::msg(if message.is_empty() {
+        "Git command failed".to_string()
+    } else {
+        message
+    })
+}
+
+fn short_id(id: &str) -> String {
+    id.chars().take(7).collect()
+}
+
 pub fn write_commit_patch(repo: &Repository, spec: &str, dest: &str) -> AppResult<()> {
     let oid = peel_commit(repo, spec)?.id().to_string();
     let dest = dest.trim();
@@ -2846,6 +3229,164 @@ mod tests {
             extra.lines
         );
 
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    fn commit_file(repo: &mut Repository, root: &Path, name: &str, body: &str, message: &str) {
+        fs::write(root.join(name), body).unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new(name)).unwrap();
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        drop(index);
+        let tree = repo.find_tree(tree_id).unwrap();
+        let signature = repo.signature().unwrap();
+        let parent = repo.head().ok().and_then(|head| head.peel_to_commit().ok());
+        let parents: Vec<_> = parent.iter().collect();
+        repo.commit(
+            Some("HEAD"),
+            &signature,
+            &signature,
+            message,
+            &tree,
+            &parents,
+        )
+        .unwrap();
+    }
+
+    fn head_summary(repo: &Repository) -> String {
+        repo.head()
+            .unwrap()
+            .peel_to_commit()
+            .unwrap()
+            .summary()
+            .unwrap_or("")
+            .to_string()
+    }
+
+    #[test]
+    fn rebase_onto_replays_commits() {
+        let (root, mut repo) = temp_repo();
+        commit_file(&mut repo, &root, "base.txt", "base\n", "base");
+        repo.branch("feature", &repo.head().unwrap().peel_to_commit().unwrap(), false)
+            .unwrap();
+        commit_file(&mut repo, &root, "main.txt", "main\n", "main-tip");
+        repo.set_head("refs/heads/feature").unwrap();
+        repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+            .unwrap();
+        commit_file(&mut repo, &root, "feature.txt", "one\n", "feature-one");
+        commit_file(&mut repo, &root, "feature.txt", "two\n", "feature-two");
+
+        let onto = {
+            let main = repo
+                .find_branch("main", BranchType::Local)
+                .or_else(|_| repo.find_branch("master", BranchType::Local))
+                .unwrap();
+            main.get().target().unwrap().to_string()
+        };
+        rebase_onto(&mut repo, &onto).unwrap();
+        assert_eq!(head_summary(&repo), "feature-two");
+        assert!(root.join("main.txt").exists());
+        assert!(rebase_progress(&repo).is_none());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn interactive_rebase_can_reword_and_drop() {
+        let (root, mut repo) = temp_repo();
+        commit_file(&mut repo, &root, "file.txt", "a\n", "base");
+        let onto = repo.head().unwrap().target().unwrap().to_string();
+        commit_file(&mut repo, &root, "file.txt", "b\n", "keep");
+        let keep = repo.head().unwrap().target().unwrap().to_string();
+        commit_file(&mut repo, &root, "file.txt", "c\n", "change-me");
+        let change = repo.head().unwrap().target().unwrap().to_string();
+        commit_file(&mut repo, &root, "file.txt", "d\n", "drop-me");
+        let drop = repo.head().unwrap().target().unwrap().to_string();
+
+        rebase_interactive(
+            &mut repo,
+            &onto,
+            &[
+                RebaseStep {
+                    id: keep,
+                    action: "pick".to_string(),
+                    message: String::new(),
+                },
+                RebaseStep {
+                    id: change,
+                    action: "reword".to_string(),
+                    message: "rewritten".to_string(),
+                },
+                RebaseStep {
+                    id: drop,
+                    action: "drop".to_string(),
+                    message: String::new(),
+                },
+            ],
+        )
+        .unwrap();
+        assert_eq!(head_summary(&repo), "rewritten");
+        let log = run_git_stdout(&root, &["log", "--format=%s"]).unwrap();
+        let text = String::from_utf8_lossy(&log);
+        assert!(text.contains("keep"));
+        assert!(!text.contains("drop-me"));
+        assert!(!text.contains("change-me"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn rebase_conflict_can_abort() {
+        let (root, mut repo) = temp_repo();
+        commit_file(&mut repo, &root, "file.txt", "base\n", "base");
+        repo.branch("other", &repo.head().unwrap().peel_to_commit().unwrap(), false)
+            .unwrap();
+        commit_file(&mut repo, &root, "file.txt", "left\n", "left");
+        repo.set_head("refs/heads/other").unwrap();
+        repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+            .unwrap();
+        commit_file(&mut repo, &root, "file.txt", "right\n", "right");
+        let original = repo.head().unwrap().target().unwrap();
+        let onto = {
+            let main = repo
+                .find_branch("main", BranchType::Local)
+                .or_else(|_| repo.find_branch("master", BranchType::Local))
+                .unwrap();
+            main.get().target().unwrap().to_string()
+        };
+        let err = rebase_onto(&mut repo, &onto).unwrap_err();
+        assert!(err.to_string().contains("conflicts"), "{err}");
+        assert!(rebase_progress(&repo).is_some());
+        rebase_abort(&mut repo).unwrap();
+        assert!(rebase_progress(&repo).is_none());
+        assert_eq!(repo.head().unwrap().target().unwrap(), original);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn rebase_conflict_can_continue() {
+        let (root, mut repo) = temp_repo();
+        commit_file(&mut repo, &root, "file.txt", "base\n", "base");
+        repo.branch("other", &repo.head().unwrap().peel_to_commit().unwrap(), false)
+            .unwrap();
+        commit_file(&mut repo, &root, "file.txt", "left\n", "left");
+        repo.set_head("refs/heads/other").unwrap();
+        repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+            .unwrap();
+        commit_file(&mut repo, &root, "file.txt", "right\n", "right");
+        let onto = {
+            let main = repo
+                .find_branch("main", BranchType::Local)
+                .or_else(|_| repo.find_branch("master", BranchType::Local))
+                .unwrap();
+            main.get().target().unwrap().to_string()
+        };
+        assert!(rebase_onto(&mut repo, &onto).is_err());
+        fs::write(root.join("file.txt"), "both\n").unwrap();
+        run_git_stdout(&root, &["add", "file.txt"]).unwrap();
+        rebase_continue(&mut repo).unwrap();
+        assert!(rebase_progress(&repo).is_none());
+        assert_eq!(head_summary(&repo), "right");
+        assert_eq!(fs::read_to_string(root.join("file.txt")).unwrap(), "both\n");
         let _ = fs::remove_dir_all(&root);
     }
 }

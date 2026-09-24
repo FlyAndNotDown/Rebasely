@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { useGroupRef, type Layout } from "react-resizable-panels";
 import { ChangesPane } from "@/components/changes-pane";
+import { RebaseBanner } from "@/components/rebase-dialog";
 import { CommitFiles } from "@/components/commit-files";
 import { DiffViewer } from "@/components/diff-viewer";
 import { HistoryBranches } from "@/components/history-branches";
@@ -202,7 +203,9 @@ export function Workspace() {
   if (!snapshot) return <WorkspaceSkeleton />;
 
   return (
-    <div className="relative h-full min-h-0 min-w-0">
+    <div className="flex h-full min-h-0 min-w-0 flex-col">
+      <RebaseBanner />
+      <div className="relative min-h-0 flex-1">
       {showStash ? (
         <StackedPane active={view === "stash"}>
           <StashWorkspace />
@@ -216,6 +219,7 @@ export function Workspace() {
       <StackedPane active={view === "changes"}>
         <ChangesWorkspace />
       </StackedPane>
+      </div>
     </div>
   );
 }

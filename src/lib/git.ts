@@ -6,6 +6,8 @@ import type {
   BranchList,
   CommitDetails,
   CommitSummary,
+  RebaseCommit,
+  RebaseStep,
   FileDiff,
   StashDetails,
   GitIdentity,
@@ -133,6 +135,16 @@ export const gitApi = {
     invoke<WorkspaceSnapshot>("revert_commit", { repoPath, oid }),
   cherryPickCommit: (repoPath: string, oid: string) =>
     invoke<WorkspaceSnapshot>("cherry_pick_commit", { repoPath, oid }),
+  rebasePlan: (repoPath: string, onto: string) =>
+    invoke<RebaseCommit[]>("rebase_plan", { repoPath, onto }),
+  rebaseOnto: (repoPath: string, onto: string) =>
+    invoke<WorkspaceSnapshot>("rebase_onto", { repoPath, onto }),
+  rebaseInteractive: (repoPath: string, onto: string, steps: RebaseStep[]) =>
+    invoke<WorkspaceSnapshot>("rebase_interactive", { repoPath, onto, steps }),
+  rebaseContinue: (repoPath: string) =>
+    invoke<WorkspaceSnapshot>("rebase_continue", { repoPath }),
+  rebaseSkip: (repoPath: string) => invoke<WorkspaceSnapshot>("rebase_skip", { repoPath }),
+  rebaseAbort: (repoPath: string) => invoke<WorkspaceSnapshot>("rebase_abort", { repoPath }),
   resetToCommit: (repoPath: string, oid: string, mode: string) =>
     invoke<WorkspaceSnapshot>("reset_to_commit", { repoPath, oid, mode }),
   writeCommitPatch: (repoPath: string, oid: string, dest: string) =>

@@ -4,6 +4,7 @@ import {
   CopyPlusIcon,
   FileDiffIcon,
   GitBranchIcon,
+  ListOrderedIcon,
   HashIcon,
   MailIcon,
   MessageSquareTextIcon,
@@ -34,6 +35,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { InteractiveRebaseDialog, RebaseOntoDialog } from "@/components/rebase-dialog";
 import { HistorySkeleton } from "@/components/skeletons";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { formatAbsoluteTime } from "@/lib/format";
@@ -50,7 +52,9 @@ type CommitRowAction =
   | { type: "revert"; commit: CommitSummary }
   | { type: "cherry-pick"; commit: CommitSummary }
   | { type: "reset"; commit: CommitSummary }
-  | { type: "patch"; commit: CommitSummary };
+  | { type: "patch"; commit: CommitSummary }
+  | { type: "rebase"; commit: CommitSummary }
+  | { type: "interactive"; commit: CommitSummary };
 
 function commitSubject(summary: string) {
   return summary.split(/\r?\n/, 1)[0]?.replace(/\s+/g, " ").trim() ?? "";
@@ -136,7 +140,10 @@ export function HistoryPane() {
   );
   const [resetTarget, setResetTarget] = useState<CommitSummary | null>(null);
   const [resetMode, setResetMode] = useState<ResetMode>("mixed");
+  const [rebaseTarget, setRebaseTarget] = useState<CommitSummary | null>(null);
+  const [interactiveTarget, setInteractiveTarget] = useState<CommitSummary | null>(null);
   const canResetBranch = Boolean(snapshot?.repo.currentBranch) && !snapshot?.repo.isDetached;
+  const canRebase = canResetBranch && !snapshot?.repo.rebase;
   const currentBranch = snapshot?.repo.currentBranch;
   const selectedId = historySelection?.id ?? null;
   const searchRevs = useMemo(
@@ -174,6 +181,12 @@ export function HistoryPane() {
           break;
         case "patch":
           void createPatch(action.commit);
+          break;
+        case "rebase":
+          setRebaseTarget(action.commit);
+          break;
+        case "interactive":
+          setInteractiveTarget(action.commit);
           break;
       }
     },
@@ -286,6 +299,7 @@ export function HistoryPane() {
               searchingMode={searchingMode}
               hasMore={hasMore}
               canResetBranch={canResetBranch}
+              canRebase={canRebase}
               onAction={onRowAction}
             />
           </>
@@ -428,6 +442,26 @@ export function HistoryPane() {
           </form>
         </DialogContent>
       </Dialog>
+      <RebaseOntoDialog
+        target={
+          rebaseTarget
+            ? { onto: rebaseTarget.id, label: rebaseTarget.shortId }
+            : null
+        }
+        onOpenChange={(open) => {
+          if (!open) setRebaseTarget(null);
+        }}
+      />
+      <InteractiveRebaseDialog
+        onto={
+          interactiveTarget
+            ? { id: interactiveTarget.id, label: interactiveTarget.shortId }
+            : null
+        }
+        onOpenChange={(open) => {
+          if (!open) setInteractiveTarget(null);
+        }}
+      />
     </div>
   );
 }
@@ -442,6 +476,7 @@ const CommitList = memo(function CommitList({
   searchingMode,
   hasMore,
   canResetBranch,
+  canRebase,
   onAction,
 }: {
   commits: CommitSummary[];
@@ -453,6 +488,7 @@ const CommitList = memo(function CommitList({
   searchingMode: boolean;
   hasMore: boolean;
   canResetBranch: boolean;
+  canRebase: boolean;
   onAction: (action: CommitRowAction) => void;
 }) {
   const rows = useMemo(
@@ -481,6 +517,7 @@ const CommitList = memo(function CommitList({
           avatarProvider={avatarProvider}
           graph={row.graph}
           canResetBranch={canResetBranch}
+          canRebase={canRebase}
           onAction={onAction}
         />
       ))}
@@ -504,6 +541,7 @@ const CommitRow = memo(function CommitRow({
   avatarProvider,
   graph,
   canResetBranch,
+  canRebase,
   onAction,
 }: {
   commit: CommitSummary;
@@ -511,6 +549,7 @@ const CommitRow = memo(function CommitRow({
   avatarProvider: AvatarProvider;
   graph: { width: number; row: GraphRow; previous?: GraphRow } | null;
   canResetBranch: boolean;
+  canRebase: boolean;
   onAction: (action: CommitRowAction) => void;
 }) {
   const message = [commit.summary, commit.body].filter(Boolean).join("\n\n");
@@ -603,6 +642,18 @@ const CommitRow = memo(function CommitRow({
           <FileDiffIcon />
           Create patch
         </ContextMenuItem>
+        {canRebase && !commit.onCurrentBranch ? (
+          <ContextMenuItem onClick={() => onAction({ type: "rebase", commit })}>
+            <GitBranchIcon />
+            Rebase onto
+          </ContextMenuItem>
+        ) : null}
+        {canRebase && commit.onCurrentBranch && !commit.refs.some((ref) => ref.kind === "head") ? (
+          <ContextMenuItem onClick={() => onAction({ type: "interactive", commit })}>
+            <ListOrderedIcon />
+            Interactive rebase
+          </ContextMenuItem>
+        ) : null}
         <ContextMenuSeparator />
         <ContextMenuSub>
           <ContextMenuSubTrigger>

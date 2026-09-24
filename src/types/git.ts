@@ -17,6 +17,28 @@ export interface RepoInfo {
   ahead: number | null;
   behind: number | null;
   upstream: string | null;
+  rebase: RebaseProgress | null;
+}
+
+export interface RebaseProgress {
+  onto: string | null;
+  headName: string | null;
+  step: number | null;
+  total: number | null;
+}
+
+export type RebaseAction = "pick" | "reword" | "squash" | "fixup" | "drop";
+
+export interface RebaseCommit {
+  id: string;
+  shortId: string;
+  summary: string;
+}
+
+export interface RebaseStep {
+  id: string;
+  action: RebaseAction;
+  message: string;
 }
 
 export interface FileStatus {
