@@ -3,6 +3,7 @@ import { ChevronRightIcon, EyeIcon, GitBranchIcon, PlusIcon, SearchIcon } from "
 import { AddRemoteDialog } from "@/components/add-remote-dialog";
 import { MergeDialog, RebaseOntoDialog } from "@/components/rebase-dialog";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -52,6 +53,9 @@ export function HistoryBranches() {
   const [addOpen, setAddOpen] = useState(false);
   const [deleting, setDeleting] = useState<BranchInfo | null>(null);
   const [forceDeleting, setForceDeleting] = useState<BranchInfo | null>(null);
+  const [trackedDelete, setTrackedDelete] = useState<BranchInfo | null>(null);
+  const [deleteRemoteToo, setDeleteRemoteToo] = useState(true);
+  const [pendingRemote, setPendingRemote] = useState<string | null>(null);
   const [deletingRemote, setDeletingRemote] = useState<string | null>(null);
   const [rebasing, setRebasing] = useState<BranchInfo | null>(null);
   const [merging, setMerging] = useState<BranchInfo | null>(null);
@@ -121,14 +125,28 @@ export function HistoryBranches() {
     setHistoryRevs([...historyRevs, name]);
   }
 
-  async function requestDelete(branch: BranchInfo) {
+  async function removeLocalBranch(branch: BranchInfo, force: boolean, remote: string | null) {
+    const result = await deleteBranch(branch.name, force);
+    if (result === "unmerged") {
+      setPendingRemote(remote);
+      setForceDeleting(branch);
+      return;
+    }
+    if (result === true && remote) await deleteBranch(remote);
+  }
+
+  function requestDelete(branch: BranchInfo) {
     if (branch.isHead) return;
     if (branch.isRemote) {
       setDeleting(branch);
       return;
     }
-    const result = await deleteBranch(branch.name);
-    if (result === "unmerged") setForceDeleting(branch);
+    if (branch.upstream) {
+      setDeleteRemoteToo(true);
+      setTrackedDelete(branch);
+      return;
+    }
+    void removeLocalBranch(branch, false, null);
   }
 
   async function handleAddRemote(name: string, url: string) {
@@ -254,7 +272,60 @@ export function HistoryBranches() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      <Dialog open={Boolean(forceDeleting)} onOpenChange={(open) => !open && setForceDeleting(null)}>
+      <Dialog
+        open={Boolean(trackedDelete)}
+        onOpenChange={(open) => {
+          if (!open) setTrackedDelete(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete branch?</DialogTitle>
+            <DialogDescription>
+              Delete local branch{" "}
+              <span className="font-mono text-foreground">{trackedDelete?.name}</span>.
+            </DialogDescription>
+          </DialogHeader>
+          <label className="flex items-start gap-2 text-sm">
+            <Checkbox
+              className="mt-0.5"
+              checked={deleteRemoteToo}
+              onCheckedChange={(value) => setDeleteRemoteToo(value === true)}
+            />
+            <span>
+              Also delete remote branch{" "}
+              <span className="font-mono">{trackedDelete?.upstream}</span>
+            </span>
+          </label>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setTrackedDelete(null)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => {
+                const branch = trackedDelete;
+                if (!branch) return;
+                const remote = deleteRemoteToo ? branch.upstream : null;
+                setTrackedDelete(null);
+                void removeLocalBranch(branch, false, remote);
+              }}
+            >
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={Boolean(forceDeleting)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setForceDeleting(null);
+            setPendingRemote(null);
+          }
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Delete unmerged branch?</DialogTitle>
@@ -265,7 +336,14 @@ export function HistoryBranches() {
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setForceDeleting(null)}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setForceDeleting(null);
+                setPendingRemote(null);
+              }}
+            >
               Cancel
             </Button>
             <Button
@@ -273,9 +351,11 @@ export function HistoryBranches() {
               variant="destructive"
               onClick={() => {
                 const branch = forceDeleting;
+                const remote = pendingRemote;
                 if (!branch) return;
                 setForceDeleting(null);
-                void deleteBranch(branch.name, true);
+                setPendingRemote(null);
+                void removeLocalBranch(branch, true, remote);
               }}
             >
               Delete anyway
