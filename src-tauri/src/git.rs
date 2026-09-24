@@ -151,11 +151,18 @@ pub struct BranchInfo {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct TagInfo {
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct BranchList {
     pub current: Option<String>,
     pub is_detached: bool,
     pub local: Vec<BranchInfo>,
     pub remote: Vec<BranchInfo>,
+    pub tags: Vec<TagInfo>,
 }
 
 #[derive(Debug, Clone, Serialize, serde::Deserialize)]
@@ -2056,7 +2063,29 @@ fn branch_list(
         is_detached,
         local,
         remote,
+        tags: list_tags(repo)?,
     })
+}
+
+fn list_tags(repo: &Repository) -> AppResult<Vec<TagInfo>> {
+    let mut tags = Vec::new();
+    repo.tag_foreach(|_oid, name| {
+        let name = String::from_utf8_lossy(name);
+        if let Some(short) = name.strip_prefix("refs/tags/") {
+            if !short.is_empty() {
+                tags.push(TagInfo {
+                    name: short.to_string(),
+                });
+            }
+        }
+        true
+    })?;
+    tags.sort_by(|left, right| {
+        left.name
+            .to_lowercase()
+            .cmp(&right.name.to_lowercase())
+    });
+    Ok(tags)
 }
 
 fn configured_remote_names(repo: &Repository) -> Vec<String> {
@@ -2146,6 +2175,13 @@ pub fn checkout_branch(repo: &Repository, name: &str) -> AppResult<()> {
         return checkout_local_branch(repo, &branch);
     }
 
+    if repo.find_reference(&format!("refs/tags/{name}")).is_ok() {
+        let commit = peel_commit(repo, name)?;
+        repo.checkout_tree(commit.as_object(), None)?;
+        repo.set_head_detached(commit.id())?;
+        return Ok(());
+    }
+
     let remote = repo
         .find_branch(name, BranchType::Remote)
         .map_err(|_| AppError::msg(format!("Branch not found: {name}")))?;
@@ -2160,6 +2196,61 @@ pub fn checkout_branch(repo: &Repository, name: &str) -> AppResult<()> {
     let mut local = repo.branch(local_name, &commit, false)?;
     let _ = local.set_upstream(Some(name));
     checkout_local_branch(repo, &local)
+}
+
+pub fn create_tag(
+    repo: &Repository,
+    name: &str,
+    message: Option<&str>,
+    target: Option<&str>,
+) -> AppResult<()> {
+    let name = name.trim();
+    if name.is_empty() || name.ends_with('/') || name.contains("//") || name.contains([' ', '~', '^', ':', '?', '*', '[', '\\']) {
+        return Err(AppError::msg("Tag name is invalid"));
+    }
+    let target = if let Some(target) = target.map(str::trim).filter(|value| !value.is_empty()) {
+        peel_commit(repo, target)?
+    } else {
+        repo.head()
+            .map_err(|_| AppError::msg("Cannot create a tag before the first commit"))?
+            .peel_to_commit()?
+    };
+    if let Some(message) = message.map(str::trim).filter(|value| !value.is_empty()) {
+        let signature = repo.signature()?;
+        repo.tag(name, target.as_object(), &signature, message, false)?;
+    } else {
+        repo.tag_lightweight(name, target.as_object(), false)?;
+    }
+    Ok(())
+}
+
+pub fn delete_tag(repo: &Repository, name: &str) -> AppResult<()> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(AppError::msg("Tag name cannot be empty"));
+    }
+    repo.tag_delete(name)?;
+    Ok(())
+}
+
+pub fn push_tag(
+    repo: &Repository,
+    remote: &str,
+    name: &str,
+    on_progress: impl FnMut(&str) + Send,
+) -> AppResult<()> {
+    let remote = remote.trim();
+    let name = name.trim();
+    if remote.is_empty() || name.is_empty() {
+        return Err(AppError::msg("A remote and tag name are required"));
+    }
+    let spec = format!("refs/tags/{name}");
+    run_git_ok_progress(
+        workdir(repo)?,
+        &["push", "--progress", remote, &spec],
+        on_progress,
+    )?;
+    Ok(())
 }
 
 pub fn create_branch(

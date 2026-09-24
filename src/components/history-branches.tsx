@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ChevronRightIcon, EyeIcon, GitBranchIcon, PlusIcon, SearchIcon } from "lucide-react";
+import { ChevronRightIcon, EyeIcon, GitBranchIcon, PlusIcon, SearchIcon, TagIcon } from "lucide-react";
 import { AddRemoteDialog } from "@/components/add-remote-dialog";
 import { MergeDialog, RebaseOntoDialog } from "@/components/rebase-dialog";
 import { Button } from "@/components/ui/button";
@@ -8,6 +8,9 @@ import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import {
@@ -29,10 +32,11 @@ type BranchTreeNode = {
   id: string;
   label: string;
   branch?: BranchInfo;
+  tag?: string;
   children: BranchTreeNode[];
 };
 
-const DEFAULT_EXPANDED = ["section:local", "section:remotes", "remote:origin"];
+const DEFAULT_EXPANDED = ["section:local", "section:remotes", "remote:origin", "section:tags"];
 
 export function HistoryBranches() {
   const {
@@ -47,6 +51,9 @@ export function HistoryBranches() {
     checkoutBranch,
     deleteBranch,
     fetchRemote,
+    createTag,
+    deleteTag,
+    pushTag,
   } = useGit();
   const [query, setQuery] = useState("");
   const [needle, setNeedle] = useState("");
@@ -59,6 +66,10 @@ export function HistoryBranches() {
   const [deletingRemote, setDeletingRemote] = useState<string | null>(null);
   const [rebasing, setRebasing] = useState<BranchInfo | null>(null);
   const [merging, setMerging] = useState<BranchInfo | null>(null);
+  const [creatingTag, setCreatingTag] = useState(false);
+  const [tagName, setTagName] = useState("");
+  const [tagMessage, setTagMessage] = useState("");
+  const [deletingTag, setDeletingTag] = useState<string | null>(null);
   const canRebase =
     Boolean(snapshot?.repo.currentBranch) && !snapshot?.repo.isDetached && !snapshot?.repo.operation;
   const branches = snapshot?.branches;
@@ -109,6 +120,19 @@ export function HistoryBranches() {
       ),
     }));
   }, [branches?.remote, needle, snapshot?.remotes]);
+
+  const tagTree = useMemo(() => {
+    const items = (branches?.tags ?? []).filter(
+      (tag) => !needle || tag.name.toLowerCase().includes(needle),
+    );
+    return markTagNodes(
+      buildBranchTree(
+        items.map((tag) => ({ name: tag.name, isHead: false, isRemote: false, upstream: null })),
+        (tag) => tag.name.split("/"),
+        "tag",
+      ),
+    );
+  }, [branches?.tags, needle]);
 
   function toggleFolder(id: string) {
     const next = new Set(expanded);
@@ -175,6 +199,9 @@ export function HistoryBranches() {
     ...(!needle || remotesTree.length > 0
       ? [{ id: "section:remotes", label: "Remotes", children: remotesTree }]
       : []),
+    ...(!needle || tagTree.length > 0
+      ? [{ id: "section:tags", label: "Tags", children: tagTree }]
+      : []),
   ];
 
   return (
@@ -196,7 +223,7 @@ export function HistoryBranches() {
                 setNeedle("");
               }
             }}
-            placeholder="Filter branches"
+            placeholder="Filter branches and tags"
             className="h-7 pl-7"
           />
         </div>
@@ -222,6 +249,14 @@ export function HistoryBranches() {
             onDeleteRemote={setDeletingRemote}
             onFetchRemote={(name) => void fetchRemote(name)}
             onAddRemote={() => setAddOpen(true)}
+            onCreateTag={() => {
+              setTagName("");
+              setTagMessage("");
+              setCreatingTag(true);
+            }}
+            onDeleteTag={setDeletingTag}
+            onPushTag={(remote, name) => void pushTag(remote, name)}
+            remotes={snapshot?.remotes.map((remote) => remote.name) ?? []}
           />
         )}
       </ScrollArea>
@@ -363,6 +398,76 @@ export function HistoryBranches() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <Dialog open={creatingTag} onOpenChange={setCreatingTag}>
+        <DialogContent>
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              const name = tagName.trim();
+              if (!name) return;
+              void createTag(name, tagMessage.trim() || undefined).then((ok) => {
+                if (ok) setCreatingTag(false);
+              });
+            }}
+          >
+            <DialogHeader>
+              <DialogTitle>Create tag</DialogTitle>
+              <DialogDescription>Tags the current commit. A message makes it an annotated tag.</DialogDescription>
+            </DialogHeader>
+            <div className="mt-3 grid gap-3">
+              <Input
+                autoFocus
+                className="font-mono"
+                placeholder="v1.0.0"
+                value={tagName}
+                onChange={(event) => setTagName(event.target.value)}
+              />
+              <Input
+                placeholder="Message (optional)"
+                value={tagMessage}
+                onChange={(event) => setTagMessage(event.target.value)}
+              />
+            </div>
+            <DialogFooter className="mt-4">
+              <Button type="button" variant="outline" onClick={() => setCreatingTag(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={!tagName.trim()}>
+                Create
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={Boolean(deletingTag)} onOpenChange={(open) => !open && setDeletingTag(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete tag?</DialogTitle>
+            <DialogDescription>
+              This deletes the local tag{" "}
+              <span className="font-mono text-foreground">{deletingTag}</span>. The remote tag is
+              left in place.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setDeletingTag(null)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => {
+                const name = deletingTag;
+                if (!name) return;
+                setDeletingTag(null);
+                void deleteTag(name);
+              }}
+            >
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <Dialog open={Boolean(deletingRemote)} onOpenChange={(open) => !open && setDeletingRemote(null)}>
         <DialogContent>
           <DialogHeader>
@@ -411,6 +516,10 @@ function TreeRows({
   onDeleteRemote,
   onFetchRemote,
   onAddRemote,
+  onCreateTag,
+  onDeleteTag,
+  onPushTag,
+  remotes,
 }: {
   nodes: BranchTreeNode[];
   depth: number;
@@ -426,10 +535,58 @@ function TreeRows({
   onDeleteRemote?: (name: string) => void;
   onFetchRemote?: (name: string) => void;
   onAddRemote?: () => void;
+  onCreateTag?: () => void;
+  onDeleteTag?: (name: string) => void;
+  onPushTag?: (remote: string, name: string) => void;
+  remotes?: string[];
 }) {
   return (
     <>
       {nodes.map((node) => {
+        if (node.tag) {
+          const name = node.tag;
+          const active = watched.has(name);
+          return (
+            <ContextMenu key={node.id}>
+              <ContextMenuTrigger asChild>
+                <div
+                  className="flex h-7 items-center gap-1 pr-1 text-muted-foreground hover:bg-muted/70"
+                  style={{ paddingLeft: 8 + depth * 12 }}
+                >
+                  <TagIcon className="size-3.5 shrink-0" />
+                  <span className="min-w-0 flex-1 truncate font-mono text-xs">{node.label}</span>
+                  <WatchButton
+                    active={active}
+                    title={active ? "Remove this tag from History" : "Add this tag to History"}
+                    onClick={() => onToggleWatch(name)}
+                  />
+                </div>
+              </ContextMenuTrigger>
+              <ContextMenuContent className="w-44">
+                <ContextMenuItem onClick={() => onCheckout({ name, isHead: false, isRemote: false, upstream: null })}>
+                  Checkout
+                </ContextMenuItem>
+                {onPushTag && remotes && remotes.length > 0 ? (
+                  <ContextMenuSub>
+                    <ContextMenuSubTrigger>Push to</ContextMenuSubTrigger>
+                    <ContextMenuSubContent>
+                      {remotes.map((remote) => (
+                        <ContextMenuItem key={remote} onClick={() => onPushTag(remote, name)}>
+                          <span className="font-mono">{remote}</span>
+                        </ContextMenuItem>
+                      ))}
+                    </ContextMenuSubContent>
+                  </ContextMenuSub>
+                ) : null}
+                {onDeleteTag ? (
+                  <ContextMenuItem variant="destructive" onClick={() => onDeleteTag(name)}>
+                    Delete
+                  </ContextMenuItem>
+                ) : null}
+              </ContextMenuContent>
+            </ContextMenu>
+          );
+        }
         if (node.branch) {
           const branch = node.branch;
           const active = watched.has(branch.name);
@@ -488,7 +645,8 @@ function TreeRows({
         }
         const open = forceOpen || expanded.has(node.id);
         const section = depth === 0;
-        const remotes = node.id === "section:remotes";
+        const remoteSection = node.id === "section:remotes";
+        const tags = node.id === "section:tags";
         const remoteName = remoteFolderName(node.id);
         const folderRow = (
           <div
@@ -512,12 +670,22 @@ function TreeRows({
                 {node.label}
               </span>
             </button>
-            {remotes && onAddRemote ? (
+            {remoteSection && onAddRemote ? (
               <button
                 type="button"
                 title="Add remote"
                 className="flex size-6 shrink-0 items-center justify-center rounded-sm hover:bg-muted hover:text-foreground"
                 onClick={onAddRemote}
+              >
+                <PlusIcon className="size-3.5" />
+              </button>
+            ) : null}
+            {tags && onCreateTag ? (
+              <button
+                type="button"
+                title="Create tag"
+                className="flex size-6 shrink-0 items-center justify-center rounded-sm hover:bg-muted hover:text-foreground"
+                onClick={onCreateTag}
               >
                 <PlusIcon className="size-3.5" />
               </button>
@@ -559,6 +727,10 @@ function TreeRows({
                 onDeleteRemote={onDeleteRemote}
                 onFetchRemote={onFetchRemote}
                 onAddRemote={onAddRemote}
+                onCreateTag={onCreateTag}
+                onDeleteTag={onDeleteTag}
+                onPushTag={onPushTag}
+                remotes={remotes}
               />
             ) : null}
           </div>
@@ -590,6 +762,15 @@ function WatchButton({
       <EyeIcon className="size-3.5" />
     </button>
   );
+}
+
+function markTagNodes(nodes: BranchTreeNode[]): BranchTreeNode[] {
+  return nodes.map((node) => ({
+    ...node,
+    tag: node.branch?.name,
+    branch: undefined,
+    children: markTagNodes(node.children),
+  }));
 }
 
 function buildBranchTree(

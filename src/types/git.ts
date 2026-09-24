@@ -121,11 +121,16 @@ export interface BranchInfo {
   upstream: string | null;
 }
 
+export interface TagInfo {
+  name: string;
+}
+
 export interface BranchList {
   current: string | null;
   isDetached: boolean;
   local: BranchInfo[];
   remote: BranchInfo[];
+  tags: TagInfo[];
 }
 
 export interface GitIdentity {

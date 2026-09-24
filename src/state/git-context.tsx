@@ -279,6 +279,10 @@ function sameSnapshot(previous: WorkspaceSnapshot | null | undefined, next: Work
     const b = next.branches.local[index];
     if (a.name !== b.name || a.isHead !== b.isHead || a.upstream !== b.upstream) return false;
   }
+  if (previous.branches.tags.length !== next.branches.tags.length) return false;
+  for (let index = 0; index < previous.branches.tags.length; index += 1) {
+    if (previous.branches.tags[index]?.name !== next.branches.tags[index]?.name) return false;
+  }
   if (previous.branches.remote !== next.branches.remote) {
     if (previous.branches.remote.length !== next.branches.remote.length) return false;
     for (let index = 0; index < previous.branches.remote.length; index += 1) {
@@ -424,6 +428,9 @@ interface GitContextValue {
   dismissPublish: () => void;
   confirmPublish: () => Promise<void>;
   createBranch: (name: string, switchTo: boolean, start?: string) => Promise<boolean>;
+  createTag: (name: string, message?: string, target?: string) => Promise<boolean>;
+  deleteTag: (name: string) => Promise<boolean>;
+  pushTag: (remote: string, name: string) => Promise<boolean>;
   deleteBranch: (name: string, force?: boolean) => Promise<boolean | "unmerged">;
   revertCommit: (oid: string) => Promise<boolean>;
   cherryPickCommit: (oid: string) => Promise<boolean>;
@@ -1692,6 +1699,44 @@ export function GitProvider({ children }: { children: ReactNode }) {
     [loadHistoryPage, patchSession, runMutation],
   );
 
+  const createTag = useCallback(
+    async (name: string, message?: string, target?: string) => {
+      return runMutation(
+        `Creating tag ${name}`,
+        (repoPath) => gitApi.createTag(repoPath, name, message, target),
+        `Created tag ${name}`,
+      );
+    },
+    [runMutation],
+  );
+
+  const deleteTag = useCallback(
+    async (name: string) => {
+      const ok = await runMutation(
+        `Deleting tag ${name}`,
+        (repoPath) => gitApi.deleteTag(repoPath, name),
+        `Deleted tag ${name}`,
+      );
+      if (!ok) return false;
+      const tabId = activeTabIdRef.current;
+      const revs = sessionsRef.current[tabId]?.historyRevs ?? [];
+      if (revs.includes(name)) setHistoryRevs(revs.filter((rev) => rev !== name));
+      return true;
+    },
+    [runMutation, setHistoryRevs],
+  );
+
+  const pushTag = useCallback(
+    async (remote: string, name: string) => {
+      return runMutation(
+        `Pushing tag ${name}`,
+        (repoPath, activityId) => gitApi.pushTag(repoPath, remote, name, activityId),
+        `Pushed tag ${name}`,
+      );
+    },
+    [runMutation],
+  );
+
   const deleteBranch = useCallback(
     async (name: string, force = false) => {
       const repoPath = activeRepoPath();
@@ -2145,6 +2190,9 @@ export function GitProvider({ children }: { children: ReactNode }) {
       dismissPublish,
       confirmPublish,
       createBranch,
+      createTag,
+      deleteTag,
+      pushTag,
       deleteBranch,
       revertCommit,
       cherryPickCommit,
@@ -2214,6 +2262,9 @@ export function GitProvider({ children }: { children: ReactNode }) {
       dismissPublish,
       confirmPublish,
       createBranch,
+      createTag,
+      deleteTag,
+      pushTag,
       deleteBranch,
       revertCommit,
       cherryPickCommit,

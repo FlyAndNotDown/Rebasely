@@ -266,6 +266,49 @@ fn progress_sink(app: &AppHandle, activity_id: Option<&str>) -> impl FnMut(&str)
 }
 
 #[tauri::command]
+async fn create_tag(
+    repo_path: String,
+    name: String,
+    message: Option<String>,
+    target: Option<String>,
+) -> AppResult<WorkspaceSnapshot> {
+    with_repo_async(repo_path, move |repo| {
+        git::create_tag(repo, &name, message.as_deref(), target.as_deref())?;
+        git::snapshot(repo)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn delete_tag(repo_path: String, name: String) -> AppResult<WorkspaceSnapshot> {
+    with_repo_async(repo_path, move |repo| {
+        git::delete_tag(repo, &name)?;
+        git::snapshot(repo)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn push_tag(
+    repo_path: String,
+    remote: String,
+    name: String,
+    activity_id: Option<String>,
+    app: AppHandle,
+) -> AppResult<WorkspaceSnapshot> {
+    with_repo_async(repo_path, move |repo| {
+        git::push_tag(
+            repo,
+            &remote,
+            &name,
+            progress_sink(&app, activity_id.as_deref()),
+        )?;
+        git::snapshot(repo)
+    })
+    .await
+}
+
+#[tauri::command]
 async fn create_branch(
     repo_path: String,
     name: String,
@@ -630,6 +673,9 @@ pub fn run() {
             pull_remote,
             push_remote,
             create_branch,
+            create_tag,
+            delete_tag,
+            push_tag,
             delete_branch,
             revert_commit,
             cherry_pick_commit,

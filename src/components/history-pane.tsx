@@ -5,6 +5,7 @@ import {
   FileDiffIcon,
   GitBranchIcon,
   ListOrderedIcon,
+  TagIcon,
   HashIcon,
   MailIcon,
   MessageSquareTextIcon,
@@ -49,6 +50,7 @@ import { toast } from "sonner";
 type CommitRowAction =
   | { type: "select"; id: string }
   | { type: "branch"; commit: CommitSummary }
+  | { type: "tag"; commit: CommitSummary }
   | { type: "revert"; commit: CommitSummary }
   | { type: "cherry-pick"; commit: CommitSummary }
   | { type: "reset"; commit: CommitSummary }
@@ -123,6 +125,7 @@ export function HistoryPane() {
     prefs,
     snapshot,
     createBranch,
+    createTag,
     revertCommit,
     cherryPickCommit,
     resetCommit,
@@ -134,6 +137,9 @@ export function HistoryPane() {
   const [searching, setSearching] = useState(false);
   const [searchHasMore, setSearchHasMore] = useState(false);
   const [branchCommit, setBranchCommit] = useState<CommitSummary | null>(null);
+  const [tagCommit, setTagCommit] = useState<CommitSummary | null>(null);
+  const [tagName, setTagName] = useState("");
+  const [tagMessage, setTagMessage] = useState("");
   const [branchName, setBranchName] = useState("");
   const [checkoutNew, setCheckoutNew] = useState(true);
   const [confirm, setConfirm] = useState<{ kind: "revert" | "cherry-pick"; commit: CommitSummary } | null>(
@@ -170,6 +176,11 @@ export function HistoryPane() {
           setBranchCommit(action.commit);
           setBranchName("");
           setCheckoutNew(true);
+          break;
+        case "tag":
+          setTagCommit(action.commit);
+          setTagName("");
+          setTagMessage("");
           break;
         case "revert":
           setConfirm({ kind: "revert", commit: action.commit });
@@ -310,6 +321,54 @@ export function HistoryPane() {
           </>
         )}
       </ScrollArea>
+      <Dialog
+        open={Boolean(tagCommit)}
+        onOpenChange={(open) => {
+          if (!open) setTagCommit(null);
+        }}
+      >
+        <DialogContent>
+          <form
+            className="min-w-0"
+            onSubmit={(event) => {
+              event.preventDefault();
+              const name = tagName.trim();
+              const commit = tagCommit;
+              if (!name || !commit) return;
+              void createTag(name, tagMessage.trim() || undefined, commit.id).then((ok) => {
+                if (ok) setTagCommit(null);
+              });
+            }}
+          >
+            <DialogHeader className="min-w-0">
+              <DialogTitle>Create tag</DialogTitle>
+              <DialogDescription>Tags this commit. A message makes it an annotated tag.</DialogDescription>
+            </DialogHeader>
+            <CommitLine commit={tagCommit} />
+            <Input
+              className="mt-3 font-mono"
+              autoFocus
+              placeholder="v1.0.0"
+              value={tagName}
+              onChange={(event) => setTagName(event.target.value)}
+            />
+            <Input
+              className="mt-3"
+              placeholder="Message (optional)"
+              value={tagMessage}
+              onChange={(event) => setTagMessage(event.target.value)}
+            />
+            <DialogFooter className="mt-4">
+              <Button type="button" variant="outline" onClick={() => setTagCommit(null)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={!tagName.trim()}>
+                Create
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
       <Dialog
         open={Boolean(branchCommit)}
         onOpenChange={(open) => {
@@ -664,6 +723,10 @@ const CommitRow = memo(function CommitRow({
         <ContextMenuItem onClick={() => onAction({ type: "branch", commit })}>
           <GitBranchIcon />
           Create branch
+        </ContextMenuItem>
+        <ContextMenuItem onClick={() => onAction({ type: "tag", commit })}>
+          <TagIcon />
+          Create tag
         </ContextMenuItem>
         <ContextMenuItem onClick={() => onAction({ type: "patch", commit })}>
           <FileDiffIcon />

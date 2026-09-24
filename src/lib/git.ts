@@ -120,6 +120,22 @@ export const gitApi = {
       force: options?.force ?? false,
       setUpstream: options?.setUpstream ?? false,
     }),
+  createTag: (repoPath: string, name: string, message?: string, target?: string) =>
+    invoke<WorkspaceSnapshot>("create_tag", {
+      repoPath,
+      name,
+      message: message || null,
+      target: target || null,
+    }),
+  deleteTag: (repoPath: string, name: string) =>
+    invoke<WorkspaceSnapshot>("delete_tag", { repoPath, name }),
+  pushTag: (repoPath: string, remote: string, name: string, activityId?: string) =>
+    invoke<WorkspaceSnapshot>("push_tag", {
+      repoPath,
+      remote,
+      name,
+      activityId: activityId || null,
+    }),
   createBranch: (repoPath: string, name: string, switchTo: boolean, start?: string) =>
     invoke<WorkspaceSnapshot>("create_branch", {
       repoPath,
