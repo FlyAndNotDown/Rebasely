@@ -883,6 +883,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
   }, [activeRepoPath, patchSession]);
 
   const historyEpochRef = useRef<Record<string, number>>({});
+  const historyInflightRef = useRef<Record<string, number>>({});
 
   const bumpHistoryEpoch = useCallback((tabId: string) => {
     const next = (historyEpochRef.current[tabId] ?? 0) + 1;
@@ -903,14 +904,17 @@ export function GitProvider({ children }: { children: ReactNode }) {
       const epoch = reset ? bumpHistoryEpoch(tabId) : (historyEpochRef.current[tabId] ?? 0);
       const skip = reset ? 0 : current.commits.length;
       const revs = expandHistoryRevs(current.historyRevs, current.snapshot?.branches.local);
+      historyInflightRef.current[tabId] = (historyInflightRef.current[tabId] ?? 0) + 1;
       patchSession(tabId, { commitsLoading: true });
+      let stale = false;
       try {
         const page = await runActivity(
           reset ? "Loading history" : "Loading earlier history",
           current.snapshot?.repo.name,
           () => gitApi.getCommits(repoPath, COMMIT_PAGE, skip, undefined, revs),
         );
-        if (historyEpochRef.current[tabId] !== epoch) return;
+        stale = historyEpochRef.current[tabId] !== epoch;
+        if (stale) return;
         const latest = sessionsRef.current[tabId];
         patchSession(tabId, {
           commits: reset ? page : [...(latest?.commits ?? []), ...page],
@@ -919,9 +923,15 @@ export function GitProvider({ children }: { children: ReactNode }) {
           commitsLoading: false,
         });
       } catch (error) {
-        if (historyEpochRef.current[tabId] !== epoch) return;
+        stale = historyEpochRef.current[tabId] !== epoch;
+        if (stale) return;
         patchSession(tabId, { commitsLoading: false });
         toast.error(errorMessage(error));
+      } finally {
+        historyInflightRef.current[tabId] = Math.max(0, (historyInflightRef.current[tabId] ?? 1) - 1);
+        if (stale && historyInflightRef.current[tabId] === 0) {
+          patchSession(tabId, { commitsLoading: false });
+        }
       }
     },
     [bumpHistoryEpoch, patchSession, runActivity],
@@ -1054,11 +1064,19 @@ export function GitProvider({ children }: { children: ReactNode }) {
               const diffSame = sameDiff(changeDiff, current?.changeDiff ?? null);
               if (!snapshotSame || !diffSame) {
                 const stashPatch = snapshotSame ? {} : stashPatchFor(tab.id, snapshot.stashes);
+                const patch = {
+                  ...(snapshotSame ? {} : { snapshot, ...stashPatch }),
+                  ...(diffSame ? {} : { changeDiff }),
+                };
+                const existing = sessionsRef.current[tab.id];
+                if (existing) {
+                  sessionsRef.current = {
+                    ...sessionsRef.current,
+                    [tab.id]: { ...existing, ...patch },
+                  };
+                }
                 startTransition(() => {
-                  patchSession(tab.id, {
-                    ...(snapshotSame ? {} : { snapshot, ...stashPatch }),
-                    ...(diffSame ? {} : { changeDiff }),
-                  });
+                  patchSession(tab.id, patch);
                 });
               }
               if (graphChanged) {
