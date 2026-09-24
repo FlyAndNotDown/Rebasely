@@ -25,8 +25,8 @@ import {
   UserIcon,
 } from "lucide-react";
 import { AuthorAvatar } from "@/components/author-avatar";
+import { CommitLine, CreateBranchDialog, CreateTagDialog } from "@/components/create-ref-dialogs";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -46,7 +46,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { InteractiveRebaseDialog, MergeDialog, RebaseOntoDialog } from "@/components/rebase-dialog";
+import { InteractiveRebaseDialog } from "@/components/lazy-dialogs";
+import { MergeDialog, RebaseOntoDialog } from "@/components/rebase-dialog";
 import { HistorySkeleton } from "@/components/skeletons";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { formatAbsoluteTime } from "@/lib/format";
@@ -54,7 +55,7 @@ import { errorMessage, expandHistoryRevs, gitApi } from "@/lib/git";
 import { graphWidth, laneColor, layoutCommitGraph, type GraphRow } from "@/lib/commit-graph";
 import { useWindowedRows } from "@/lib/use-windowed-rows";
 import { cn } from "@/lib/utils";
-import { COMMIT_PAGE, useGit, type ResetMode } from "@/state/git-context";
+import { COMMIT_PAGE, useGitPick, type ResetMode } from "@/state/git-context";
 import type { AvatarProvider, CommitRef, CommitSummary } from "@/types/git";
 import { toast } from "sonner";
 
@@ -73,25 +74,6 @@ type CommitRowAction =
   | { type: "rebase"; commit: CommitSummary }
   | { type: "merge"; commit: CommitSummary }
   | { type: "interactive"; commit: CommitSummary };
-
-function commitSubject(summary: string) {
-  return summary.split(/\r?\n/, 1)[0]?.replace(/\s+/g, " ").trim() ?? "";
-}
-
-function CommitLine({ commit }: { commit?: { shortId: string; summary: string } | null }) {
-  if (!commit) return null;
-  const subject = commitSubject(commit.summary);
-  return (
-    <div className="mt-2 flex w-full min-w-0 items-baseline gap-2 font-mono text-xs">
-      <span className="shrink-0 text-foreground">{commit.shortId}</span>
-      {subject ? (
-        <span className="min-w-0 truncate text-muted-foreground" title={subject}>
-          {subject}
-        </span>
-      ) : null}
-    </div>
-  );
-}
 
 const RESET_MODES: { id: ResetMode; label: string; detail: string }[] = [
   {
@@ -140,25 +122,38 @@ export function HistoryPane() {
     historyRevs,
     prefs,
     snapshot,
-    createBranch,
-    createTag,
     revertCommit,
     cherryPickCommit,
     resetCommit,
     createPatch,
     openComparison,
-  } = useGit();
+  } = useGitPick([
+    "commits",
+    "commitsHasMore",
+    "commitsLoading",
+    "historySelection",
+    "selectCommit",
+    "ensureHistory",
+    "loadMoreCommits",
+    "historyRevs",
+    "prefs",
+    "snapshot",
+    "revertCommit",
+    "cherryPickCommit",
+    "resetCommit",
+    "createPatch",
+    "openComparison",
+  ]);
   const [query, setQuery] = useState("");
   const [applied, setApplied] = useState("");
-  const [results, setResults] = useState<CommitSummary[] | null>(null);
-  const [searching, setSearching] = useState(false);
-  const [searchHasMore, setSearchHasMore] = useState(false);
+  // A result records which query it answers, so a new query shows as searching
+  // without resetting state first.
+  const [search, setSearch] = useState<{ key: string; items: CommitSummary[]; hasMore: boolean } | null>(
+    null,
+  );
+  const [loadingMore, setLoadingMore] = useState(false);
   const [branchCommit, setBranchCommit] = useState<CommitSummary | null>(null);
   const [tagCommit, setTagCommit] = useState<CommitSummary | null>(null);
-  const [tagName, setTagName] = useState("");
-  const [tagMessage, setTagMessage] = useState("");
-  const [branchName, setBranchName] = useState("");
-  const [checkoutNew, setCheckoutNew] = useState(true);
   const [confirm, setConfirm] = useState<{ kind: "revert" | "cherry-pick"; commits: CommitSummary[] } | null>(
     null,
   );
@@ -178,6 +173,12 @@ export function HistoryPane() {
   const searchRevsKey = expandHistoryRevs(historyRevs, snapshot?.branches.local).join("\0");
   const searchRevs = useMemo(() => (searchRevsKey ? searchRevsKey.split("\0") : []), [searchRevsKey]);
   const searchGeneration = useRef(0);
+  const repoPath = snapshot?.repo.path;
+  const searchKey = `${repoPath ?? ""}\0${applied}\0${searchRevsKey}`;
+  const answered = applied && search?.key === searchKey ? search : null;
+  const results = answered?.items ?? null;
+  const searchHasMore = answered?.hasMore ?? false;
+  const searching = Boolean(applied) && (!answered || loadingMore);
   const searchingMode = Boolean(applied);
   const visible = searchingMode ? (results ?? NO_COMMITS) : commits;
   const graph = useMemo(
@@ -203,13 +204,9 @@ export function HistoryPane() {
           break;
         case "branch":
           setBranchCommit(action.commit);
-          setBranchName("");
-          setCheckoutNew(true);
           break;
         case "tag":
           setTagCommit(action.commit);
-          setTagName("");
-          setTagMessage("");
           break;
         case "compare": {
           const [older, newer] = [...action.commits].sort((left, right) => left.timestamp - right.timestamp);
@@ -307,39 +304,30 @@ export function HistoryPane() {
   }, [ensureHistory]);
 
   useEffect(() => {
-    if (!applied) {
-      setResults(null);
-      setSearchHasMore(false);
-      setSearching(false);
-      return;
-    }
-    const repoPath = snapshot?.repo.path;
-    if (!repoPath) return;
+    if (!applied || !repoPath) return;
+    const key = searchKey;
     const generation = ++searchGeneration.current;
-    setSearching(true);
     void gitApi
       .getCommits(repoPath, COMMIT_PAGE, 0, applied, searchRevs)
       .then((items) => {
         if (searchGeneration.current !== generation) return;
-        setResults(items);
-        setSearchHasMore(items.length === COMMIT_PAGE);
+        setSearch({ key, items, hasMore: items.length === COMMIT_PAGE });
       })
       .catch((error) => {
-        if (searchGeneration.current === generation) toast.error(errorMessage(error));
-      })
-      .finally(() => {
-        if (searchGeneration.current === generation) setSearching(false);
+        if (searchGeneration.current !== generation) return;
+        toast.error(errorMessage(error));
+        setSearch({ key, items: [], hasMore: false });
       });
     return () => {
       searchGeneration.current += 1;
     };
-  }, [applied, searchRevs, snapshot?.repo.path]);
+  }, [applied, repoPath, searchKey, searchRevs]);
 
   async function loadMoreSearch() {
-    const repoPath = snapshot?.repo.path;
     if (!repoPath || !applied || searching || !searchHasMore || !results) return;
+    const key = searchKey;
     const generation = searchGeneration.current;
-    setSearching(true);
+    setLoadingMore(true);
     try {
       const more = await gitApi.getCommits(
         repoPath,
@@ -349,12 +337,15 @@ export function HistoryPane() {
         searchRevs,
       );
       if (searchGeneration.current !== generation) return;
-      setResults((current) => [...(current ?? []), ...more]);
-      setSearchHasMore(more.length === COMMIT_PAGE);
+      setSearch((current) =>
+        current?.key === key
+          ? { key, items: [...current.items, ...more], hasMore: more.length === COMMIT_PAGE }
+          : current,
+      );
     } catch (error) {
       if (searchGeneration.current === generation) toast.error(errorMessage(error));
     } finally {
-      if (searchGeneration.current === generation) setSearching(false);
+      setLoadingMore(false);
     }
   }
 
@@ -420,103 +411,20 @@ export function HistoryPane() {
           />
         )}
       </ScrollArea>
-      <Dialog
+      <CreateTagDialog
+        commit={tagCommit}
         open={Boolean(tagCommit)}
         onOpenChange={(open) => {
           if (!open) setTagCommit(null);
         }}
-      >
-        <DialogContent>
-          <form
-            className="min-w-0"
-            onSubmit={(event) => {
-              event.preventDefault();
-              const name = tagName.trim();
-              const commit = tagCommit;
-              if (!name || !commit) return;
-              void createTag(name, tagMessage.trim() || undefined, commit.id).then((ok) => {
-                if (ok) setTagCommit(null);
-              });
-            }}
-          >
-            <DialogHeader className="min-w-0">
-              <DialogTitle>Create tag</DialogTitle>
-              <DialogDescription>Tags this commit. A message makes it an annotated tag.</DialogDescription>
-            </DialogHeader>
-            <CommitLine commit={tagCommit} />
-            <Input
-              className="mt-3 font-mono"
-              autoFocus
-              placeholder="v1.0.0"
-              value={tagName}
-              onChange={(event) => setTagName(event.target.value)}
-            />
-            <Input
-              className="mt-3"
-              placeholder="Message (optional)"
-              value={tagMessage}
-              onChange={(event) => setTagMessage(event.target.value)}
-            />
-            <DialogFooter className="mt-4">
-              <Button type="button" variant="outline" onClick={() => setTagCommit(null)}>
-                Cancel
-              </Button>
-              <Button type="submit" disabled={!tagName.trim()}>
-                Create
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-      <Dialog
+      />
+      <CreateBranchDialog
+        commit={branchCommit}
         open={Boolean(branchCommit)}
         onOpenChange={(open) => {
           if (!open) setBranchCommit(null);
         }}
-      >
-        <DialogContent>
-          <form
-            className="min-w-0"
-            onSubmit={(event) => {
-              event.preventDefault();
-              const name = branchName.trim();
-              const commit = branchCommit;
-              if (!name || !commit) return;
-              void createBranch(name, checkoutNew, commit.id).then((ok) => {
-                if (ok) setBranchCommit(null);
-              });
-            }}
-          >
-            <DialogHeader className="min-w-0">
-              <DialogTitle>Create branch</DialogTitle>
-              <DialogDescription>Starts a branch at this commit.</DialogDescription>
-            </DialogHeader>
-            <CommitLine commit={branchCommit} />
-            <Input
-              className="mt-3 font-mono"
-              autoFocus
-              placeholder="foo"
-              value={branchName}
-              onChange={(event) => setBranchName(event.target.value)}
-            />
-            <label className="mt-3 flex items-center gap-2 text-sm">
-              <Checkbox
-                checked={checkoutNew}
-                onCheckedChange={(value) => setCheckoutNew(value === true)}
-              />
-              <span>Check out after creating</span>
-            </label>
-            <DialogFooter className="mt-4">
-              <Button type="button" variant="outline" onClick={() => setBranchCommit(null)}>
-                Cancel
-              </Button>
-              <Button type="submit" disabled={!branchName.trim()}>
-                Create
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+      />
       <Dialog open={Boolean(confirm)} onOpenChange={(open) => !open && setConfirm(null)}>
         <DialogContent>
           <DialogHeader className="min-w-0">

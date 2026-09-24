@@ -90,9 +90,11 @@ pub fn save_session(app: &AppHandle, mut session: AppSession) -> AppResult<AppSe
     session.history_revs = normalize_path_lists(session.history_revs);
     session.history_expanded = normalize_path_lists(session.history_expanded);
     let path = session_path(app)?;
-    fs::write(
-        path,
-        serde_json::to_string_pretty(&session).unwrap_or_else(|_| "{}".into()),
+    crate::fsutil::write_atomic(
+        &path,
+        serde_json::to_string_pretty(&session)
+            .unwrap_or_else(|_| "{}".into())
+            .as_bytes(),
     )?;
     Ok(session)
 }

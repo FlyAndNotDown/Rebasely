@@ -71,7 +71,7 @@ fn save_state(app: &AppHandle, state: &WindowState) {
     let Ok(data) = serde_json::to_string_pretty(state) else {
         return;
     };
-    let _ = fs::write(path, data);
+    let _ = crate::fsutil::write_atomic(&path, data.as_bytes());
 }
 
 fn clamp_size(width: f64, height: f64) -> (f64, f64) {

@@ -3,11 +3,15 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { fileKindClass, fileKindLabel } from "@/lib/file-kind";
 import { cn } from "@/lib/utils";
-import { useGit } from "@/state/git-context";
+import { useGitPick } from "@/state/git-context";
 import type { CommitFile } from "@/types/git";
 
 export function StashFiles() {
-  const { stashSelection, stashDetails, selectStashFile } = useGit();
+  const { stashSelection, stashDetails, selectStashFile } = useGitPick([
+    "stashSelection",
+    "stashDetails",
+    "selectStashFile",
+  ]);
   const onSelect = useCallback(
     (path: string) => {
       if (!stashSelection) return;

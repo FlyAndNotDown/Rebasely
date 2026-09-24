@@ -27,17 +27,35 @@ pub fn stash_save(repo: &mut Repository, message: &str, include_untracked: bool)
     Ok(())
 }
 
-pub fn stash_apply(repo: &mut Repository, index: usize) -> AppResult<()> {
+/// Stash indexes shift whenever another stash is pushed or dropped, so callers
+/// name a stash by its commit id and it is looked up right before use.
+fn stash_index(repo: &mut Repository, id: &str) -> AppResult<usize> {
+    let target = Oid::from_str(id.trim())?;
+    let mut found = None;
+    repo.stash_foreach(|index, _, oid| {
+        if *oid == target {
+            found = Some(index);
+            return false;
+        }
+        true
+    })?;
+    found.ok_or_else(|| AppError::msg("That stash no longer exists"))
+}
+
+pub fn stash_apply(repo: &mut Repository, id: &str) -> AppResult<()> {
+    let index = stash_index(repo, id)?;
     repo.stash_apply(index, None)?;
     Ok(())
 }
 
-pub fn stash_pop(repo: &mut Repository, index: usize) -> AppResult<()> {
+pub fn stash_pop(repo: &mut Repository, id: &str) -> AppResult<()> {
+    let index = stash_index(repo, id)?;
     repo.stash_pop(index, None)?;
     Ok(())
 }
 
-pub fn stash_drop(repo: &mut Repository, index: usize) -> AppResult<()> {
+pub fn stash_drop(repo: &mut Repository, id: &str) -> AppResult<()> {
+    let index = stash_index(repo, id)?;
     repo.stash_drop(index)?;
     Ok(())
 }
@@ -66,7 +84,7 @@ pub fn stash_details(repo: &Repository, oid: &str) -> AppResult<StashDetails> {
             }
         }
     }
-    files.sort_by(|left, right| left.path.to_lowercase().cmp(&right.path.to_lowercase()));
+    files.sort_by_cached_key(|file| file.path.to_lowercase());
     Ok(StashDetails {
         id: parsed.to_string(),
         message: commit.summary().unwrap_or("").trim().to_string(),

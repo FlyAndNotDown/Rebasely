@@ -12,7 +12,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { errorMessage, gitApi } from "@/lib/git";
-import { useGit } from "@/state/git-context";
+import { useGitPick } from "@/state/git-context";
 
 export function RepoSettingsDialog({
   open,
@@ -21,7 +21,7 @@ export function RepoSettingsDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const { snapshot } = useGit();
+  const { snapshot } = useGitPick(["snapshot"]);
   const repoPath = snapshot?.repo.path;
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");

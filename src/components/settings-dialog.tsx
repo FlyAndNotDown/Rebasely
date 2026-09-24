@@ -24,7 +24,7 @@ import { AVATAR_PROVIDERS } from "@/lib/avatar";
 import { errorMessage, gitApi } from "@/lib/git";
 import { normalizePrefs } from "@/lib/prefs";
 import { cn } from "@/lib/utils";
-import { useGit } from "@/state/git-context";
+import { useGitPick } from "@/state/git-context";
 import type { AvatarProvider, TerminalOption } from "@/types/git";
 
 type SettingsSection = "git" | "general";
@@ -43,20 +43,31 @@ export function SettingsDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="flex max-h-[min(44rem,calc(100vh-4rem))] w-[min(56rem,calc(100vw-4rem))] max-w-none flex-col gap-0 p-0 sm:max-w-none">
+        {/* Mounted on each open, so the fields load fresh every time. */}
+        <SettingsForm onOpenChange={onOpenChange} />
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function SettingsForm({ onOpenChange }: { onOpenChange: (open: boolean) => void }) {
   const { theme, setTheme } = useTheme();
-  const { prefs, updatePrefs } = useGit();
+  const { prefs, updatePrefs } = useGitPick(["prefs", "updatePrefs"]);
   const [section, setSection] = useState<SettingsSection>("git");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [terminalId, setTerminalId] = useState("auto");
-  const [avatarProvider, setAvatarProvider] = useState<AvatarProvider>("initials");
+  const [avatarProvider, setAvatarProvider] = useState<AvatarProvider>(prefs.avatarProvider);
   const [terminals, setTerminals] = useState<TerminalOption[]>([]);
-  const [themeChoice, setThemeChoice] = useState<ThemeChoice>("dark");
+  const [themeChoice, setThemeChoice] = useState<ThemeChoice>(() =>
+    theme === "light" || theme === "dark" || theme === "system" ? theme : "dark",
+  );
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    if (!open) return;
-    setSection("git");
     void Promise.all([gitApi.getGitIdentity(), gitApi.getPrefs(), gitApi.listTerminals()])
       .then(([identity, loadedPrefs, options]) => {
         const prefs = normalizePrefs(loadedPrefs);
@@ -67,12 +78,7 @@ export function SettingsDialog({
         setTerminals(options);
       })
       .catch((error) => toast.error(errorMessage(error)));
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-    if (theme === "light" || theme === "dark" || theme === "system") setThemeChoice(theme);
-  }, [open, theme]);
+  }, []);
 
   async function save() {
     setSaving(true);
@@ -96,133 +102,131 @@ export function SettingsDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[min(44rem,calc(100vh-4rem))] w-[min(56rem,calc(100vw-4rem))] max-w-none flex-col gap-0 p-0 sm:max-w-none">
-        <div className="flex min-h-0 flex-1">
-          <aside className="flex w-44 shrink-0 flex-col gap-1 border-r p-4">
-            <NavButton active={section === "git"} onClick={() => setSection("git")}>
-              Git
-            </NavButton>
-            <NavButton active={section === "general"} onClick={() => setSection("general")}>
-              General
-            </NavButton>
-          </aside>
-          <ScrollArea className="min-w-0 flex-1">
-          <div className="p-6">
-            {section === "git" ? (
-              <>
-                <DialogHeader>
-                  <DialogTitle>Git</DialogTitle>
-                  <DialogDescription>
-                    Global Git identity from your user Git config.
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="mt-6 grid gap-5">
-                  <div className="grid gap-2">
-                    <Label htmlFor="git-name">User name</Label>
-                    <Input
-                      id="git-name"
-                      value={name}
-                      onChange={(event) => setName(event.target.value)}
-                      placeholder="Your name"
-                    />
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="git-email">Email</Label>
-                    <Input
-                      id="git-email"
-                      type="email"
-                      value={email}
-                      onChange={(event) => setEmail(event.target.value)}
-                      placeholder="you@example.com"
-                    />
-                  </div>
+    <>
+      <div className="flex min-h-0 flex-1">
+        <aside className="flex w-44 shrink-0 flex-col gap-1 border-r p-4">
+          <NavButton active={section === "git"} onClick={() => setSection("git")}>
+            Git
+          </NavButton>
+          <NavButton active={section === "general"} onClick={() => setSection("general")}>
+            General
+          </NavButton>
+        </aside>
+        <ScrollArea className="min-w-0 flex-1">
+        <div className="p-6">
+          {section === "git" ? (
+            <>
+              <DialogHeader>
+                <DialogTitle>Git</DialogTitle>
+                <DialogDescription>
+                  Global Git identity from your user Git config.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="mt-6 grid gap-5">
+                <div className="grid gap-2">
+                  <Label htmlFor="git-name">User name</Label>
+                  <Input
+                    id="git-name"
+                    value={name}
+                    onChange={(event) => setName(event.target.value)}
+                    placeholder="Your name"
+                  />
                 </div>
-              </>
-            ) : (
-              <>
-                <DialogHeader>
-                  <DialogTitle>General</DialogTitle>
-                  <DialogDescription>
-                    Theme, author avatars, and the terminal used to open a repository.
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="mt-6 grid gap-8">
-                  <FieldGroup title="Appearance">
-                    <SelectField
-                      id="theme-choice"
-                      label="Theme"
-                      value={themeChoice}
-                      options={themeOptions}
-                      onChange={setThemeChoice}
-                    />
-                    <SelectField
-                      id="avatar-provider"
-                      label="Avatar provider"
-                      value={avatarProvider}
-                      options={AVATAR_PROVIDERS}
-                      onChange={setAvatarProvider}
-                    />
-                  </FieldGroup>
-                  <FieldGroup title="Terminal">
-                    <div className="grid gap-2">
-                      <Label htmlFor="terminal-app">Application</Label>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button
-                            id="terminal-app"
-                            type="button"
-                            variant="outline"
-                            className="w-full justify-between font-normal"
-                          >
-                            <span className="truncate">
-                              {terminals.find((item) => item.id === terminalId)?.name ??
-                                "System default"}
-                            </span>
-                            <ChevronDownIcon />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent
-                          align="start"
-                          className="w-(--radix-dropdown-menu-trigger-width)"
+                <div className="grid gap-2">
+                  <Label htmlFor="git-email">Email</Label>
+                  <Input
+                    id="git-email"
+                    type="email"
+                    value={email}
+                    onChange={(event) => setEmail(event.target.value)}
+                    placeholder="you@example.com"
+                  />
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
+              <DialogHeader>
+                <DialogTitle>General</DialogTitle>
+                <DialogDescription>
+                  Theme, author avatars, and the terminal used to open a repository.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="mt-6 grid gap-8">
+                <FieldGroup title="Appearance">
+                  <SelectField
+                    id="theme-choice"
+                    label="Theme"
+                    value={themeChoice}
+                    options={themeOptions}
+                    onChange={setThemeChoice}
+                  />
+                  <SelectField
+                    id="avatar-provider"
+                    label="Avatar provider"
+                    value={avatarProvider}
+                    options={AVATAR_PROVIDERS}
+                    onChange={setAvatarProvider}
+                  />
+                </FieldGroup>
+                <FieldGroup title="Terminal">
+                  <div className="grid gap-2">
+                    <Label htmlFor="terminal-app">Application</Label>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          id="terminal-app"
+                          type="button"
+                          variant="outline"
+                          className="w-full justify-between font-normal"
                         >
-                          {terminals.map((option) => (
-                            <DropdownMenuItem
-                              key={option.id}
-                              disabled={!option.available}
-                              onClick={() => setTerminalId(option.id)}
-                            >
-                              <span className="min-w-4">
-                                {option.id === terminalId ? <CheckIcon className="size-3.5" /> : null}
+                          <span className="truncate">
+                            {terminals.find((item) => item.id === terminalId)?.name ??
+                              "System default"}
+                          </span>
+                          <ChevronDownIcon />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent
+                        align="start"
+                        className="w-(--radix-dropdown-menu-trigger-width)"
+                      >
+                        {terminals.map((option) => (
+                          <DropdownMenuItem
+                            key={option.id}
+                            disabled={!option.available}
+                            onClick={() => setTerminalId(option.id)}
+                          >
+                            <span className="min-w-4">
+                              {option.id === terminalId ? <CheckIcon className="size-3.5" /> : null}
+                            </span>
+                            <span className="truncate">{option.name}</span>
+                            {!option.available ? (
+                              <span className="ml-auto text-xs text-muted-foreground">
+                                Not found
                               </span>
-                              <span className="truncate">{option.name}</span>
-                              {!option.available ? (
-                                <span className="ml-auto text-xs text-muted-foreground">
-                                  Not found
-                                </span>
-                              ) : null}
-                            </DropdownMenuItem>
-                          ))}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </div>
-                  </FieldGroup>
-                </div>
-              </>
-            )}
-          </div>
-          </ScrollArea>
+                            ) : null}
+                          </DropdownMenuItem>
+                        ))}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                </FieldGroup>
+              </div>
+            </>
+          )}
         </div>
-        <DialogFooter className="mx-0 mb-0 rounded-none">
-          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button type="button" onClick={() => void save()} disabled={saving}>
-            Save
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </ScrollArea>
+      </div>
+      <DialogFooter className="mx-0 mb-0 rounded-none">
+        <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+          Cancel
+        </Button>
+        <Button type="button" onClick={() => void save()} disabled={saving}>
+          Save
+        </Button>
+      </DialogFooter>
+    </>
   );
 }
 

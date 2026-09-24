@@ -1,5 +1,4 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { useGroupRef, type Layout } from "react-resizable-panels";
 import { ChevronRightIcon, FileIcon, FolderIcon, FolderOpenIcon } from "lucide-react";
 import { toast } from "sonner";
 import { AuthorAvatar } from "@/components/author-avatar";
@@ -11,226 +10,75 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { textColumns } from "@/lib/diff-text";
 import { formatAbsoluteTime } from "@/lib/format";
 import { errorMessage, gitApi } from "@/lib/git";
+import { dirsToReload, touchesFile } from "@/lib/repo-paths";
 import { useWindowedRows } from "@/lib/use-windowed-rows";
 import { cn } from "@/lib/utils";
-import { useGit } from "@/state/git-context";
-import type { AvatarProvider, BlameHunk, CommitSummary, DirEntry, FileDiff, PanelLayoutId } from "@/types/git";
+import { useGitPick, useGitSelect } from "@/state/git-context";
+import { usePanelGroupLayout } from "@/state/use-panel-group-layout";
+import { useRepoChanged } from "@/state/use-repo-changed";
+import type { AvatarProvider, BlameHunk, CommitSummary, DirEntry, FileDiff } from "@/types/git";
 
 const PAGE = 80;
 
-function usePanelGroupLayout(id: PanelLayoutId) {
-  const { prefs, updatePanelLayout } = useGit();
-  const groupRef = useGroupRef();
-  const layout = prefs.panelLayouts[id];
-  const layoutRef = useRef(layout);
-  layoutRef.current = layout;
-
-  useLayoutEffect(() => {
-    const frame = requestAnimationFrame(() => {
-      groupRef.current?.setLayout(layoutRef.current);
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [groupRef]);
-
-  return {
-    groupRef,
-    defaultLayout: layout,
-    onLayoutChanged: (next: Layout, meta: { isUserInteraction: boolean }) => {
-      if (meta.isUserInteraction) updatePanelLayout(id, next);
-    },
-  };
-}
-
 export function FilesBrowser() {
   const shell = usePanelGroupLayout("files");
-  const historyLayout = usePanelGroupLayout("fileHistory");
-  const { snapshot, prefs, beginActivity, endActivity } = useGit();
-  const repoPath = snapshot?.repo.path ?? "";
+  const repoPath = useGitSelect((state) => state.snapshot?.repo.path ?? "");
   const [entries, setEntries] = useState<Record<string, DirEntry[]>>({});
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [path, setPath] = useState<string | null>(null);
   const [mode, setMode] = useState<"browse" | "history">("browse");
-  const [fileText, setFileText] = useState<string | null>(null);
-  const [binary, setBinary] = useState(false);
-  const [textLoading, setTextLoading] = useState(false);
-  const [hunks, setHunks] = useState<BlameHunk[] | null>(null);
-  const [blameLoading, setBlameLoading] = useState(false);
-  const [commits, setCommits] = useState<CommitSummary[]>([]);
-  const [commitsHasMore, setCommitsHasMore] = useState(false);
-  const [commitsLoading, setCommitsLoading] = useState(false);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [diff, setDiff] = useState<FileDiff | null>(null);
-  const pinnedCommit = useRef<string | null>(null);
-  const pathRef = useRef(path);
+  // A commit picked from blame, to select when the history opens.
+  const [pin, setPin] = useState<string | null>(null);
+  const entriesRef = useRef(entries);
   useLayoutEffect(() => {
-    pathRef.current = path;
-  }, [path]);
+    entriesRef.current = entries;
+  });
 
   const loadDir = useCallback(
-    async (dir: string) => {
+    async (dir: string, quiet = false) => {
       if (!repoPath) return;
       try {
         const items = await gitApi.listDirectory(repoPath, dir);
         setEntries((current) => ({ ...current, [dir]: items }));
       } catch (error) {
-        toast.error(errorMessage(error));
+        if (!quiet) {
+          toast.error(errorMessage(error));
+          return;
+        }
+        // The folder was deleted while it was expanded.
+        setEntries((current) => {
+          const { [dir]: _gone, ...rest } = current;
+          return rest;
+        });
       }
     },
     [repoPath],
   );
 
+  // The workspace remounts per repository, so the root is listed once here.
   useEffect(() => {
-    setEntries({});
-    setOpen(new Set());
-    setPath(null);
-    void loadDir("");
-  }, [loadDir]);
-
-  useEffect(() => {
-    if (!repoPath || !path || mode !== "browse") return;
+    if (!repoPath) return;
     let cancelled = false;
-    setTextLoading(true);
-    setBlameLoading(true);
-    setFileText(null);
-    setHunks(null);
-    setBinary(false);
-    const textActivity = beginActivity("Reading file", path);
-    const blameActivity = beginActivity("Blaming file", path);
     void gitApi
-      .readFile(repoPath, path)
-      .then((result) => {
-        if (cancelled) return;
-        setBinary(result.binary);
-        setFileText(result.text);
+      .listDirectory(repoPath, "")
+      .then((items) => {
+        if (!cancelled) setEntries((current) => ({ ...current, "": items }));
       })
-      .catch((error) => {
-        if (!cancelled) toast.error(errorMessage(error));
-      })
-      .finally(() => {
-        endActivity(textActivity);
-        if (!cancelled) setTextLoading(false);
-      });
-    void gitApi
-      .fileBlame(repoPath, path)
-      .then((result) => {
-        if (!cancelled) setHunks(result);
-      })
-      .catch((error) => {
-        if (!cancelled) toast.error(errorMessage(error));
-      })
-      .finally(() => {
-        endActivity(blameActivity);
-        if (!cancelled) setBlameLoading(false);
-      });
-    return () => {
-      cancelled = true;
-      endActivity(textActivity);
-      endActivity(blameActivity);
-    };
-  }, [beginActivity, endActivity, mode, path, repoPath]);
-
-  const loadHistory = useCallback(
-    async (reset: boolean) => {
-      if (!repoPath || !path) return;
-      setCommitsLoading(true);
-      const activity = beginActivity("Loading file history", path);
-      try {
-        const skip = reset ? 0 : commits.length;
-        const page = await gitApi.fileCommits(repoPath, path, PAGE, skip);
-        if (pathRef.current !== path) return;
-        setCommits((current) => (reset ? page : [...current, ...page.filter((item) => !current.some((have) => have.id === item.id))]));
-        setCommitsHasMore(page.length === PAGE);
-        if (reset) {
-          setSelectedId((current) => current && page.some((item) => item.id === current) ? current : (page[0]?.id ?? current));
-        }
-      } catch (error) {
-        toast.error(errorMessage(error));
-      } finally {
-        endActivity(activity);
-        setCommitsLoading(false);
-      }
-    },
-    [beginActivity, commits.length, endActivity, path, repoPath],
-  );
-
-  useEffect(() => {
-    if (mode !== "history" || !path || !repoPath) return;
-    const keep = pinnedCommit.current;
-    pinnedCommit.current = null;
-    let cancelled = false;
-    setCommitsLoading(true);
-    setDiff(null);
-    const activity = beginActivity("Loading file history", path);
-    void (async () => {
-      try {
-        const page = await gitApi.fileCommits(repoPath, path, PAGE, 0);
-        if (cancelled) return;
-        let items = page;
-        if (keep && !page.some((commit) => commit.id === keep)) {
-          const details = await gitApi.getCommitDetails(repoPath, keep);
-          if (!cancelled) items = [details.commit, ...page];
-        }
-        if (cancelled) return;
-        setCommits(items);
-        setCommitsHasMore(page.length === PAGE);
-        setSelectedId(keep ?? page[0]?.id ?? null);
-      } catch (error) {
-        if (!cancelled) toast.error(errorMessage(error));
-      } finally {
-        endActivity(activity);
-        if (!cancelled) setCommitsLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-      endActivity(activity);
-    };
-  }, [beginActivity, endActivity, mode, path, repoPath]);
-
-  useEffect(() => {
-    if (mode !== "history" || !repoPath || !path || !selectedId) {
-      setDiff(null);
-      return;
-    }
-    let cancelled = false;
-    setDiff(null);
-    void gitApi
-      .getCommitDiff(repoPath, selectedId, path)
-      .then((next) => {
-        if (!cancelled) setDiff(next);
-      })
-      .catch((error) => {
-        if (!cancelled) toast.error(errorMessage(error));
-      });
+      .catch((error) => toast.error(errorMessage(error)));
     return () => {
       cancelled = true;
     };
-  }, [mode, path, repoPath, selectedId]);
+  }, [repoPath]);
 
-  async function openBlameCommit(commitId: string) {
-    setSelectedId(commitId);
-    if (mode !== "history") {
-      pinnedCommit.current = commitId;
-      setMode("history");
-      return;
+  useRepoChanged(repoPath, (changed) => {
+    for (const dir of dirsToReload(repoPath, changed, Object.keys(entriesRef.current))) {
+      void loadDir(dir, true);
     }
-    if (!repoPath || commits.some((commit) => commit.id === commitId)) return;
-    try {
-      const details = await gitApi.getCommitDetails(repoPath, commitId);
-      setCommits((current) =>
-        current.some((commit) => commit.id === commitId) ? current : [details.commit, ...current],
-      );
-    } catch (error) {
-      toast.error(errorMessage(error));
-    }
-  }
-
-  const openBlameRef = useRef(openBlameCommit);
-  useLayoutEffect(() => {
-    openBlameRef.current = openBlameCommit;
   });
-  const onOpenBlameCommit = useCallback((commitId: string) => {
-    void openBlameRef.current(commitId);
+
+  const openBlameCommit = useCallback((commitId: string) => {
+    setPin(commitId);
+    setMode("history");
   }, []);
 
   return (
@@ -264,7 +112,10 @@ export function FilesBrowser() {
                 if (!entries[dir]) await loadDir(dir);
                 setOpen((current) => new Set(current).add(dir));
               }}
-              onOpenFile={setPath}
+              onOpenFile={(next) => {
+                setPath(next);
+                setPin(null);
+              }}
             />
           </ScrollArea>
         </div>
@@ -294,49 +145,211 @@ export function FilesBrowser() {
                   size="sm"
                   variant={mode === "history" ? "secondary" : "ghost"}
                   className="h-6 px-2 text-xs"
-                  onClick={() => setMode("history")}
+                  onClick={() => {
+                    setPin(null);
+                    setMode("history");
+                  }}
                 >
                   History
                 </Button>
               </div>
             </div>
             {mode === "browse" ? (
-              <FileBrowse
-                textLoading={textLoading}
-                blameLoading={blameLoading}
-                binary={binary}
-                text={fileText}
-                hunks={hunks}
-                onOpenCommit={onOpenBlameCommit}
-              />
+              <FileBrowsePane key={path} repoPath={repoPath} path={path} onOpenCommit={openBlameCommit} />
             ) : (
-              <ResizablePanelGroup
-                id="file-history"
-                orientation="vertical"
-                className="min-h-0 min-w-0 flex-1"
-                groupRef={historyLayout.groupRef}
-                defaultLayout={historyLayout.defaultLayout}
-                onLayoutChanged={historyLayout.onLayoutChanged}
-              >
-                <ResizablePanel id="file-commits" defaultSize="42%" minSize="18%">
-                  <FileHistory
-                    commits={commits}
-                    loading={commitsLoading}
-                    hasMore={commitsHasMore}
-                    selectedId={selectedId}
-                    avatarProvider={prefs.avatarProvider}
-                    onSelect={setSelectedId}
-                    onLoadMore={() => void loadHistory(false)}
-                  />
-                </ResizablePanel>
-                <ResizableHandle withHandle />
-                <ResizablePanel id="file-diff" defaultSize="58%" minSize="20%">
-                  <FileCommitDiff diff={diff} loading={Boolean(selectedId) && !diff} />
-                </ResizablePanel>
-              </ResizablePanelGroup>
+              <FileHistoryPane key={`${path}\0${pin ?? ""}`} repoPath={repoPath} path={path} pin={pin} />
             )}
           </div>
         )}
+      </ResizablePanel>
+    </ResizablePanelGroup>
+  );
+}
+
+/** One file's text and blame. Keyed by path, so it starts out loading. */
+function FileBrowsePane({
+  repoPath,
+  path,
+  onOpenCommit,
+}: {
+  repoPath: string;
+  path: string;
+  onOpenCommit: (commitId: string) => void;
+}) {
+  const { beginActivity, endActivity } = useGitPick(["beginActivity", "endActivity"]);
+  const [fileText, setFileText] = useState<string | null>(null);
+  const [binary, setBinary] = useState(false);
+  const [textLoading, setTextLoading] = useState(true);
+  const [hunks, setHunks] = useState<BlameHunk[] | null>(null);
+  const [blameLoading, setBlameLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    const textActivity = beginActivity("Reading file", path);
+    const blameActivity = beginActivity("Blaming file", path);
+    void gitApi
+      .readFile(repoPath, path)
+      .then((result) => {
+        if (cancelled) return;
+        setBinary(result.binary);
+        setFileText(result.text);
+      })
+      .catch((error) => {
+        if (!cancelled) toast.error(errorMessage(error));
+      })
+      .finally(() => {
+        endActivity(textActivity);
+        if (!cancelled) setTextLoading(false);
+      });
+    void gitApi
+      .fileBlame(repoPath, path)
+      .then((result) => {
+        if (!cancelled) setHunks(result);
+      })
+      .catch((error) => {
+        if (!cancelled) toast.error(errorMessage(error));
+      })
+      .finally(() => {
+        endActivity(blameActivity);
+        if (!cancelled) setBlameLoading(false);
+      });
+    return () => {
+      cancelled = true;
+      endActivity(textActivity);
+      endActivity(blameActivity);
+    };
+  }, [beginActivity, endActivity, path, repoPath]);
+
+  // Edits and commits refresh the view in place, without the loading skeleton.
+  useRepoChanged(repoPath, (changed) => {
+    if (!touchesFile(repoPath, changed, path)) return;
+    void Promise.all([gitApi.readFile(repoPath, path), gitApi.fileBlame(repoPath, path)])
+      .then(([file, blame]) => {
+        setBinary(file.binary);
+        setFileText(file.text);
+        setHunks(blame);
+      })
+      .catch(() => undefined);
+  });
+
+  return (
+    <FileBrowse
+      textLoading={textLoading}
+      blameLoading={blameLoading}
+      binary={binary}
+      text={fileText}
+      hunks={hunks}
+      onOpenCommit={onOpenCommit}
+    />
+  );
+}
+
+/** One file's commit history and the selected commit's diff. Keyed by path and pin. */
+function FileHistoryPane({ repoPath, path, pin }: { repoPath: string; path: string; pin: string | null }) {
+  const layout = usePanelGroupLayout("fileHistory");
+  const avatarProvider = useGitSelect((state) => state.prefs.avatarProvider);
+  const { beginActivity, endActivity } = useGitPick(["beginActivity", "endActivity"]);
+  const [commits, setCommits] = useState<CommitSummary[]>([]);
+  // Commits read from the log so far; the pinned commit may be extra.
+  const [fetched, setFetched] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [selectedId, setSelectedId] = useState<string | null>(pin);
+  const [loadedDiff, setLoadedDiff] = useState<{ key: string; diff: FileDiff } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const activity = beginActivity("Loading file history", path);
+    void (async () => {
+      try {
+        const page = await gitApi.fileCommits(repoPath, path, PAGE, 0);
+        let items = page;
+        if (pin && !page.some((commit) => commit.id === pin)) {
+          const details = await gitApi.getCommitDetails(repoPath, pin);
+          items = [details.commit, ...page];
+        }
+        if (cancelled) return;
+        setCommits(items);
+        setFetched(page.length);
+        setHasMore(page.length === PAGE);
+        setSelectedId((current) => current ?? page[0]?.id ?? null);
+      } catch (error) {
+        if (!cancelled) toast.error(errorMessage(error));
+      } finally {
+        endActivity(activity);
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      endActivity(activity);
+    };
+  }, [beginActivity, endActivity, path, pin, repoPath]);
+
+  async function loadMore() {
+    if (loading) return;
+    setLoading(true);
+    const activity = beginActivity("Loading file history", path);
+    try {
+      const page = await gitApi.fileCommits(repoPath, path, PAGE, fetched);
+      setCommits((current) => [
+        ...current,
+        ...page.filter((item) => !current.some((have) => have.id === item.id)),
+      ]);
+      setFetched((count) => count + page.length);
+      setHasMore(page.length === PAGE);
+    } catch (error) {
+      toast.error(errorMessage(error));
+    } finally {
+      endActivity(activity);
+      setLoading(false);
+    }
+  }
+
+  // Before a rename the file had another name, and its diff lives under that one.
+  const diffPath = commits.find((commit) => commit.id === selectedId)?.path ?? path;
+  const diffKey = selectedId ? `${selectedId}\0${diffPath}` : null;
+  const diff = loadedDiff && loadedDiff.key === diffKey ? loadedDiff.diff : null;
+
+  useEffect(() => {
+    if (!selectedId || !diffKey) return;
+    let cancelled = false;
+    void gitApi
+      .getCommitDiff(repoPath, selectedId, diffPath)
+      .then((next) => {
+        if (!cancelled) setLoadedDiff({ key: diffKey, diff: next });
+      })
+      .catch((error) => {
+        if (!cancelled) toast.error(errorMessage(error));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [diffKey, diffPath, repoPath, selectedId]);
+
+  return (
+    <ResizablePanelGroup
+      id="file-history"
+      orientation="vertical"
+      className="min-h-0 min-w-0 flex-1"
+      groupRef={layout.groupRef}
+      defaultLayout={layout.defaultLayout}
+      onLayoutChanged={layout.onLayoutChanged}
+    >
+      <ResizablePanel id="file-commits" defaultSize="42%" minSize="18%">
+        <FileHistory
+          commits={commits}
+          loading={loading}
+          hasMore={hasMore}
+          selectedId={selectedId}
+          avatarProvider={avatarProvider}
+          onSelect={setSelectedId}
+          onLoadMore={() => void loadMore()}
+        />
+      </ResizablePanel>
+      <ResizableHandle withHandle />
+      <ResizablePanel id="file-diff" defaultSize="58%" minSize="20%">
+        <FileCommitDiff diff={diff} loading={Boolean(selectedId) && !diff} />
       </ResizablePanel>
     </ResizablePanelGroup>
   );

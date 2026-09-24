@@ -17,11 +17,6 @@ export default tseslint.config(
         "error",
         { argsIgnorePattern: "^_", varsIgnorePattern: "^_", ignoreRestSiblings: true },
       ],
-      // React Compiler readiness rules. Existing code predates them, so they
-      // report as warnings until those effects and refs are reworked.
-      "react-hooks/set-state-in-effect": "warn",
-      "react-hooks/refs": "warn",
-      "react-hooks/preserve-manual-memoization": "warn",
     },
   },
 );

@@ -28,7 +28,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { fileKindClass, fileKindLabel } from "@/lib/file-kind";
 import { fileName, parentPath } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { useGit } from "@/state/git-context";
+import { useGitPick } from "@/state/git-context";
 import type { FileStatus, WorkspaceSnapshot } from "@/types/git";
 
 function FileRow({
@@ -79,7 +79,7 @@ function FileRow({
             type="button"
             variant="ghost"
             size="icon-xs"
-            className="opacity-0 group-hover:opacity-100"
+            className="opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 focus-visible:opacity-100"
             onClick={onPrimary}
             aria-label={primaryLabel}
           >
@@ -109,8 +109,16 @@ function headCommitMessage(snapshot: WorkspaceSnapshot) {
 }
 
 export function ChangesPane() {
-  const { snapshot, changeSelection, selectChange, stage, unstage, discard, commit, pushRemote } =
-    useGit();
+  const { snapshot, changeSelection, selectChange, stage, unstage, discard, commit, pushRemote } = useGitPick([
+    "snapshot",
+    "changeSelection",
+    "selectChange",
+    "stage",
+    "unstage",
+    "discard",
+    "commit",
+    "pushRemote",
+  ]);
   const [message, setMessage] = useState("");
   const [amend, setAmend] = useState(false);
   const [committing, setCommitting] = useState(false);

@@ -1,14 +1,19 @@
 import { useState } from "react";
 import { DownloadIcon, FolderOpenIcon, XIcon } from "lucide-react";
 import { AppMark } from "@/components/app-mark";
-import { CloneRepositoryDialog } from "@/components/clone-repository-dialog";
+import { CloneRepositoryDialog } from "@/components/lazy-dialogs";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { disambiguateRepoLabels, displayPath, formatRelativeTime } from "@/lib/format";
-import { useGit } from "@/state/git-context";
+import { useGitPick } from "@/state/git-context";
 
 export function WelcomeScreen() {
-  const { recents, openFolder, openPath, forgetRecent } = useGit();
+  const { recents, openFolder, openPath, forgetRecent } = useGitPick([
+    "recents",
+    "openFolder",
+    "openPath",
+    "forgetRecent",
+  ]);
   const [cloneOpen, setCloneOpen] = useState(false);
   const labels = disambiguateRepoLabels(recents);
 

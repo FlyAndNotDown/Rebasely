@@ -10,6 +10,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { useSyncExternalStoreWithSelector } from "use-sync-external-store/with-selector";
 import { listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { toast } from "sonner";
@@ -164,14 +165,51 @@ interface GitContextValue {
   addRemote: (name: string, url: string) => Promise<boolean>;
   deleteRemote: (name: string) => Promise<boolean>;
   stashSave: (message: string, includeUntracked: boolean) => Promise<boolean>;
-  stashApply: (index: number) => Promise<void>;
-  stashPop: (index: number) => Promise<void>;
-  stashDrop: (index: number) => Promise<void>;
+  stashApply: (id: string) => Promise<void>;
+  stashPop: (id: string) => Promise<void>;
+  stashDrop: (id: string) => Promise<void>;
   updatePrefs: (prefs: AppPrefs) => Promise<AppPrefs>;
   updatePanelLayout: (id: PanelLayoutId, layout: PanelLayout) => void;
 }
 
-const GitContext = createContext<GitContextValue | null>(null);
+type ActionKey = {
+  [K in keyof GitContextValue]: GitContextValue[K] extends (...args: never[]) => unknown ? K : never;
+}[keyof GitContextValue];
+type GitActions = Pick<GitContextValue, ActionKey>;
+type GitState = Omit<GitContextValue, ActionKey>;
+
+interface GitStore {
+  get: () => GitState;
+  set: (next: GitState) => void;
+  subscribe: (listener: () => void) => () => void;
+}
+
+function createStore(initial: GitState): GitStore {
+  let state = initial;
+  const listeners = new Set<() => void>();
+  return {
+    get: () => state,
+    set: (next) => {
+      if (next === state) return;
+      state = next;
+      for (const listener of listeners) listener();
+    },
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+  };
+}
+
+const NO_COMMITS: CommitSummary[] = [];
+const NO_REVS: string[] = [];
+const NO_STASHES: StashInfo[] = [];
+
+// The value never changes after mount; components subscribe to the store for
+// the fields they read, so an unrelated update does not re-render them.
+const GitContext = createContext<{ store: GitStore; actions: GitActions } | null>(null);
 // Progress updates arrive many times per second; keeping them out of GitContext
 // means only the activity meter re-renders for them.
 const ActivityContext = createContext<Activity[]>([]);
@@ -1513,12 +1551,17 @@ export function GitProvider({ children }: { children: ReactNode }) {
 
   const dismissPublish = useCallback(() => setPublishPrompt(null), []);
 
+  const publishPromptRef = useRef(publishPrompt);
+  useLayoutEffect(() => {
+    publishPromptRef.current = publishPrompt;
+  }, [publishPrompt]);
+
   const confirmPublish = useCallback(async () => {
-    const prompt = publishPrompt;
+    const prompt = publishPromptRef.current;
     if (!prompt) return;
     setPublishPrompt(null);
     await pushRemote({ remote: prompt.remote, setUpstream: true });
-  }, [publishPrompt, pushRemote]);
+  }, [pushRemote]);
 
   const createBranch = useCallback(
     async (name: string, switchTo: boolean, start?: string) => {
@@ -1903,26 +1946,22 @@ export function GitProvider({ children }: { children: ReactNode }) {
   );
 
   const stashApply = useCallback(
-    async (index: number) => {
-      await runMutation(
-        "Applying stash",
-        (repoPath) => gitApi.stashApply(repoPath, index),
-        "Applied stash",
-      );
+    async (id: string) => {
+      await runMutation("Applying stash", (repoPath) => gitApi.stashApply(repoPath, id), "Applied stash");
     },
     [runMutation],
   );
 
   const stashPop = useCallback(
-    async (index: number) => {
-      await runMutation("Popping stash", (repoPath) => gitApi.stashPop(repoPath, index), "Popped stash");
+    async (id: string) => {
+      await runMutation("Popping stash", (repoPath) => gitApi.stashPop(repoPath, id), "Popped stash");
     },
     [runMutation],
   );
 
   const stashDrop = useCallback(
-    async (index: number) => {
-      await runMutation("Dropping stash", (repoPath) => gitApi.stashDrop(repoPath, index), "Dropped stash");
+    async (id: string) => {
+      await runMutation("Dropping stash", (repoPath) => gitApi.stashDrop(repoPath, id), "Dropped stash");
     },
     [runMutation],
   );
@@ -1966,17 +2005,17 @@ export function GitProvider({ children }: { children: ReactNode }) {
     }, 400);
   }, []);
 
-  const value = useMemo<GitContextValue>(
+  const state = useMemo<GitState>(
     () => ({
       recents,
       tabs,
       activeTabId,
       activeTab,
       snapshot: session?.snapshot ?? null,
-      commits: session?.commits ?? [],
+      commits: session?.commits ?? NO_COMMITS,
       commitsHasMore: session?.commitsHasMore ?? true,
       commitsLoading: session?.commitsLoading ?? false,
-      historyRevs: session?.historyRevs ?? [],
+      historyRevs: session?.historyRevs ?? NO_REVS,
       historyExpanded: session?.historyExpanded ?? null,
       view: session?.view ?? "changes",
       changeSelection: session?.changeSelection ?? null,
@@ -1988,9 +2027,18 @@ export function GitProvider({ children }: { children: ReactNode }) {
       stashSelection: session?.stashSelection ?? null,
       stashDetails: session?.stashDetails ?? null,
       stashDiff: session?.stashDiff ?? null,
-      stashes: session?.snapshot?.stashes ?? [],
+      stashes: session?.snapshot?.stashes ?? NO_STASHES,
       prefs,
       loading,
+      publishPrompt,
+    }),
+    [activeTab, activeTabId, loading, prefs, publishPrompt, recents, session, tabs],
+  );
+
+  // Every action reads refs rather than render state, so this object keeps its
+  // identity and the context value never changes after mount.
+  const actions = useMemo<GitActions>(
+    () => ({
       setView,
       beginActivity,
       endActivity,
@@ -2027,7 +2075,6 @@ export function GitProvider({ children }: { children: ReactNode }) {
       fetchAllRemotes,
       pullRemote,
       pushRemote,
-      publishPrompt,
       dismissPublish,
       confirmPublish,
       createBranch,
@@ -2060,13 +2107,6 @@ export function GitProvider({ children }: { children: ReactNode }) {
       updatePanelLayout,
     }),
     [
-      recents,
-      tabs,
-      activeTabId,
-      activeTab,
-      session,
-      prefs,
-      loading,
       setView,
       beginActivity,
       endActivity,
@@ -2103,7 +2143,6 @@ export function GitProvider({ children }: { children: ReactNode }) {
       fetchAllRemotes,
       pullRemote,
       pushRemote,
-      publishPrompt,
       dismissPublish,
       confirmPublish,
       createBranch,
@@ -2137,19 +2176,61 @@ export function GitProvider({ children }: { children: ReactNode }) {
     ],
   );
 
+  const [store] = useState(() => createStore(state));
+  useLayoutEffect(() => {
+    store.set(state);
+  }, [state, store]);
+  const context = useMemo(() => ({ store, actions }), [actions, store]);
+
   return (
-    <GitContext.Provider value={value}>
+    <GitContext.Provider value={context}>
       <ActivityContext.Provider value={activities}>{children}</ActivityContext.Provider>
     </GitContext.Provider>
   );
 }
 
-export function useGit() {
-  const value = useContext(GitContext);
-  if (!value) {
-    throw new Error("useGit must be used within GitProvider");
+/**
+ * Reads the named state fields and actions. The component re-renders only
+ * when one of the named state fields changes identity; actions never change.
+ */
+export function useGitPick<K extends keyof GitContextValue>(keys: readonly K[]): Pick<GitContextValue, K> {
+  const context = useContext(GitContext);
+  if (!context) {
+    throw new Error("useGitPick must be used within GitProvider");
   }
-  return value;
+  const { store, actions } = context;
+  const keyText = keys.join(",");
+  const select = useCallback(
+    (current: GitState) => {
+      const picked = {} as Pick<GitContextValue, K>;
+      for (const name of keyText.split(",") as K[]) {
+        picked[name] = (
+          name in actions ? actions[name as keyof GitActions] : current[name as keyof GitState]
+        ) as GitContextValue[K];
+      }
+      return picked;
+    },
+    [actions, keyText],
+  );
+  return useSyncExternalStoreWithSelector(store.subscribe, store.get, store.get, select, shallowEqual);
+}
+
+function shallowEqual<T extends object>(left: T, right: T) {
+  const keys = Object.keys(left) as (keyof T)[];
+  return keys.length === Object.keys(right).length && keys.every((key) => Object.is(left[key], right[key]));
+}
+
+/**
+ * Subscribes to one value derived from state. The selector must return a
+ * primitive or an existing reference, since results are compared with Object.is.
+ */
+export function useGitSelect<T>(selector: (state: GitState) => T): T {
+  const context = useContext(GitContext);
+  if (!context) {
+    throw new Error("useGitSelect must be used within GitProvider");
+  }
+  const { store } = context;
+  return useSyncExternalStoreWithSelector(store.subscribe, store.get, store.get, selector);
 }
 
 export function useActivities() {

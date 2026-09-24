@@ -90,9 +90,11 @@ pub fn load_prefs(app: &AppHandle) -> AppResult<AppPrefs> {
 
 pub fn save_prefs(app: &AppHandle, prefs: AppPrefs) -> AppResult<AppPrefs> {
     let path = prefs_path(app)?;
-    fs::write(
-        path,
-        serde_json::to_string_pretty(&prefs).unwrap_or_else(|_| "{}".into()),
+    crate::fsutil::write_atomic(
+        &path,
+        serde_json::to_string_pretty(&prefs)
+            .unwrap_or_else(|_| "{}".into())
+            .as_bytes(),
     )?;
     Ok(prefs)
 }

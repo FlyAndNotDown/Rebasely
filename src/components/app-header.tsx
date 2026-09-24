@@ -6,7 +6,6 @@ import {
   useState,
   type MouseEvent,
   type PointerEvent,
-  type UIEvent,
 } from "react";
 import {
   CheckIcon,
@@ -18,14 +17,6 @@ import {
   XIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -44,11 +35,14 @@ import { ActivityMeter } from "@/components/activity-meter";
 import { AppMark } from "@/components/app-mark";
 import { AppToolbar } from "@/components/app-toolbar";
 import { WindowControls } from "@/components/window-controls";
+import { CreateBranchDialog } from "@/components/create-ref-dialogs";
+import { defaultBranchRank, groupRemoteBranches, remoteGroupRank, shortRemoteName } from "@/lib/branches";
 import { disambiguateRepoLabels } from "@/lib/format";
 import { isRemoteTrackingBranch } from "@/lib/git";
+import { useWindowedRows } from "@/lib/use-windowed-rows";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { cn } from "@/lib/utils";
-import { useGit, type AppTab } from "@/state/git-context";
+import { useGitPick, type AppTab } from "@/state/git-context";
 import type { BranchInfo } from "@/types/git";
 
 export function AppHeader() {
@@ -64,20 +58,30 @@ export function AppHeader() {
     openTerminal,
     ensureBranches,
     checkoutBranch,
-    createBranch,
-  } = useGit();
+  } = useGitPick([
+    "snapshot",
+    "tabs",
+    "activeTabId",
+    "setActiveTab",
+    "closeTab",
+    "reorderTabs",
+    "revealRepo",
+    "openFolder",
+    "openTerminal",
+    "ensureBranches",
+    "checkoutBranch",
+  ]);
   const [branchOpen, setBranchOpen] = useState(false);
   const [branchMenuOpen, setBranchMenuOpen] = useState(false);
   const [branchQuery, setBranchQuery] = useState("");
-  const [newBranch, setNewBranch] = useState("");
   const repo = snapshot?.repo;
   const local = snapshot?.branches.local ?? [];
+  const remoteBranches = snapshot?.branches.remote;
+  const remotes = snapshot?.remotes;
   const remote = useMemo(() => {
-    const remoteNames = snapshot?.remotes.map((item) => item.name) ?? [];
-    return (snapshot?.branches.remote ?? []).filter((branch) =>
-      isRemoteTrackingBranch(branch.name, remoteNames),
-    );
-  }, [snapshot?.branches.remote, snapshot?.remotes]);
+    const remoteNames = remotes?.map((item) => item.name) ?? [];
+    return (remoteBranches ?? []).filter((branch) => isRemoteTrackingBranch(branch.name, remoteNames));
+  }, [remoteBranches, remotes]);
   const query = branchQuery.trim().toLowerCase();
   const remoteGroups = useMemo(() => groupRemoteBranches(remote), [remote]);
   const filteredRemote = useMemo(() => {
@@ -229,44 +233,7 @@ export function AppHeader() {
       ) : null}
       </div>
 
-      <Dialog open={branchOpen} onOpenChange={setBranchOpen}>
-        <DialogContent>
-          <form
-            onSubmit={(event) => {
-              event.preventDefault();
-              const name = newBranch.trim();
-              if (!name) return;
-              void createBranch(name, true).then((ok) => {
-                if (!ok) return;
-                setNewBranch("");
-                setBranchOpen(false);
-              });
-            }}
-          >
-            <DialogHeader>
-              <DialogTitle>Create branch</DialogTitle>
-              <DialogDescription>
-                Creates a branch from the current HEAD and checks it out.
-              </DialogDescription>
-            </DialogHeader>
-            <Input
-              className="mt-3 font-mono"
-              autoFocus
-              placeholder="foo"
-              value={newBranch}
-              onChange={(event) => setNewBranch(event.target.value)}
-            />
-            <DialogFooter className="mt-4">
-              <Button type="button" variant="outline" onClick={() => setBranchOpen(false)}>
-                Cancel
-              </Button>
-              <Button type="submit" disabled={!newBranch.trim()}>
-                Create and checkout
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+      <CreateBranchDialog open={branchOpen} onOpenChange={setBranchOpen} />
     </header>
   );
 }
@@ -293,7 +260,9 @@ function TabStrip({
   const reorderTabsRef = useRef(reorderTabs);
   const [hiddenIds, setHiddenIds] = useState<string[]>([]);
   const [draggingId, setDraggingId] = useState<string | null>(null);
-  reorderTabsRef.current = reorderTabs;
+  useLayoutEffect(() => {
+    reorderTabsRef.current = reorderTabs;
+  });
 
   useLayoutEffect(() => {
     const container = containerRef.current;
@@ -569,7 +538,9 @@ function TabButton({
               type="button"
               className={cn(
                 "flex size-4 items-center justify-center rounded-sm hover:bg-background/80",
-                active ? "opacity-100" : "opacity-0 group-hover:opacity-100",
+                active
+                  ? "opacity-100"
+                  : "opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 focus-visible:opacity-100",
               )}
               onPointerDown={(event) => event.stopPropagation()}
               onClick={onClose}
@@ -585,47 +556,6 @@ function TabButton({
   );
 }
 
-function remoteGroupRank(name: string) {
-  if (name === "origin") return 0;
-  return 1;
-}
-
-function defaultBranchRank(shortName: string) {
-  const base = shortName.split("/").pop() ?? shortName;
-  if (base === "main") return 0;
-  if (base === "master") return 1;
-  if (base === "develop") return 2;
-  return 3;
-}
-
-function groupRemoteBranches(branches: BranchInfo[]) {
-  const groups = new Map<string, BranchInfo[]>();
-  for (const branch of branches) {
-    const slash = branch.name.indexOf("/");
-    const remote = slash === -1 ? branch.name : branch.name.slice(0, slash);
-    const list = groups.get(remote) ?? [];
-    list.push(branch);
-    groups.set(remote, list);
-  }
-  for (const [remote, list] of groups) {
-    list.sort((left, right) => {
-      const leftName = shortRemoteName(left.name, remote);
-      const rightName = shortRemoteName(right.name, remote);
-      const rank = defaultBranchRank(leftName) - defaultBranchRank(rightName);
-      return rank !== 0 ? rank : leftName.localeCompare(rightName);
-    });
-  }
-  return [...groups.entries()].sort(([left], [right]) => {
-    const rank = remoteGroupRank(left) - remoteGroupRank(right);
-    return rank !== 0 ? rank : left.localeCompare(right);
-  });
-}
-
-function shortRemoteName(fullName: string, remoteName: string) {
-  const prefix = `${remoteName}/`;
-  return fullName.startsWith(prefix) ? fullName.slice(prefix.length) : fullName;
-}
-
 function VirtualBranchList({
   items,
   remoteName,
@@ -636,8 +566,6 @@ function VirtualBranchList({
   onPick: (name: string) => void;
 }) {
   const [query, setQuery] = useState("");
-  const [scrollTop, setScrollTop] = useState(0);
-  const listRef = useRef<HTMLDivElement>(null);
   const row = 36;
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -647,50 +575,43 @@ function VirtualBranchList({
       return short.includes(needle) || branch.name.toLowerCase().includes(needle);
     });
   }, [items, query, remoteName]);
-
-  useEffect(() => {
-    setScrollTop(0);
-    if (listRef.current) listRef.current.scrollTop = 0;
-  }, [query]);
-
+  const rows = useWindowedRows(filtered.length, row, 6);
   const height = Math.min(320, Math.max(filtered.length === 0 ? 48 : row, filtered.length * row));
-  const start = Math.max(0, Math.floor(scrollTop / row) - 6);
-  const visible = Math.ceil(height / row) + 12;
-  const slice = filtered.slice(start, start + visible);
-
-  function onScroll(event: UIEvent<HTMLDivElement>) {
-    setScrollTop(event.currentTarget.scrollTop);
-  }
 
   return (
     <div className="flex flex-col">
       <div className="border-b px-2 py-2" onPointerDown={(event) => event.stopPropagation()}>
         <Input
           value={query}
-          onChange={(event) => setQuery(event.target.value)}
+          onChange={(event) => {
+            setQuery(event.target.value);
+            rows.viewport?.scrollTo({ top: 0 });
+          }}
           onKeyDown={(event) => event.stopPropagation()}
           placeholder="Filter branches"
           className="h-7"
         />
       </div>
-      <ScrollArea viewportRef={listRef} style={{ height }} onScroll={onScroll}>
+      <ScrollArea viewportRef={rows.viewportRef} style={{ height }}>
         {filtered.length === 0 ? (
           <div className="flex h-full items-center justify-center px-3 text-xs text-muted-foreground">
             No matching branches
           </div>
         ) : (
-          <div className="relative" style={{ height: filtered.length * row }}>
-            {slice.map((branch, index) => (
+          <div>
+            <div style={{ height: rows.before }} />
+            {filtered.slice(rows.start, rows.end).map((branch) => (
               <button
                 key={branch.name}
                 type="button"
-                className="absolute right-0 left-0 flex items-center truncate px-3 text-left font-mono text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-                style={{ top: (start + index) * row, height: row }}
+                className="flex w-full items-center truncate px-3 text-left font-mono text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                style={{ height: row }}
                 onClick={() => onPick(branch.name)}
               >
                 {shortRemoteName(branch.name, remoteName)}
               </button>
             ))}
+            <div style={{ height: rows.after }} />
           </div>
         )}
       </ScrollArea>

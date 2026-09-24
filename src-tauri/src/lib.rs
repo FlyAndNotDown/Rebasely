@@ -1,4 +1,5 @@
 mod error;
+mod fsutil;
 mod git;
 mod prefs;
 mod recents;
@@ -428,17 +429,17 @@ async fn rebase_interactive(
 
 #[tauri::command]
 async fn rebase_continue(repo_path: String) -> AppResult<WorkspaceSnapshot> {
-    with_repo_async(repo_path, |repo| git::rebase_continue(repo)).await
+    with_repo_async(repo_path, git::rebase_continue).await
 }
 
 #[tauri::command]
 async fn rebase_skip(repo_path: String) -> AppResult<WorkspaceSnapshot> {
-    with_repo_async(repo_path, |repo| git::rebase_skip(repo)).await
+    with_repo_async(repo_path, git::rebase_skip).await
 }
 
 #[tauri::command]
 async fn rebase_abort(repo_path: String) -> AppResult<WorkspaceSnapshot> {
-    with_repo_async(repo_path, |repo| git::rebase_abort(repo)).await
+    with_repo_async(repo_path, git::rebase_abort).await
 }
 
 #[tauri::command]
@@ -448,12 +449,12 @@ async fn merge_ref(repo_path: String, onto: String) -> AppResult<WorkspaceSnapsh
 
 #[tauri::command]
 async fn operation_continue(repo_path: String) -> AppResult<WorkspaceSnapshot> {
-    with_repo_async(repo_path, |repo| git::operation_continue(repo)).await
+    with_repo_async(repo_path, git::operation_continue).await
 }
 
 #[tauri::command]
 async fn operation_abort(repo_path: String) -> AppResult<WorkspaceSnapshot> {
-    with_repo_async(repo_path, |repo| git::operation_abort(repo)).await
+    with_repo_async(repo_path, git::operation_abort).await
 }
 
 #[tauri::command]
@@ -543,27 +544,27 @@ async fn stash_save(
 }
 
 #[tauri::command]
-async fn stash_apply(repo_path: String, index: usize) -> AppResult<WorkspaceSnapshot> {
+async fn stash_apply(repo_path: String, id: String) -> AppResult<WorkspaceSnapshot> {
     with_repo_async(repo_path, move |repo| {
-        git::stash_apply(repo, index)?;
+        git::stash_apply(repo, &id)?;
         git::snapshot(repo)
     })
     .await
 }
 
 #[tauri::command]
-async fn stash_pop(repo_path: String, index: usize) -> AppResult<WorkspaceSnapshot> {
+async fn stash_pop(repo_path: String, id: String) -> AppResult<WorkspaceSnapshot> {
     with_repo_async(repo_path, move |repo| {
-        git::stash_pop(repo, index)?;
+        git::stash_pop(repo, &id)?;
         git::snapshot(repo)
     })
     .await
 }
 
 #[tauri::command]
-async fn stash_drop(repo_path: String, index: usize) -> AppResult<WorkspaceSnapshot> {
+async fn stash_drop(repo_path: String, id: String) -> AppResult<WorkspaceSnapshot> {
     with_repo_async(repo_path, move |repo| {
-        git::stash_drop(repo, index)?;
+        git::stash_drop(repo, &id)?;
         git::snapshot(repo)
     })
     .await
@@ -639,6 +640,7 @@ async fn open_in_terminal(path: String, app: AppHandle) -> AppResult<()> {
 
 #[tauri::command]
 fn sync_watches(paths: Vec<String>, app: AppHandle, state: State<WatchState>) -> AppResult<()> {
+    git::retain_log_streams(&paths);
     watch::sync_watches(&app, &state, paths)
 }
 
@@ -667,13 +669,13 @@ fn apply_caption_color(window: &tauri::WebviewWindow, dark: bool) {
         return;
     };
     // COLORREF 0x00BBGGRR matching --background in index.css
-    let caption: u32 = if dark { 0x0017_17_17 } else { 0x00FB_FB_FB };
-    let text: u32 = if dark { 0x00FF_FF_FF } else { 0x0000_00_00 };
+    let caption: u32 = if dark { 0x00_17_17_17 } else { 0x00_FB_FB_FB };
+    let text: u32 = if dark { 0x00_FF_FF_FF } else { 0x00_00_00_00 };
     const DWMWA_BORDER_COLOR: u32 = 34;
     const DWMWA_CAPTION_COLOR: u32 = 35;
     const DWMWA_TEXT_COLOR: u32 = 36;
     unsafe {
-        let handle = hwnd.0 as *mut std::ffi::c_void;
+        let handle = hwnd.0;
         dwm_set_color(handle, DWMWA_CAPTION_COLOR, caption);
         dwm_set_color(handle, DWMWA_BORDER_COLOR, caption);
         dwm_set_color(handle, DWMWA_TEXT_COLOR, text);

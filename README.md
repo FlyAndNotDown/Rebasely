@@ -19,11 +19,10 @@ npm run dev
 ## Check
 
 ```bash
-npm run typecheck
-npm run lint
-npm test
-cd src-tauri && cargo test
+npm run check       # typecheck, lint, and frontend tests
+npm run check:all   # the above plus the Rust tests
 ```
+
 
 ## Build
 

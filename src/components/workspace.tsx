@@ -1,5 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { useGroupRef, type Layout } from "react-resizable-panels";
+import { useState, type ReactNode } from "react";
 import { ChangesPane } from "@/components/changes-pane";
 import { RebaseBanner } from "@/components/rebase-dialog";
 import { CommitFiles } from "@/components/commit-files";
@@ -16,31 +15,8 @@ import {
 } from "@/components/ui/resizable";
 import { WorkspaceSkeleton } from "@/components/skeletons";
 import { cn } from "@/lib/utils";
-import { useGit } from "@/state/git-context";
-import type { PanelLayoutId } from "@/types/git";
-
-function usePanelGroupLayout(id: PanelLayoutId) {
-  const { prefs, updatePanelLayout } = useGit();
-  const groupRef = useGroupRef();
-  const layout = prefs.panelLayouts[id];
-  const layoutRef = useRef(layout);
-  layoutRef.current = layout;
-
-  useLayoutEffect(() => {
-    const frame = requestAnimationFrame(() => {
-      groupRef.current?.setLayout(layoutRef.current);
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [groupRef]);
-
-  return {
-    groupRef,
-    defaultLayout: layout,
-    onLayoutChanged: (next: Layout, meta: { isUserInteraction: boolean }) => {
-      if (meta.isUserInteraction) updatePanelLayout(id, next);
-    },
-  };
-}
+import { useGitPick, useGitSelect } from "@/state/git-context";
+import { usePanelGroupLayout } from "@/state/use-panel-group-layout";
 
 function HistoryWorkspace() {
   const shell = usePanelGroupLayout("historyShell");
@@ -185,26 +161,23 @@ function StackedPane({
 }
 
 export function Workspace() {
-  const { view, snapshot } = useGit();
+  const { view } = useGitPick(["view"]);
+  const hasSnapshot = useGitSelect((state) => state.snapshot !== null);
   const [visited, setVisited] = useState({
     history: view === "history",
     stash: view === "stash",
     files: view === "files",
   });
+  // Panes stay mounted once visited. Updating during render (rather than in an
+  // effect) avoids a second render pass with the pane missing.
+  if (view !== "changes" && !visited[view]) {
+    setVisited({ ...visited, [view]: true });
+  }
   const showHistory = visited.history || view === "history";
   const showStash = visited.stash || view === "stash";
   const showFiles = visited.files || view === "files";
 
-  useEffect(() => {
-    setVisited((current) => {
-      if (view === "history" && !current.history) return { ...current, history: true };
-      if (view === "stash" && !current.stash) return { ...current, stash: true };
-      if (view === "files" && !current.files) return { ...current, files: true };
-      return current;
-    });
-  }, [view]);
-
-  if (!snapshot) return <WorkspaceSkeleton />;
+  if (!hasSnapshot) return <WorkspaceSkeleton />;
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">

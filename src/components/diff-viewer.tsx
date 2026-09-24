@@ -5,7 +5,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { diffLineSpans, textColumns, type TextSpan } from "@/lib/diff-text";
 import { useWindowedRows } from "@/lib/use-windowed-rows";
 import { cn } from "@/lib/utils";
-import { useGit } from "@/state/git-context";
+import { useGitPick } from "@/state/git-context";
 import type { FileDiff } from "@/types/git";
 
 export type DiffSource = "changes" | "history" | "stash";
@@ -25,7 +25,18 @@ export function DiffViewer({ source }: { source: DiffSource }) {
     stashDetails,
     snapshot,
     comparison,
-  } = useGit();
+  } = useGitPick([
+    "changeSelection",
+    "historySelection",
+    "stashSelection",
+    "changeDiff",
+    "historyDiff",
+    "stashDiff",
+    "commitDetails",
+    "stashDetails",
+    "snapshot",
+    "comparison",
+  ]);
   const comparing = source === "history" && comparison != null;
   const selection = comparing
     ? comparison.path
@@ -106,6 +117,7 @@ export function DiffViewer({ source }: { source: DiffSource }) {
       </div>
       {conflicted && selection.type === "change" ? (
         <ConflictEditor
+          key={`${snapshot?.repo.path ?? ""}:${selection.path}`}
           repoPath={snapshot?.repo.path ?? ""}
           path={selection.path}
           rebasing={snapshot?.repo.operation?.kind === "rebase"}

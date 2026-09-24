@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+use std::sync::{Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Manager};
 
@@ -8,6 +9,13 @@ use crate::error::AppResult;
 use crate::git::strip_verbatim_prefix;
 
 const MAX_RECENTS: usize = 12;
+
+/// Opening and forgetting run on background threads; this keeps two
+/// read-modify-write cycles from dropping each other's change.
+fn recents_lock() -> MutexGuard<'static, ()> {
+    static LOCK: Mutex<()> = Mutex::new(());
+    LOCK.lock().unwrap_or_else(|err| err.into_inner())
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -26,6 +34,11 @@ fn recents_path(app: &AppHandle) -> AppResult<PathBuf> {
 }
 
 pub fn load_recents(app: &AppHandle) -> AppResult<Vec<RecentRepo>> {
+    let _guard = recents_lock();
+    read_recents(app)
+}
+
+fn read_recents(app: &AppHandle) -> AppResult<Vec<RecentRepo>> {
     let path = recents_path(app)?;
     if !path.exists() {
         return Ok(Vec::new());
@@ -48,7 +61,8 @@ pub fn load_recents(app: &AppHandle) -> AppResult<Vec<RecentRepo>> {
 
 fn save_recents(app: &AppHandle, recents: &[RecentRepo]) -> AppResult<()> {
     let path = recents_path(app)?;
-    fs::write(path, serde_json::to_string_pretty(recents).unwrap_or_else(|_| "[]".into()))?;
+    let data = serde_json::to_string_pretty(recents).unwrap_or_else(|_| "[]".into());
+    crate::fsutil::write_atomic(&path, data.as_bytes())?;
     Ok(())
 }
 
@@ -58,7 +72,8 @@ pub fn remember_repo(app: &AppHandle, path: &str, name: &str) -> AppResult<Vec<R
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
     let path = strip_verbatim_prefix(path);
-    let mut recents = load_recents(app)?;
+    let _guard = recents_lock();
+    let mut recents = read_recents(app)?;
     recents.retain(|item| item.path != path);
     recents.insert(
         0,
@@ -75,7 +90,8 @@ pub fn remember_repo(app: &AppHandle, path: &str, name: &str) -> AppResult<Vec<R
 
 pub fn forget_repo(app: &AppHandle, path: &str) -> AppResult<Vec<RecentRepo>> {
     let path = strip_verbatim_prefix(path);
-    let mut recents = load_recents(app)?;
+    let _guard = recents_lock();
+    let mut recents = read_recents(app)?;
     recents.retain(|item| item.path != path);
     save_recents(app, &recents)?;
     Ok(recents)

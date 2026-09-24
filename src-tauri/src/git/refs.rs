@@ -29,7 +29,7 @@ pub(super) fn branch_list(
             upstream,
         });
     }
-    local.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    local.sort_by_cached_key(|branch| branch.name.to_lowercase());
 
     let mut remote = Vec::new();
     if include_remote {
@@ -55,7 +55,7 @@ pub(super) fn branch_list(
                         upstream: None,
                     });
                 }
-                items.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+                items.sort_by_cached_key(|branch| branch.name.to_lowercase());
                 items
             }
         };

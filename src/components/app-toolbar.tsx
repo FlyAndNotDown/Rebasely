@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import {
   ArrowDownFromLineIcon,
   ArrowDownToLineIcon,
@@ -9,7 +9,7 @@ import {
   Settings2Icon,
 } from "lucide-react";
 import { Popover as PopoverPrimitive } from "radix-ui";
-import { RepoSettingsDialog } from "@/components/repo-settings-dialog";
+import { RepoSettingsDialog } from "@/components/lazy-dialogs";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -29,7 +29,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { defaultFetchRemote, primaryRemote, useGit } from "@/state/git-context";
+import { defaultFetchRemote, primaryRemote, useGitPick } from "@/state/git-context";
 
 type SyncAction = "fetch" | "pull" | "push" | null;
 
@@ -46,7 +46,19 @@ export function AppToolbar() {
     dismissPublish,
     confirmPublish,
     applyPatch,
-  } = useGit();
+  } = useGitPick([
+    "snapshot",
+    "prefs",
+    "updatePrefs",
+    "fetchRemote",
+    "fetchAllRemotes",
+    "pullRemote",
+    "pushRemote",
+    "publishPrompt",
+    "dismissPublish",
+    "confirmPublish",
+    "applyPatch",
+  ]);
   const [repoSettingsOpen, setRepoSettingsOpen] = useState(false);
   const [syncAction, setSyncAction] = useState<SyncAction>(null);
   if (!snapshot) return null;
@@ -69,7 +81,6 @@ export function AppToolbar() {
           icon={<ArrowDownFromLineIcon className="size-4" />}
         >
           <FetchPanel
-            open={syncAction === "fetch"}
             remotes={remotes}
             initial={fetchTarget}
             onFetch={(remote) => {
@@ -95,7 +106,6 @@ export function AppToolbar() {
           icon={<ArrowDownToLineIcon className="size-4" />}
         >
           <PullPanel
-            open={syncAction === "pull"}
             remotes={remotes}
             initial={primary}
             rebase={prefs.pullRebase}
@@ -122,7 +132,6 @@ export function AppToolbar() {
           icon={<ArrowUpFromLineIcon className="size-4" />}
         >
           <PushPanel
-            open={syncAction === "push"}
             remotes={remotes}
             initial={primary}
             branch={snapshot.repo.currentBranch}
@@ -223,24 +232,18 @@ function SyncPopover({
   );
 }
 
+// The panels live in popover content, which mounts on each open, so their
+// initial state is computed fresh every time.
 function FetchPanel({
-  open,
   remotes,
   initial,
   onFetch,
 }: {
-  open: boolean;
   remotes: string[];
   initial?: string;
   onFetch: (remote: string) => void;
 }) {
-  const [remote, setRemote] = useState(initial ?? "*");
-  const remoteKey = remotes.join("\0");
-  useEffect(() => {
-    if (!open) return;
-    const names = remoteKey ? remoteKey.split("\0") : [];
-    setRemote(initial && names.includes(initial) ? initial : "*");
-  }, [initial, open, remoteKey]);
+  const [remote, setRemote] = useState(() => (initial && remotes.includes(initial) ? initial : "*"));
   return (
     <Panel
       title="Fetch"
@@ -260,27 +263,18 @@ function FetchPanel({
 }
 
 function PullPanel({
-  open,
   remotes,
   initial,
   rebase,
   onPull,
 }: {
-  open: boolean;
   remotes: string[];
   initial?: string;
   rebase: boolean;
   onPull: (remote: string, rebase: boolean) => void;
 }) {
-  const [remote, setRemote] = useState(initial ?? "");
+  const [remote, setRemote] = useState(() => pickRemote(remotes, initial));
   const [strategy, setStrategy] = useState(rebase ? "rebase" : "merge");
-  const remoteKey = remotes.join("\0");
-  useEffect(() => {
-    if (!open) return;
-    const names = remoteKey ? remoteKey.split("\0") : [];
-    setRemote(initial && names.includes(initial) ? initial : (names[0] ?? ""));
-    setStrategy(rebase ? "rebase" : "merge");
-  }, [initial, open, rebase, remoteKey]);
   return (
     <Panel title="Pull" action="Pull" disabled={!remote} onSubmit={() => onPull(remote, strategy === "rebase")}>
       <SelectField
@@ -303,28 +297,23 @@ function PullPanel({
   );
 }
 
+function pickRemote(remotes: string[], initial?: string) {
+  return initial && remotes.includes(initial) ? initial : (remotes[0] ?? "");
+}
+
 function PushPanel({
-  open,
   remotes,
   initial,
   branch,
   onPush,
 }: {
-  open: boolean;
   remotes: string[];
   initial?: string;
   branch: string | null;
   onPush: (remote: string, force: boolean) => void;
 }) {
-  const [remote, setRemote] = useState(initial ?? "");
+  const [remote, setRemote] = useState(() => pickRemote(remotes, initial));
   const [force, setForce] = useState(false);
-  const remoteKey = remotes.join("\0");
-  useEffect(() => {
-    if (!open) return;
-    const names = remoteKey ? remoteKey.split("\0") : [];
-    setRemote(initial && names.includes(initial) ? initial : (names[0] ?? ""));
-    setForce(false);
-  }, [initial, open, remoteKey]);
   const target = remote && branch ? `${remote}/${branch}` : "the remote branch";
   return (
     <Panel

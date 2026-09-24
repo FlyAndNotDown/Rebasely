@@ -1,13 +1,12 @@
 use super::*;
 
 fn temp_repo() -> (PathBuf, Repository) {
+    // Tests run in parallel and the clock is too coarse to tell them apart.
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let root = std::env::temp_dir().join(format!(
-        "rebasely-stash-{}-{}",
+        "rebasely-test-{}-{}",
         std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos()
+        NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     ));
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(&root).unwrap();
@@ -385,4 +384,219 @@ fn pathspec_chunks_split_long_lists() {
     assert!(chunks.len() > 1);
     assert_eq!(chunks.iter().map(|chunk| chunk.len()).sum::<usize>(), paths.len());
     assert!(pathspec_chunks(&[]).is_empty());
+}
+
+#[test]
+fn stash_actions_follow_the_id_after_indexes_shift() {
+    let (root, mut repo) = temp_repo();
+    commit_file(&mut repo, &root, "file.txt", "base\n", "base");
+    fs::write(root.join("file.txt"), "first\n").unwrap();
+    stash_save(&mut repo, "first", false).unwrap();
+    let first = list_stashes(&mut repo).unwrap()[0].id.clone();
+    fs::write(root.join("file.txt"), "second\n").unwrap();
+    stash_save(&mut repo, "second", false).unwrap();
+
+    // "first" is now stash@{1}; dropping by id must not touch "second".
+    stash_drop(&mut repo, &first).unwrap();
+    let left = list_stashes(&mut repo).unwrap();
+    assert_eq!(left.len(), 1);
+    assert!(left[0].message.contains("second"), "{:?}", left[0].message);
+    assert!(stash_apply(&mut repo, &first).is_err());
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn file_history_follows_a_rename() {
+    let (root, mut repo) = temp_repo();
+    commit_file(&mut repo, &root, "old.txt", "one\ntwo\nthree\nfour\n", "add old");
+    commit_file(&mut repo, &root, "old.txt", "one\ntwo\nthree\nfour\nfive\n", "edit old");
+    run_git_stdout(&root, &["mv", "old.txt", "new name.txt"]).unwrap();
+    run_git_stdout(&root, &["commit", "-q", "-m", "rename"]).unwrap();
+
+    let commits = file_commits(&repo, "new name.txt", 10, 0).unwrap();
+    let seen: Vec<_> = commits
+        .iter()
+        .map(|commit| (commit.summary.as_str(), commit.path.as_deref().unwrap_or("")))
+        .collect();
+    assert_eq!(
+        seen,
+        vec![("rename", "new name.txt"), ("edit old", "old.txt"), ("add old", "old.txt")]
+    );
+    let paged = file_commits(&repo, "new name.txt", 1, 1).unwrap();
+    assert_eq!(paged[0].path.as_deref(), Some("old.txt"));
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn blame_of_a_file_not_in_head_is_empty_but_other_failures_surface() {
+    let (root, mut repo) = temp_repo();
+    commit_file(&mut repo, &root, "tracked.txt", "a\n", "base");
+    fs::write(root.join("loose.txt"), "b\n").unwrap();
+    assert!(file_blame(&repo, "loose.txt").unwrap().is_empty());
+    assert_eq!(file_blame(&repo, "tracked.txt").unwrap().len(), 1);
+    fs::create_dir_all(root.join("dir")).unwrap();
+    assert!(file_blame(&repo, "../outside.txt").is_err());
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn porcelain_status_splits_staged_unstaged_renames_and_conflicts() {
+    let raw = b" M a.txt\0M  b.txt\0MM c.txt\0R  new.txt\0old.txt\0?? dir/u.txt\0UU both.txt\0AA added.txt\0 D gone.txt\0";
+    let status = parse_porcelain(raw).unwrap();
+    let staged: Vec<_> = status
+        .staged
+        .iter()
+        .map(|file| (file.path.as_str(), file.old_path.as_deref(), file.kind.as_str()))
+        .collect();
+    assert_eq!(
+        staged,
+        vec![
+            ("b.txt", None, "modified"),
+            ("c.txt", None, "modified"),
+            ("new.txt", Some("old.txt"), "renamed"),
+        ]
+    );
+    let unstaged: Vec<_> = status
+        .unstaged
+        .iter()
+        .map(|file| (file.path.as_str(), file.kind.as_str()))
+        .collect();
+    assert_eq!(
+        unstaged,
+        vec![
+            ("a.txt", "modified"),
+            ("c.txt", "modified"),
+            ("dir/u.txt", "untracked"),
+            ("both.txt", "conflicted"),
+            ("added.txt", "conflicted"),
+            ("gone.txt", "deleted"),
+        ]
+    );
+}
+
+#[test]
+fn staged_rename_is_listed_under_its_new_name() {
+    let (root, mut repo) = temp_repo();
+    commit_file(&mut repo, &root, "old.txt", "one\ntwo\nthree\nfour\n", "base");
+    run_git_stdout(&root, &["mv", "old.txt", "new.txt"]).unwrap();
+    let status = status_from_git(&root).unwrap();
+    assert_eq!(status.staged.len(), 1, "{:?}", status.staged);
+    assert_eq!(status.staged[0].path, "new.txt");
+    assert_eq!(status.staged[0].old_path.as_deref(), Some("old.txt"));
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn git_log_parser_reads_fields_and_parents() {
+    let raw = b"aaaaaaa1\0aaaaaaa\0Merge side\0Ann\0ann@x\x001700000000\0bbbbbbb1 ccccccc1\n\
+                bbbbbbb1\0bbbbbbb\0Root\0Bob\0bob@x\x001600000000\0\n";
+    let commits = parse_git_log(raw).unwrap();
+    assert_eq!(commits.len(), 2);
+    assert_eq!(commits[0].summary, "Merge side");
+    assert_eq!(commits[0].parents, vec!["bbbbbbb1", "ccccccc1"]);
+    assert_eq!(commits[0].timestamp, 1_700_000_000);
+    assert!(commits[1].parents.is_empty());
+}
+
+#[test]
+fn blame_parser_merges_runs_and_skips_uncommitted_lines() {
+    let first = "1".repeat(40);
+    let second = "2".repeat(40);
+    let zero = "0".repeat(40);
+    let raw = format!(
+        "{first} 1 1 2\nauthor Alice\nauthor-mail <a@x>\nauthor-time 100\nauthor-tz +0000\nsummary one\nfilename a.txt\n\tline one\n\
+         {first} 2 2\n\tline two\n\
+         {zero} 3 3 1\nauthor Not Committed Yet\nauthor-time 0\nfilename a.txt\n\tline three\n\
+         {second} 4 4 1\nauthor Bob\nauthor-time 200\nfilename a.txt\n\tline four\n"
+    );
+    let hunks = parse_blame_porcelain(raw.as_bytes());
+    let seen: Vec<_> = hunks
+        .iter()
+        .map(|hunk| (hunk.start, hunk.count, hunk.author.as_str(), hunk.time))
+        .collect();
+    assert_eq!(seen, vec![(0, 2, "Alice", 100), (3, 1, "Bob", 200)]);
+}
+
+#[test]
+fn name_status_parser_reads_renames_old_path_first() {
+    let files = parse_name_status_z(b"M\0a.txt\0R100\0old.txt\0new.txt\0A\0img.png\0").unwrap();
+    let seen: Vec<_> = files
+        .iter()
+        .map(|file| (file.path.as_str(), file.old_path.as_deref(), file.kind.as_str(), file.binary))
+        .collect();
+    assert_eq!(
+        seen,
+        vec![
+            ("a.txt", None, "modified", false),
+            ("new.txt", Some("old.txt"), "renamed", false),
+            ("img.png", None, "added", true),
+        ]
+    );
+}
+
+#[test]
+fn keeping_both_sides_drops_markers_and_the_diff3_base() {
+    let plain = "a\n<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> side\nz\n";
+    assert_eq!(take_both_sides(plain).as_deref(), Some("a\nours\ntheirs\nz\n"));
+    let diff3 = "<<<<<<< HEAD\nours\n||||||| base\nbase\n=======\ntheirs\n>>>>>>> side\n";
+    assert_eq!(take_both_sides(diff3).as_deref(), Some("ours\ntheirs\n"));
+    assert_eq!(take_both_sides("no markers\n"), None);
+}
+
+#[test]
+fn history_pages_are_contiguous_whether_or_not_the_stream_is_reused() {
+    let (root, mut repo) = temp_repo();
+    for n in 0..10 {
+        commit_file(&mut repo, &root, "file.txt", &format!("{n}\n"), &format!("c{n}"));
+    }
+    let page = |skip| {
+        commits(&repo, 3, skip, None, &[])
+            .unwrap()
+            .into_iter()
+            .map(|commit| commit.summary)
+            .collect::<Vec<_>>()
+    };
+    let mut seen = page(0);
+    seen.extend(page(3));
+    seen.extend(page(6));
+    seen.extend(page(9));
+    assert_eq!(seen, (0..10).rev().map(|n| format!("c{n}")).collect::<Vec<_>>());
+    // Out of order: the open stream is at 12, so this restarts and reads through.
+    assert_eq!(page(3), vec!["c6", "c5", "c4"]);
+    assert!(page(10).is_empty());
+    retain_log_streams(&[]);
+    let _ = fs::remove_dir_all(&root);
+}
+
+/// `REBASELY_BENCH_REPO=<path> cargo test bench_history_pages -- --ignored --nocapture`
+#[test]
+#[ignore]
+fn bench_history_pages() {
+    let Ok(path) = std::env::var("REBASELY_BENCH_REPO") else { return };
+    let mut repo = open_at(Path::new(&path)).unwrap();
+    for skip in [0, 80, 160, 240] {
+        let started = std::time::Instant::now();
+        let items = commits(&repo, 80, skip, None, &[]).unwrap();
+        println!("skip={skip}: {} commits in {:?}", items.len(), started.elapsed());
+    }
+    let started = std::time::Instant::now();
+    snapshot(&mut repo).unwrap();
+    println!("snapshot: {:?}", started.elapsed());
+    let started = std::time::Instant::now();
+    for _ in 0..50 {
+        let repo = open_at(Path::new(&path)).unwrap();
+        let _ = repo.head().unwrap().target();
+    }
+    println!("open + head: {:?} each", started.elapsed() / 50);
+}
+
+#[test]
+fn follow_log_parser_tracks_names_across_records() {
+    let raw = "\u{1e}aaaaaaa\0aaaaaaa\0rename\0A\0a@x\x001\0bbbbbbb\0\nR100\0old.txt\0new.txt\0\
+               \u{1e}bbbbbbb\0bbbbbbb\0merge\0A\0a@x\x000\0ccccccc ddddddd\0\
+               \u{1e}ccccccc\0ccccccc\0edit\0A\0a@x\x000\0\0\nM\0old.txt\0";
+    let commits = parse_follow_log(raw.as_bytes(), "new.txt");
+    let paths: Vec<_> = commits.iter().map(|commit| commit.path.clone().unwrap()).collect();
+    assert_eq!(paths, vec!["new.txt", "old.txt", "old.txt"]);
+    assert_eq!(commits[1].parents.len(), 2);
 }

@@ -7,7 +7,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { formatAbsoluteTime } from "@/lib/format";
 import { fileKindClass, fileKindLabel } from "@/lib/file-kind";
 import { cn } from "@/lib/utils";
-import { useGit } from "@/state/git-context";
+import { useGitPick } from "@/state/git-context";
 import type { CommitFile } from "@/types/git";
 
 export function CommitFiles() {
@@ -20,7 +20,16 @@ export function CommitFiles() {
     swapComparison,
     closeComparison,
     selectCompareFile,
-  } = useGit();
+  } = useGitPick([
+    "commitDetails",
+    "historySelection",
+    "selectCommitFile",
+    "prefs",
+    "comparison",
+    "swapComparison",
+    "closeComparison",
+    "selectCompareFile",
+  ]);
   const selectedPath = comparison ? comparison.path : historySelection?.path;
   const onSelect = useCallback(
     (path: string) => {

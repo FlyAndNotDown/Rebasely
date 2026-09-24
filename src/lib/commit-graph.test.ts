@@ -84,7 +84,7 @@ function mergeLineKeepsBranchColor() {
 }
 
 function sideTipInterleavesByDate() {
-  // Author-date order can place another branch's tip between two commits on main.
+  // Date order can place another branch's tip between two commits on main.
   const rows = layoutCommitGraph([
     { id: "D", parents: ids("C") },
     { id: "S", parents: ids("A") },

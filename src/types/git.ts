@@ -85,6 +85,8 @@ export interface CommitSummary {
   refs: CommitRef[];
   onCurrentBranch: boolean;
   onTrackingBranch: boolean;
+  /** The file's name at this commit; only set by per-file history. */
+  path?: string;
 }
 
 export interface DiffLine {

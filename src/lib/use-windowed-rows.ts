@@ -35,6 +35,7 @@ export function useWindowedRows(count: number, rowHeight: number, overscan = 16)
   const end = Math.min(count, Math.ceil((view.top + height) / rowHeight) + overscan);
   return {
     viewportRef: setNode,
+    viewport: node,
     start,
     end,
     before: start * rowHeight,

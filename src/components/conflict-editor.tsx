@@ -13,7 +13,7 @@ import {
 } from "@/lib/conflict-text";
 import { errorMessage, gitApi } from "@/lib/git";
 import { cn } from "@/lib/utils";
-import { useGit } from "@/state/git-context";
+import { useGitPick } from "@/state/git-context";
 
 export function ConflictEditor({
   repoPath,
@@ -24,7 +24,7 @@ export function ConflictEditor({
   path: string;
   rebasing: boolean;
 }) {
-  const { saveConflict, resolveConflict } = useGit();
+  const { saveConflict, resolveConflict } = useGitPick(["saveConflict", "resolveConflict"]);
   const [text, setText] = useState("");
   const [eol, setEol] = useState<"\n" | "\r\n">("\n");
   const [binary, setBinary] = useState(false);
@@ -39,22 +39,18 @@ export function ConflictEditor({
   const past = useRef<string[]>([]);
   const future = useRef<string[]>([]);
   const echo = useRef(false);
-  textRef.current = text;
+  useLayoutEffect(() => {
+    textRef.current = text;
+  });
   const hunks = conflictHunks(text);
   const segments = conflictSegments(text);
   const current = rebasing ? "Target" : "Current";
   const incoming = rebasing ? "Replaying" : "Incoming";
   const shown = hunks.length === 0 ? 0 : Math.min(active, hunks.length - 1);
 
+  // The parent keys this editor by file, so each file starts from fresh state.
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    setError(null);
-    setActive(0);
-    past.current = [];
-    future.current = [];
-    setCanUndo(false);
-    setCanRedo(false);
     void gitApi
       .conflictView(repoPath, path)
       .then((view) => {
@@ -136,8 +132,10 @@ export function ConflictEditor({
 
   const undoRef = useRef(undo);
   const redoRef = useRef(redo);
-  undoRef.current = undo;
-  redoRef.current = redo;
+  useLayoutEffect(() => {
+    undoRef.current = undo;
+    redoRef.current = redo;
+  });
 
   useEffect(() => {
     function onKey(event: globalThis.KeyboardEvent) {

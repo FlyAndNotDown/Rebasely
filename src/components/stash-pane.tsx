@@ -20,11 +20,18 @@ import {
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
-import { useGit } from "@/state/git-context";
+import { useGitPick } from "@/state/git-context";
 import type { StashInfo } from "@/types/git";
 
 export function StashPane() {
-  const { stashes, stashSelection, selectStash, stashApply, stashPop, stashDrop } = useGit();
+  const { stashes, stashSelection, selectStash, stashApply, stashPop, stashDrop } = useGitPick([
+    "stashes",
+    "stashSelection",
+    "selectStash",
+    "stashApply",
+    "stashPop",
+    "stashDrop",
+  ]);
   const [dropping, setDropping] = useState<StashInfo | null>(null);
 
   return (
@@ -43,8 +50,8 @@ export function StashPane() {
                 stash={stash}
                 selected={stashSelection?.id === stash.id}
                 onSelect={() => void selectStash(stash)}
-                onApply={() => void stashApply(stash.index)}
-                onPop={() => void stashPop(stash.index)}
+                onApply={() => void stashApply(stash.id)}
+                onPop={() => void stashPop(stash.id)}
                 onDrop={() => setDropping(stash)}
               />
             ))}
@@ -73,7 +80,7 @@ export function StashPane() {
             <Button
               variant="destructive"
               onClick={() => {
-                if (dropping) void stashDrop(dropping.index);
+                if (dropping) void stashDrop(dropping.id);
                 setDropping(null);
               }}
             >
@@ -87,7 +94,7 @@ export function StashPane() {
 }
 
 export function StashComposer() {
-  const { stashSave } = useGit();
+  const { stashSave } = useGitPick(["stashSave"]);
   const [message, setMessage] = useState("");
   const [includeUntracked, setIncludeUntracked] = useState(true);
   const [saving, setSaving] = useState(false);

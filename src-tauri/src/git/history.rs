@@ -19,6 +19,7 @@ pub(super) fn summarize_oid(repo: &Repository, oid: Oid) -> AppResult<CommitSumm
         refs: Vec::new(),
         on_current_branch: true,
         on_tracking_branch: false,
+        path: None,
     })
 }
 
@@ -35,14 +36,15 @@ pub fn commits(
         return search_commits(repo, limit, skip, query, &revs);
     }
     if let Ok(root) = workdir(repo) {
-        let args = git_log_args(
-            limit,
-            skip,
-            &revs,
-            &["-c", "log.showSignature=false", "log", "--author-date-order"],
-        );
-        let argv: Vec<&str> = args.iter().map(String::as_str).collect();
-        if let Ok(stdout) = run_git_stdout(root, &argv) {
+        // Committer-date order, unlike author-date order, lets git stream from
+        // the commit-graph instead of sorting all of history first.
+        let args = git_log_args(&revs, &["-c", "log.showSignature=false", "log", "--date-order"]);
+        let warming = if skip == 0 { warm_reachable(repo) } else { Vec::new() };
+        let page = log_page(root, &args, skip, limit);
+        for handle in warming {
+            let _ = handle.join();
+        }
+        if let Ok(stdout) = page {
             let mut items = parse_git_log(&stdout)?;
             decorate_commits(repo, &mut items);
             return Ok(items);
@@ -72,13 +74,11 @@ pub(super) fn push_all_branch_tips(args: &mut Vec<String>) {
     }
 }
 
-pub(super) fn git_log_args(limit: usize, skip: usize, revs: &[String], prefix: &[&str]) -> Vec<String> {
+pub(super) fn git_log_args(revs: &[String], prefix: &[&str]) -> Vec<String> {
     let mut args: Vec<String> = prefix.iter().map(|value| (*value).to_string()).collect();
     if revs.is_empty() {
         push_all_branch_tips(&mut args);
     }
-    args.push(format!("-n{limit}"));
-    args.push(format!("--skip={skip}"));
     args.push("--pretty=format:%H%x00%h%x00%s%x00%an%x00%ae%x00%at%x00%P".to_string());
     args.extend(revs.iter().cloned());
     args
@@ -91,7 +91,7 @@ pub(super) fn git_search_log_args(revs: &[String]) -> Vec<String> {
         "-c".to_string(),
         "i18n.logOutputEncoding=utf-8".to_string(),
         "log".to_string(),
-        "--author-date-order".to_string(),
+        "--date-order".to_string(),
     ];
     if revs.is_empty() {
         args.push("--branches".to_string());
@@ -175,6 +175,7 @@ pub(super) fn parse_search_record(bytes: &[u8]) -> Option<CommitSummary> {
         refs: Vec::new(),
         on_current_branch: true,
         on_tracking_branch: false,
+        path: None,
     })
 }
 
@@ -230,8 +231,7 @@ pub(super) fn commits_from_revwalk(
         }
     }
     // TIME | TOPOLOGICAL matches `git log --date-order` (committer time, parents
-    // still below their children). The CLI path above uses author time, which is
-    // what the history column shows.
+    // still below their children), the same order as the CLI path above.
     revwalk.set_sorting(Sort::TIME | Sort::TOPOLOGICAL)?;
 
     let mut items = Vec::new();
@@ -272,6 +272,7 @@ pub(super) fn parse_git_log(bytes: &[u8]) -> AppResult<Vec<CommitSummary>> {
             refs: Vec::new(),
             on_current_branch: true,
             on_tracking_branch: false,
+            path: None,
         });
     }
     Ok(items)
@@ -342,6 +343,32 @@ pub(super) fn commit_graph_available(repo: &Repository) -> bool {
         .read_dir()
         .map(|mut entries| entries.next().is_some())
         .unwrap_or(false)
+}
+
+/// Without a commit-graph, marking commits on the current branch walks all of
+/// history. Starting those walks on helper threads lets them overlap the
+/// `git log` process instead of following it.
+fn warm_reachable(repo: &Repository) -> Vec<thread::JoinHandle<()>> {
+    if commit_graph_available(repo) {
+        return Vec::new();
+    }
+    let Ok(head) = repo.head() else { return Vec::new() };
+    let mut tips: Vec<Oid> = [head.target(), upstream_oid_of(repo, &head)]
+        .into_iter()
+        .flatten()
+        .collect();
+    tips.dedup();
+    let git_dir = repo.path().to_path_buf();
+    tips.into_iter()
+        .map(|tip| {
+            let git_dir = git_dir.clone();
+            thread::spawn(move || {
+                if let Ok(repo) = Repository::open(&git_dir) {
+                    let _ = reachable_commits(&repo, tip);
+                }
+            })
+        })
+        .collect()
 }
 
 pub(super) fn reachable_commits(repo: &Repository, tip: Oid) -> Option<Arc<HashSet<Oid>>> {
@@ -520,15 +547,74 @@ pub fn file_commits(
         return Err(AppError::msg("A file is required"));
     }
     let root = workdir(repo)?;
-    let mut args = git_log_args(
-        limit.max(1),
-        skip,
-        &["HEAD".to_string()],
-        &["-c", "log.showSignature=false", "log", "--author-date-order"],
-    );
-    args.push("--".to_string());
-    args.push(rel);
-    let argv: Vec<&str> = args.iter().map(String::as_str).collect();
-    let stdout = run_git_stdout(root, &argv)?;
-    parse_git_log(&stdout)
+    // `--follow` switches to the old name only when it prints the rename, so a
+    // `--skip` past the rename would lose everything older. Read through instead.
+    let count = format!("-n{}", skip + limit.max(1));
+    let stdout = run_git_stdout(
+        root,
+        &[
+            "-c",
+            "log.showSignature=false",
+            "-c",
+            "core.quotePath=off",
+            "log",
+            "--follow",
+            "--name-status",
+            "-z",
+            "--format=%x1e%H%x00%h%x00%s%x00%an%x00%ae%x00%at%x00%P",
+            &count,
+            "HEAD",
+            "--",
+            &rel,
+        ],
+    )?;
+    Ok(parse_follow_log(&stdout, &rel).into_iter().skip(skip).collect())
+}
+
+/// Parses `git log --follow --name-status -z` records. Each commit carries the
+/// file's name at that commit so its diff can be shown after a rename.
+pub(super) fn parse_follow_log(bytes: &[u8], current: &str) -> Vec<CommitSummary> {
+    let text = String::from_utf8_lossy(bytes);
+    let mut items = Vec::new();
+    let mut fallback = current.to_string();
+    for record in text.split('\u{1e}') {
+        let fields: Vec<&str> = record.split('\0').collect();
+        if fields.len() < 7 {
+            continue;
+        }
+        let Some(id) = normalize_oid(fields[0]) else { continue };
+        let status: Vec<&str> = fields[7..]
+            .iter()
+            .map(|field| field.trim_start_matches('\n'))
+            .filter(|field| !field.is_empty())
+            .collect();
+        let path = match status.as_slice() {
+            [kind, old, new, ..] if kind.starts_with('R') || kind.starts_with('C') => {
+                let path = new.replace('\\', "/");
+                fallback = old.replace('\\', "/");
+                path
+            }
+            [_, path, ..] => {
+                let path = path.replace('\\', "/");
+                fallback = path.clone();
+                path
+            }
+            _ => fallback.clone(),
+        };
+        items.push(CommitSummary {
+            id,
+            short_id: fields[1].to_string(),
+            summary: fields[2].to_string(),
+            body: String::new(),
+            author_name: fields[3].to_string(),
+            author_email: fields[4].to_string(),
+            timestamp: fields[5].trim().parse().unwrap_or(0),
+            parents: fields[6].split_whitespace().filter_map(normalize_oid).collect(),
+            refs: Vec::new(),
+            on_current_branch: true,
+            on_tracking_branch: false,
+            path: Some(path),
+        });
+    }
+    items
 }

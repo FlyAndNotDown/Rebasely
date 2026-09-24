@@ -47,8 +47,13 @@ struct WatchPlan {
     starting: HashSet<String>,
 }
 
+struct WatchEntry {
+    watcher: RecommendedWatcher,
+    rules: Arc<IgnoreRules>,
+}
+
 pub struct WatchState {
-    watchers: Arc<Mutex<HashMap<String, RecommendedWatcher>>>,
+    watchers: Arc<Mutex<HashMap<String, WatchEntry>>>,
     pending: Arc<Mutex<HashMap<String, Pending>>>,
     plan: Arc<Mutex<WatchPlan>>,
     attach: Mutex<Option<mpsc::Sender<AttachRequest>>>,
@@ -101,14 +106,85 @@ fn ignored(path: &Path) -> bool {
     text.ends_with(".lock") || text.ends_with(".tmp")
 }
 
-fn interesting(event: &Event) -> bool {
+/// The fixed list above plus the repository's own ignore rules (`.gitignore`
+/// files, `.git/info/exclude`, and the global excludes file), so build output
+/// the project ignores neither gets watched nor triggers a refresh.
+struct IgnoreRules {
+    root: PathBuf,
+    repo: Mutex<Option<git2::Repository>>,
+}
+
+impl IgnoreRules {
+    fn open(root: &Path) -> Self {
+        Self {
+            root: root.to_path_buf(),
+            repo: Mutex::new(git2::Repository::open(root).ok()),
+        }
+    }
+
+    #[cfg(test)]
+    fn fixed_only() -> Self {
+        Self {
+            root: PathBuf::new(),
+            repo: Mutex::new(None),
+        }
+    }
+
+    fn ignores(&self, path: &Path) -> bool {
+        self.ignores_as(path, false)
+    }
+
+    fn ignores_dir(&self, path: &Path) -> bool {
+        self.ignores_as(path, true)
+    }
+
+    fn ignores_as(&self, path: &Path, dir: bool) -> bool {
+        if ignored(path) {
+            return true;
+        }
+        let Some(rel) = relative_path(&self.root, path) else {
+            return false;
+        };
+        if rel == ".git" || rel.starts_with(".git/") {
+            return false;
+        }
+        let guard = self.repo.lock().unwrap_or_else(|err| err.into_inner());
+        let Some(repo) = guard.as_ref() else {
+            return false;
+        };
+        // A trailing slash lets directory-only patterns such as `out/` match.
+        let query = if dir { format!("{rel}/") } else { rel.clone() };
+        if !repo.status_should_ignore(Path::new(&query)).unwrap_or(false) {
+            return false;
+        }
+        // Ignore rules do not apply to files git already tracks.
+        !repo.index().is_ok_and(|mut index| {
+            let _ = index.read(false);
+            index.get_path(Path::new(&rel), 0).is_some()
+        })
+    }
+}
+
+/// `path` relative to `root` with forward slashes; None for the root itself or outside it.
+fn relative_path(root: &Path, path: &Path) -> Option<String> {
+    let root = strip_verbatim_prefix(&root.to_string_lossy());
+    let path = strip_verbatim_prefix(&path.to_string_lossy());
+    let rel = Path::new(&path).strip_prefix(Path::new(&root)).ok()?;
+    let parts: Vec<_> = rel
+        .components()
+        .map(|part| part.as_os_str().to_string_lossy())
+        .collect();
+    (!parts.is_empty()).then(|| parts.join("/"))
+}
+
+fn interesting(event: &Event, rules: &IgnoreRules) -> bool {
     if !matches!(
         event.kind,
         EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)
     ) {
         return false;
     }
-    event.paths.iter().any(|path| !ignored(path))
+    event.paths.iter().any(|path| !rules.ignores(path))
 }
 
 fn relative_depth(root: &str, path: &Path) -> Option<usize> {
@@ -121,17 +197,19 @@ fn relative_depth(root: &str, path: &Path) -> Option<usize> {
         .filter(|depth| *depth > 0)
 }
 
-fn should_attach(root: &str, path: &Path) -> bool {
+fn should_attach(root: &str, path: &Path, rules: &IgnoreRules) -> bool {
     let Some(depth) = relative_depth(root, path) else {
         return false;
     };
-    if depth > WATCH_SPLIT_DEPTH as usize || ignored(path) {
-        return false;
-    }
-    path.is_dir()
+    depth <= WATCH_SPLIT_DEPTH as usize && path.is_dir() && !rules.ignores_dir(path)
 }
 
-fn watch_tree(watcher: &mut RecommendedWatcher, path: &Path, depth: u8) -> notify::Result<()> {
+fn watch_tree(
+    watcher: &mut RecommendedWatcher,
+    path: &Path,
+    depth: u8,
+    rules: &IgnoreRules,
+) -> notify::Result<()> {
     if depth >= WATCH_SPLIT_DEPTH {
         return watcher.watch(path, RecursiveMode::Recursive);
     }
@@ -145,16 +223,16 @@ fn watch_tree(watcher: &mut RecommendedWatcher, path: &Path, depth: u8) -> notif
             continue;
         }
         let name = child.file_name().and_then(|name| name.to_str()).unwrap_or("");
-        if name.is_empty() || name == ".git" || skip_watch_dir(name) {
+        if name.is_empty() || name == ".git" || rules.ignores_dir(&child) {
             continue;
         }
-        let _ = watch_tree(watcher, &child, depth + 1);
+        let _ = watch_tree(watcher, &child, depth + 1, rules);
     }
     Ok(())
 }
 
-fn watch_repo(watcher: &mut RecommendedWatcher, root: &Path) -> AppResult<()> {
-    watch_tree(watcher, root, 0).map_err(|err| {
+fn watch_repo(watcher: &mut RecommendedWatcher, root: &Path, rules: &IgnoreRules) -> AppResult<()> {
+    watch_tree(watcher, root, 0, rules).map_err(|err| {
         crate::error::AppError::msg(format!("Could not watch folder: {err}"))
     })?;
 
@@ -169,7 +247,12 @@ fn watch_repo(watcher: &mut RecommendedWatcher, root: &Path) -> AppResult<()> {
     Ok(())
 }
 
-fn note_change(pending: &Mutex<HashMap<String, Pending>>, repo: &str, event: &Event) {
+fn note_change(
+    pending: &Mutex<HashMap<String, Pending>>,
+    repo: &str,
+    event: &Event,
+    rules: &IgnoreRules,
+) {
     let mut map = pending.lock().unwrap_or_else(|err| err.into_inner());
     let slot = map.entry(repo.to_string()).or_insert_with(|| Pending {
         generation: 0,
@@ -183,7 +266,7 @@ fn note_change(pending: &Mutex<HashMap<String, Pending>>, repo: &str, event: &Ev
         return;
     }
     for path in &event.paths {
-        if ignored(path) {
+        if rules.ignores(path) {
             continue;
         }
         if slot.paths.len() >= MAX_CHANGED_PATHS {
@@ -202,16 +285,18 @@ fn watch_path(
     path: String,
     pending: Arc<Mutex<HashMap<String, Pending>>>,
     attach: mpsc::Sender<AttachRequest>,
-) -> AppResult<RecommendedWatcher> {
+) -> AppResult<WatchEntry> {
+    let rules = Arc::new(IgnoreRules::open(Path::new(&path)));
     let emit_path = path.clone();
+    let event_rules = rules.clone();
     let mut watcher = notify::recommended_watcher(move |result: Result<Event, notify::Error>| {
         let Ok(event) = result else { return };
-        if !interesting(&event) {
+        if !interesting(&event, &event_rules) {
             return;
         }
         if matches!(event.kind, EventKind::Create(_)) {
             for changed in &event.paths {
-                if should_attach(&emit_path, changed) {
+                if should_attach(&emit_path, changed, &event_rules) {
                     let _ = attach.send(AttachRequest {
                         root: emit_path.clone(),
                         path: changed.clone(),
@@ -219,12 +304,12 @@ fn watch_path(
                 }
             }
         }
-        note_change(pending.as_ref(), &emit_path, &event);
+        note_change(pending.as_ref(), &emit_path, &event, &event_rules);
     })
     .map_err(|err| crate::error::AppError::msg(format!("Could not watch folder: {err}")))?;
 
-    watch_repo(&mut watcher, Path::new(&path))?;
-    Ok(watcher)
+    watch_repo(&mut watcher, Path::new(&path), &rules)?;
+    Ok(WatchEntry { watcher, rules })
 }
 
 fn ensure_debouncer(app: &AppHandle, state: &WatchState) {
@@ -242,15 +327,16 @@ fn ensure_debouncer(app: &AppHandle, state: &WatchState) {
     let app = app.clone();
     thread::spawn(move || loop {
         while let Ok(request) = receiver.try_recv() {
-            if ignored(&request.path) {
-                continue;
-            }
             let mut map = watchers.lock().unwrap_or_else(|err| err.into_inner());
-            let Some(watcher) = map.get_mut(&request.root) else {
+            let Some(entry) = map.get_mut(&request.root) else {
                 continue;
             };
+            if entry.rules.ignores_dir(&request.path) {
+                continue;
+            }
             let depth = relative_depth(&request.root, &request.path).unwrap_or(WATCH_SPLIT_DEPTH as usize);
-            let _ = watch_tree(watcher, &request.path, depth as u8);
+            let rules = entry.rules.clone();
+            let _ = watch_tree(&mut entry.watcher, &request.path, depth as u8, &rules);
         }
 
         thread::sleep(Duration::from_millis(150));
@@ -322,10 +408,10 @@ pub fn sync_watches(app: &AppHandle, state: &WatchState, paths: Vec<String>) -> 
         let plan = state.plan.clone();
         let attach = attach.clone();
         thread::spawn(move || {
-            let watcher = watch_path(path.clone(), pending, attach).ok();
+            let entry = watch_path(path.clone(), pending, attach).ok();
             let mut plan = plan.lock().unwrap_or_else(|err| err.into_inner());
             plan.starting.remove(&path);
-            let Some(watcher) = watcher else { return };
+            let Some(entry) = entry else { return };
             if !plan.wanted.contains(&path) {
                 return;
             }
@@ -333,7 +419,7 @@ pub fn sync_watches(app: &AppHandle, state: &WatchState, paths: Vec<String>) -> 
                 .lock()
                 .unwrap_or_else(|err| err.into_inner())
                 .entry(path)
-                .or_insert(watcher);
+                .or_insert(entry);
         });
     }
     Ok(())
@@ -341,7 +427,8 @@ pub fn sync_watches(app: &AppHandle, state: &WatchState, paths: Vec<String>) -> 
 
 #[cfg(test)]
 mod tests {
-    use super::ignored;
+    use super::{ignored, IgnoreRules};
+    use std::fs;
     use std::path::Path;
 
     #[test]
@@ -359,5 +446,30 @@ mod tests {
         )));
         assert!(!ignored(Path::new(r"C:\work\repo\.git\index")));
         assert!(!ignored(Path::new(r"C:\work\repo\.git\refs\heads\main")));
+        assert!(!IgnoreRules::fixed_only().ignores(Path::new(r"C:\work\repo\module\src\a.cpp")));
+    }
+
+    #[test]
+    fn follows_the_repository_gitignore_except_for_tracked_files() {
+        let root = std::env::temp_dir().join(format!("rebasely-watch-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("out")).unwrap();
+        fs::create_dir_all(root.join("src")).unwrap();
+        let repo = git2::Repository::init(&root).unwrap();
+        fs::write(root.join(".gitignore"), "out/\n*.log\n").unwrap();
+        fs::write(root.join("kept.log"), "tracked anyway\n").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("kept.log")).unwrap();
+        index.write().unwrap();
+
+        let rules = IgnoreRules::open(&root);
+        assert!(rules.ignores_dir(&root.join("out")));
+        assert!(rules.ignores(&root.join("out").join("app.o")));
+        assert!(rules.ignores(&root.join("debug.log")));
+        assert!(!rules.ignores(&root.join("kept.log")));
+        assert!(!rules.ignores(&root.join("src").join("main.rs")));
+        assert!(!rules.ignores_dir(&root.join("src")));
+        assert!(!rules.ignores(&root.join(".git").join("index")));
+        let _ = fs::remove_dir_all(&root);
     }
 }

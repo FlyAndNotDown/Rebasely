@@ -24,6 +24,7 @@ mod diff;
 mod files;
 mod history;
 mod identity;
+mod log_stream;
 mod operations;
 mod refs;
 mod remote;
@@ -39,6 +40,7 @@ pub use diff::*;
 pub use files::*;
 pub use history::*;
 pub use identity::*;
+pub use log_stream::*;
 pub use operations::*;
 pub use refs::*;
 pub use remote::*;
@@ -128,6 +130,9 @@ pub struct CommitSummary {
     pub refs: Vec<CommitRefLabel>,
     pub on_current_branch: bool,
     pub on_tracking_branch: bool,
+    /// The file's name at this commit, set only by per-file history.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

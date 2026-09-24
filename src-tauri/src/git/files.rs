@@ -95,9 +95,17 @@ pub fn file_blame(repo: &Repository, path: &str) -> AppResult<Vec<BlameHunk>> {
     let root = workdir(repo)?;
     let stdout = match run_git_stdout(root, &["blame", "-w", "--porcelain", "--", &rel]) {
         Ok(stdout) => stdout,
-        Err(_) => return Ok(Vec::new()),
+        // A file that is not in HEAD has no history yet; every line shows as not committed.
+        Err(_) if !in_head(repo, &rel) => return Ok(Vec::new()),
+        Err(err) => return Err(err),
     };
     Ok(parse_blame_porcelain(&stdout))
+}
+
+fn in_head(repo: &Repository, rel: &str) -> bool {
+    repo.head()
+        .and_then(|head| head.peel_to_tree())
+        .is_ok_and(|tree| tree.get_path(Path::new(rel)).is_ok())
 }
 
 pub(super) fn work_file_path(repo: &Repository, path: &str) -> AppResult<PathBuf> {

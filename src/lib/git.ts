@@ -198,12 +198,12 @@ export const gitApi = {
     invoke<WorkspaceSnapshot>("apply_patch", { repoPath, patchPath }),
   stashSave: (repoPath: string, message: string, includeUntracked: boolean) =>
     invoke<WorkspaceSnapshot>("stash_save", { repoPath, message, includeUntracked }),
-  stashApply: (repoPath: string, index: number) =>
-    invoke<WorkspaceSnapshot>("stash_apply", { repoPath, index }),
-  stashPop: (repoPath: string, index: number) =>
-    invoke<WorkspaceSnapshot>("stash_pop", { repoPath, index }),
-  stashDrop: (repoPath: string, index: number) =>
-    invoke<WorkspaceSnapshot>("stash_drop", { repoPath, index }),
+  stashApply: (repoPath: string, id: string) =>
+    invoke<WorkspaceSnapshot>("stash_apply", { repoPath, id }),
+  stashPop: (repoPath: string, id: string) =>
+    invoke<WorkspaceSnapshot>("stash_pop", { repoPath, id }),
+  stashDrop: (repoPath: string, id: string) =>
+    invoke<WorkspaceSnapshot>("stash_drop", { repoPath, id }),
   getStashDetails: (repoPath: string, oid: string) =>
     invoke<StashDetails>("get_stash_details", { repoPath, oid }),
   getStashDiff: (repoPath: string, oid: string, path: string) =>

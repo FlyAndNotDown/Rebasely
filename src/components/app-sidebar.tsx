@@ -1,11 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ArchiveIcon, CircleDotIcon, FolderTreeIcon, HistoryIcon, SettingsIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { SettingsDialog } from "@/components/settings-dialog";
+import { SettingsDialog } from "@/components/lazy-dialogs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { normalizeSidebarOrder, SIDEBAR_VIEWS } from "@/lib/prefs";
 import { cn } from "@/lib/utils";
-import { useGit, type View } from "@/state/git-context";
+import { useGitPick, type View } from "@/state/git-context";
 
 const itemMeta: Record<View, { label: string; icon: typeof CircleDotIcon }> = {
   changes: { label: "Changes", icon: CircleDotIcon },
@@ -15,19 +15,28 @@ const itemMeta: Record<View, { label: string; icon: typeof CircleDotIcon }> = {
 };
 
 export function AppSidebar() {
-  const { view, setView, activeTab, prefs, updatePrefs } = useGit();
+  const { view, setView, activeTab, prefs, updatePrefs } = useGitPick([
+    "view",
+    "setView",
+    "activeTab",
+    "prefs",
+    "updatePrefs",
+  ]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [order, setOrder] = useState<View[]>(() => asViews(prefs.sidebarOrder));
+  const [savedOrder, setSavedOrder] = useState(prefs.sidebarOrder);
   const [dragging, setDragging] = useState<View | null>(null);
   const dragRef = useRef<{ view: View; startY: number; active: boolean } | null>(null);
   const orderRef = useRef(order);
   const listRef = useRef<HTMLDivElement>(null);
   const repoOpen = activeTab.kind === "repo";
-  orderRef.current = order;
-
-  useEffect(() => {
+  if (savedOrder !== prefs.sidebarOrder) {
+    setSavedOrder(prefs.sidebarOrder);
     setOrder(asViews(prefs.sidebarOrder));
-  }, [prefs.sidebarOrder]);
+  }
+  useLayoutEffect(() => {
+    orderRef.current = order;
+  });
 
   useEffect(() => {
     function dropTargetAt(clientY: number): { view: View; place: "before" | "after" } | null {
@@ -122,6 +131,10 @@ export function AppSidebar() {
                     if (event.button !== 0) return;
                     dragRef.current = { view: id, startY: event.clientY, active: false };
                     if (repoOpen) setView(id);
+                  }}
+                  onClick={(event) => {
+                    // Pointer presses switch on pointerdown; detail 0 is Enter or Space.
+                    if (event.detail === 0 && repoOpen) setView(id);
                   }}
                 >
                   <Icon />

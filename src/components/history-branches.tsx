@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeftRightIcon, ChevronRightIcon, EyeIcon, GitBranchIcon, PlusIcon, SearchIcon, TagIcon } from "lucide-react";
-import { AddRemoteDialog } from "@/components/add-remote-dialog";
+import { AddRemoteDialog } from "@/components/lazy-dialogs";
+import { CreateTagDialog } from "@/components/create-ref-dialogs";
 import { MergeDialog, RebaseOntoDialog } from "@/components/rebase-dialog";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -23,9 +24,10 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { groupRemoteBranches, shortRemoteName } from "@/lib/branches";
 import { isRemoteTrackingBranch } from "@/lib/git";
 import { cn } from "@/lib/utils";
-import { useGit } from "@/state/git-context";
+import { useGitPick } from "@/state/git-context";
 import type { BranchInfo } from "@/types/git";
 
 type BranchTreeNode = {
@@ -51,11 +53,25 @@ export function HistoryBranches() {
     checkoutBranch,
     deleteBranch,
     fetchRemote,
-    createTag,
     deleteTag,
     pushTag,
     openComparison,
-  } = useGit();
+  } = useGitPick([
+    "snapshot",
+    "historyRevs",
+    "setHistoryRevs",
+    "historyExpanded",
+    "setHistoryExpanded",
+    "ensureBranches",
+    "addRemote",
+    "deleteRemote",
+    "checkoutBranch",
+    "deleteBranch",
+    "fetchRemote",
+    "deleteTag",
+    "pushTag",
+    "openComparison",
+  ]);
   const [query, setQuery] = useState("");
   const [needle, setNeedle] = useState("");
   const [addOpen, setAddOpen] = useState(false);
@@ -68,8 +84,6 @@ export function HistoryBranches() {
   const [rebasing, setRebasing] = useState<BranchInfo | null>(null);
   const [merging, setMerging] = useState<BranchInfo | null>(null);
   const [creatingTag, setCreatingTag] = useState(false);
-  const [tagName, setTagName] = useState("");
-  const [tagMessage, setTagMessage] = useState("");
   const [deletingTag, setDeletingTag] = useState<string | null>(null);
   const [selectedNames, setSelectedNames] = useState<string[]>([]);
   const [deletingMany, setDeletingMany] = useState<BranchInfo[] | null>(null);
@@ -291,11 +305,7 @@ export function HistoryBranches() {
             onDeleteRemote={setDeletingRemote}
             onFetchRemote={(name) => void fetchRemote(name)}
             onAddRemote={() => setAddOpen(true)}
-            onCreateTag={() => {
-              setTagName("");
-              setTagMessage("");
-              setCreatingTag(true);
-            }}
+            onCreateTag={() => setCreatingTag(true)}
             onDeleteTag={setDeletingTag}
             onPushTag={(remote, name) => void pushTag(remote, name)}
             remotes={snapshot?.remotes.map((remote) => remote.name) ?? []}
@@ -460,47 +470,7 @@ export function HistoryBranches() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      <Dialog open={creatingTag} onOpenChange={setCreatingTag}>
-        <DialogContent>
-          <form
-            onSubmit={(event) => {
-              event.preventDefault();
-              const name = tagName.trim();
-              if (!name) return;
-              void createTag(name, tagMessage.trim() || undefined).then((ok) => {
-                if (ok) setCreatingTag(false);
-              });
-            }}
-          >
-            <DialogHeader>
-              <DialogTitle>Create tag</DialogTitle>
-              <DialogDescription>Tags the current commit. A message makes it an annotated tag.</DialogDescription>
-            </DialogHeader>
-            <div className="mt-3 grid gap-3">
-              <Input
-                autoFocus
-                className="font-mono"
-                placeholder="v1.0.0"
-                value={tagName}
-                onChange={(event) => setTagName(event.target.value)}
-              />
-              <Input
-                placeholder="Message (optional)"
-                value={tagMessage}
-                onChange={(event) => setTagMessage(event.target.value)}
-              />
-            </div>
-            <DialogFooter className="mt-4">
-              <Button type="button" variant="outline" onClick={() => setCreatingTag(false)}>
-                Cancel
-              </Button>
-              <Button type="submit" disabled={!tagName.trim()}>
-                Create
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+      <CreateTagDialog open={creatingTag} onOpenChange={setCreatingTag} />
       <Dialog open={Boolean(deletingTag)} onOpenChange={(open) => !open && setDeletingTag(null)}>
         <DialogContent>
           <DialogHeader>
@@ -664,7 +634,10 @@ function TreeRows({
             <ContextMenu key={node.id}>
               <ContextMenuTrigger asChild>
                 <div
-                  className="flex h-7 items-center gap-1 pr-1 text-muted-foreground hover:bg-muted/70"
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Tag ${name}`}
+                  className="flex h-7 items-center gap-1 pr-1 text-muted-foreground outline-none hover:bg-muted/70 focus-visible:bg-muted/70 focus-visible:ring-1 focus-visible:ring-ring"
                   style={{ paddingLeft: 8 + depth * 12 }}
                 >
                   <TagIcon className="size-3.5 shrink-0" />
@@ -712,8 +685,12 @@ function TreeRows({
             <ContextMenu key={node.id}>
               <ContextMenuTrigger asChild>
                 <div
+                  role="button"
+                  tabIndex={0}
+                  aria-pressed={Boolean(selectedNames?.includes(branch.name))}
+                  aria-label={`Branch ${branch.name}`}
                   className={cn(
-                    "flex h-7 items-center gap-1 pr-1 text-muted-foreground hover:bg-muted/70",
+                    "flex h-7 items-center gap-1 pr-1 text-muted-foreground outline-none hover:bg-muted/70 focus-visible:ring-1 focus-visible:ring-ring",
                     selectedNames?.includes(branch.name) && "bg-muted text-foreground",
                   )}
                   style={{ paddingLeft: 8 + depth * 12 }}
@@ -723,6 +700,15 @@ function TreeRows({
                       event.shiftKey ? "range" : event.ctrlKey || event.metaKey ? "toggle" : "single",
                     )
                   }
+                  onKeyDown={(event) => {
+                    if (event.target !== event.currentTarget) return;
+                    if (event.key !== "Enter" && event.key !== " ") return;
+                    event.preventDefault();
+                    onSelectBranch?.(
+                      branch.name,
+                      event.shiftKey ? "range" : event.ctrlKey || event.metaKey ? "toggle" : "single",
+                    );
+                  }}
                   onContextMenu={() => {
                     if (!selectedNames?.includes(branch.name)) onSelectBranch?.(branch.name, "single");
                   }}
@@ -1067,24 +1053,3 @@ function remoteFolderName(id: string) {
   return id.slice("remote:".length);
 }
 
-function groupRemoteBranches(branches: BranchInfo[], extraNames: string[] = []) {
-  const groups = new Map<string, BranchInfo[]>();
-  for (const name of extraNames) groups.set(name, []);
-  for (const branch of branches) {
-    const slash = branch.name.indexOf("/");
-    const remote = slash === -1 ? branch.name : branch.name.slice(0, slash);
-    const list = groups.get(remote) ?? [];
-    list.push(branch);
-    groups.set(remote, list);
-  }
-  return [...groups.entries()].sort(([left], [right]) => {
-    if (left === "origin") return -1;
-    if (right === "origin") return 1;
-    return left.localeCompare(right);
-  });
-}
-
-function shortRemoteName(fullName: string, remoteName: string) {
-  const prefix = `${remoteName}/`;
-  return fullName.startsWith(prefix) ? fullName.slice(prefix.length) : fullName;
-}
