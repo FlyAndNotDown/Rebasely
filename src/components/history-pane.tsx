@@ -625,52 +625,42 @@ const CommitRow = memo(function CommitRow({
         </button>
       </ContextMenuTrigger>
       <ContextMenuContent className="w-48">
-        <ContextMenuItem
-          disabled={!canResetBranch}
-          onClick={() => onAction({ type: "reset", commit })}
-        >
-          <RotateCcwIcon />
-          Reset
-        </ContextMenuItem>
-        <ContextMenuItem
-          disabled={commit.onCurrentBranch}
-          onClick={() => onAction({ type: "cherry-pick", commit })}
-        >
-          <CopyPlusIcon />
-          Cherry-pick
-        </ContextMenuItem>
-        <ContextMenuItem
-          disabled={!canRebase || commit.onCurrentBranch}
-          onClick={() => onAction({ type: "merge", commit })}
-        >
-          <GitBranchIcon />
-          Merge
-        </ContextMenuItem>
-        <ContextMenuItem
-          disabled={!commit.onCurrentBranch}
-          onClick={() => onAction({ type: "revert", commit })}
-        >
-          <Undo2Icon />
-          Revert
-        </ContextMenuItem>
-        <ContextMenuItem
-          disabled={!canRebase || commit.onCurrentBranch}
-          onClick={() => onAction({ type: "rebase", commit })}
-        >
-          <GitBranchIcon />
-          Rebase onto
-        </ContextMenuItem>
-        <ContextMenuItem
-          disabled={
-            !canRebase ||
-            !commit.onCurrentBranch ||
-            commit.refs.some((ref) => ref.kind === "head")
-          }
-          onClick={() => onAction({ type: "interactive", commit })}
-        >
-          <ListOrderedIcon />
-          Interactive rebase
-        </ContextMenuItem>
+        {canResetBranch ? (
+          <ContextMenuItem onClick={() => onAction({ type: "reset", commit })}>
+            <RotateCcwIcon />
+            Reset
+          </ContextMenuItem>
+        ) : null}
+        {commit.onCurrentBranch ? null : (
+          <ContextMenuItem onClick={() => onAction({ type: "cherry-pick", commit })}>
+            <CopyPlusIcon />
+            Cherry-pick
+          </ContextMenuItem>
+        )}
+        {canRebase && !commit.onCurrentBranch ? (
+          <ContextMenuItem onClick={() => onAction({ type: "merge", commit })}>
+            <GitBranchIcon />
+            Merge
+          </ContextMenuItem>
+        ) : null}
+        {commit.onCurrentBranch ? (
+          <ContextMenuItem onClick={() => onAction({ type: "revert", commit })}>
+            <Undo2Icon />
+            Revert
+          </ContextMenuItem>
+        ) : null}
+        {canRebase && !commit.onCurrentBranch ? (
+          <ContextMenuItem onClick={() => onAction({ type: "rebase", commit })}>
+            <GitBranchIcon />
+            Rebase onto
+          </ContextMenuItem>
+        ) : null}
+        {canRebase && commit.onCurrentBranch && !commit.refs.some((ref) => ref.kind === "head") ? (
+          <ContextMenuItem onClick={() => onAction({ type: "interactive", commit })}>
+            <ListOrderedIcon />
+            Interactive rebase
+          </ContextMenuItem>
+        ) : null}
         <ContextMenuItem onClick={() => onAction({ type: "branch", commit })}>
           <GitBranchIcon />
           Create branch
@@ -690,24 +680,22 @@ const CommitRow = memo(function CommitRow({
               <UserIcon />
               Author
             </ContextMenuItem>
-            <ContextMenuItem
-              disabled={!commit.authorEmail}
-              onClick={() => void copyText(commit.authorEmail, "Copied email")}
-            >
-              <MailIcon />
-              Email
-            </ContextMenuItem>
+            {commit.authorEmail ? (
+              <ContextMenuItem onClick={() => void copyText(commit.authorEmail, "Copied email")}>
+                <MailIcon />
+                Email
+              </ContextMenuItem>
+            ) : null}
             <ContextMenuItem onClick={() => void copyText(commit.id, "Copied commit hash")}>
               <HashIcon />
               Hash
             </ContextMenuItem>
-            <ContextMenuItem
-              disabled={!message}
-              onClick={() => void copyText(message, "Copied message")}
-            >
-              <MessageSquareTextIcon />
-              Message
-            </ContextMenuItem>
+            {message ? (
+              <ContextMenuItem onClick={() => void copyText(message, "Copied message")}>
+                <MessageSquareTextIcon />
+                Message
+              </ContextMenuItem>
+            ) : null}
           </ContextMenuSubContent>
         </ContextMenuSub>
       </ContextMenuContent>
