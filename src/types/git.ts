@@ -156,7 +156,7 @@ export interface TerminalOption {
   available: boolean;
 }
 
-export type AvatarProvider = "dicebear";
+export type AvatarProvider = "initials" | "dicebear-online";
 
 export type PanelLayout = Record<string, number>;
 

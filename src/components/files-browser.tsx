@@ -1,14 +1,17 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useGroupRef, type Layout } from "react-resizable-panels";
 import { ChevronRightIcon, FileIcon, FolderIcon, FolderOpenIcon } from "lucide-react";
 import { toast } from "sonner";
 import { AuthorAvatar } from "@/components/author-avatar";
+import { DiffLines } from "@/components/diff-viewer";
 import { DiffSkeleton } from "@/components/skeletons";
 import { Button } from "@/components/ui/button";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { textColumns } from "@/lib/diff-text";
 import { formatAbsoluteTime } from "@/lib/format";
 import { errorMessage, gitApi } from "@/lib/git";
+import { useWindowedRows } from "@/lib/use-windowed-rows";
 import { cn } from "@/lib/utils";
 import { useGit } from "@/state/git-context";
 import type { AvatarProvider, BlameHunk, CommitSummary, DirEntry, FileDiff, PanelLayoutId } from "@/types/git";
@@ -58,6 +61,10 @@ export function FilesBrowser() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [diff, setDiff] = useState<FileDiff | null>(null);
   const pinnedCommit = useRef<string | null>(null);
+  const pathRef = useRef(path);
+  useLayoutEffect(() => {
+    pathRef.current = path;
+  }, [path]);
 
   const loadDir = useCallback(
     async (dir: string) => {
@@ -130,6 +137,7 @@ export function FilesBrowser() {
       try {
         const skip = reset ? 0 : commits.length;
         const page = await gitApi.fileCommits(repoPath, path, PAGE, skip);
+        if (pathRef.current !== path) return;
         setCommits((current) => (reset ? page : [...current, ...page.filter((item) => !current.some((have) => have.id === item.id))]));
         setCommitsHasMore(page.length === PAGE);
         if (reset) {
@@ -217,6 +225,14 @@ export function FilesBrowser() {
     }
   }
 
+  const openBlameRef = useRef(openBlameCommit);
+  useLayoutEffect(() => {
+    openBlameRef.current = openBlameCommit;
+  });
+  const onOpenBlameCommit = useCallback((commitId: string) => {
+    void openBlameRef.current(commitId);
+  }, []);
+
   return (
     <ResizablePanelGroup
       id="files"
@@ -237,13 +253,16 @@ export function FilesBrowser() {
               open={open}
               selected={path}
               onToggle={async (dir) => {
-                const next = new Set(open);
-                if (next.has(dir)) next.delete(dir);
-                else {
-                  next.add(dir);
-                  if (!entries[dir]) await loadDir(dir);
+                if (open.has(dir)) {
+                  setOpen((current) => {
+                    const next = new Set(current);
+                    next.delete(dir);
+                    return next;
+                  });
+                  return;
                 }
-                setOpen(next);
+                if (!entries[dir]) await loadDir(dir);
+                setOpen((current) => new Set(current).add(dir));
               }}
               onOpenFile={setPath}
             />
@@ -288,7 +307,7 @@ export function FilesBrowser() {
                 binary={binary}
                 text={fileText}
                 hunks={hunks}
-                onOpenCommit={(commitId) => void openBlameCommit(commitId)}
+                onOpenCommit={onOpenBlameCommit}
               />
             ) : (
               <ResizablePanelGroup
@@ -416,7 +435,33 @@ function blameWhen(timestamp: number) {
   return `${date.getFullYear()}-${month}-${day}`;
 }
 
-function FileBrowse({
+const FILE_ROW_HEIGHT = 20;
+
+interface BlameRow {
+  text: string;
+  hunk: BlameHunk | null;
+  head: boolean;
+  uncommitted: boolean;
+}
+
+function blameRows(text: string, hunks: BlameHunk[] | null, blameLoading: boolean): BlameRow[] {
+  const lines = text.length === 0 ? [] : text.split("\n");
+  let hunkIndex = 0;
+  let previousId: string | null | undefined;
+  return lines.map((line, index) => {
+    while (hunks && hunkIndex < hunks.length && hunks[hunkIndex].start + hunks[hunkIndex].count <= index) {
+      hunkIndex += 1;
+    }
+    const hunk =
+      hunks && hunkIndex < hunks.length && hunks[hunkIndex].start <= index ? hunks[hunkIndex] : null;
+    const id = hunk?.commitId ?? null;
+    const uncommitted = !blameLoading && hunks != null && id == null && previousId !== null;
+    previousId = id;
+    return { text: line, hunk, head: hunk != null && hunk.start === index, uncommitted };
+  });
+}
+
+const FileBrowse = memo(function FileBrowse({
   textLoading,
   blameLoading,
   binary,
@@ -431,48 +476,45 @@ function FileBrowse({
   hunks: BlameHunk[] | null;
   onOpenCommit: (commitId: string) => void;
 }) {
+  const rows = useMemo(() => blameRows(text ?? "", hunks, blameLoading), [blameLoading, hunks, text]);
+  const gutter = useMemo(
+    () =>
+      (hunks ?? []).reduce(
+        (widest, hunk) => Math.max(widest, `${blameWhen(hunk.time)} ${hunk.author}`.length),
+        14,
+      ),
+    [hunks],
+  );
+  const widest = useMemo(
+    () => rows.reduce((max, row) => Math.max(max, textColumns(row.text)), 0),
+    [rows],
+  );
+  const visibleRows = useWindowedRows(rows.length, FILE_ROW_HEIGHT);
+
   if (textLoading || text === null) return <DiffSkeleton label="Loading file" />;
   if (binary) {
     return <div className="p-4 text-sm text-muted-foreground">Binary file</div>;
   }
-  const lines = text.length === 0 ? [] : text.split("\n");
-  let gutter = 14;
-  for (const hunk of hunks ?? []) {
-    gutter = Math.max(gutter, `${blameWhen(hunk.time)} ${hunk.author}`.length);
-  }
-  let hunkIndex = 0;
-  let previousId: string | null | undefined;
+  const columns = `${gutter + 2}ch 2.75rem minmax(0,1fr)`;
   return (
-    <ScrollArea className="min-h-0 flex-1">
-      <div className="min-w-max font-mono text-[12px] leading-5">
-        {lines.map((line, index) => {
-          while (
-            hunks &&
-            hunkIndex < hunks.length &&
-            hunks[hunkIndex].start + hunks[hunkIndex].count <= index
-          ) {
-            hunkIndex += 1;
-          }
-          const hunk =
-            hunks && hunkIndex < hunks.length && hunks[hunkIndex].start <= index
-              ? hunks[hunkIndex]
-              : null;
-          const id = hunk?.commitId ?? null;
-          const head = hunk != null && hunk.start === index;
-          const uncommitted = !blameLoading && hunks != null && id == null && previousId !== null;
-          previousId = id;
+    <ScrollArea className="min-h-0 flex-1" viewportRef={visibleRows.viewportRef}>
+      <div
+        className="font-mono text-[12px] leading-5 [tab-size:4]"
+        style={{ minWidth: `calc(${gutter + 2}ch + 3.75rem + ${widest}ch)` }}
+      >
+        <div style={{ height: visibleRows.before }} />
+        {rows.slice(visibleRows.start, visibleRows.end).map((row, offset) => {
+          const index = visibleRows.start + offset;
+          const { hunk, head } = row;
           return (
-            <div
-              key={index}
-              className="grid"
-              style={{ gridTemplateColumns: `${gutter + 2}ch 2.75rem minmax(0,1fr)` }}
-            >
+            <div key={index} className="grid h-5" style={{ gridTemplateColumns: columns }}>
               {blameLoading ? (
                 <span className={cn("mx-2 my-1 h-3 rounded-sm bg-muted/60", index < 12 && "animate-pulse")} />
               ) : (
                 <button
                   type="button"
                   disabled={!hunk}
+                  tabIndex={head ? 0 : -1}
                   title={hunk ? `${hunk.author} · ${formatAbsoluteTime(hunk.time)}` : "Not committed"}
                   className={cn("whitespace-nowrap px-2 text-left text-[11px]", !hunk && "text-muted-foreground italic")}
                   style={head && hunk ? { color: blameColor(hunk.commitId) } : undefined}
@@ -480,18 +522,19 @@ function FileBrowse({
                     if (hunk) onOpenCommit(hunk.commitId);
                   }}
                 >
-                  {head && hunk ? `${blameWhen(hunk.time)} ${hunk.author}` : uncommitted ? "Not committed" : ""}
+                  {head && hunk ? `${blameWhen(hunk.time)} ${hunk.author}` : row.uncommitted ? "Not committed" : ""}
                 </button>
               )}
               <span className="pr-2 text-right text-muted-foreground/70 tabular-nums">{index + 1}</span>
-              <span className="whitespace-pre pr-4">{line}</span>
+              <span className="whitespace-pre pr-4">{row.text}</span>
             </div>
           );
         })}
+        <div style={{ height: visibleRows.after }} />
       </div>
     </ScrollArea>
   );
-}
+});
 
 function FileHistory({
   commits,
@@ -566,31 +609,8 @@ function FileCommitDiff({ diff, loading }: { diff: FileDiff | null; loading: boo
   if (diff.binary) return <p className="p-4 text-sm text-muted-foreground">Binary file</p>;
   if (diff.lines.length === 0) return <p className="p-4 text-sm text-muted-foreground">No textual diff</p>;
   return (
-    <ScrollArea className="h-full">
-      <pre className="min-w-max font-mono text-[12px] leading-5 [tab-size:4]">
-        {diff.lines.map((line, index) => (
-          <div
-            key={`${line.kind}-${index}-${line.oldLineno}-${line.newLineno}`}
-            className={cn(
-              "flex w-max min-w-full",
-              line.kind === "add" && "bg-diff-add-bg text-diff-add",
-              line.kind === "delete" && "bg-diff-del-bg text-diff-del",
-              line.kind === "hunk" && "bg-muted/50 text-diff-hunk",
-            )}
-          >
-            <span className="w-12 shrink-0 pr-2 text-right text-muted-foreground/70 tabular-nums">
-              {line.kind === "hunk" ? "" : line.oldLineno ?? ""}
-            </span>
-            <span className="w-12 shrink-0 pr-2 text-right text-muted-foreground/70 tabular-nums">
-              {line.kind === "hunk" ? "" : line.newLineno ?? ""}
-            </span>
-            <span className="w-5 shrink-0 text-center">
-              {line.kind === "add" ? "+" : line.kind === "delete" ? "-" : line.kind === "hunk" ? "" : " "}
-            </span>
-            <span className="whitespace-pre">{line.content || " "}</span>
-          </div>
-        ))}
-      </pre>
-    </ScrollArea>
+    <div className="flex h-full min-h-0 flex-col">
+      <DiffLines diff={diff} />
+    </div>
   );
 }

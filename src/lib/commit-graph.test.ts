@@ -1,7 +1,8 @@
+import { describe, expect, it } from "vitest";
 import { layoutCommitGraph } from "./commit-graph";
 
 function assert(condition: boolean, message: string) {
-  if (!condition) throw new Error(message);
+  expect(condition, message).toBe(true);
 }
 
 function ids(...values: string[]) {
@@ -106,9 +107,10 @@ function sideTipInterleavesByDate() {
   );
 }
 
-linear();
-mergeKeepsMainOnLeft();
-laterSideChildDoesNotStealMerge();
-mergeLineKeepsBranchColor();
-sideTipInterleavesByDate();
-console.log("commit-graph tests passed");
+describe("layoutCommitGraph", () => {
+  it("keeps linear history on one lane", linear);
+  it("keeps the mainline on the left through a merge", mergeKeepsMainOnLeft);
+  it("does not let a later side child steal the merge", laterSideChildDoesNotStealMerge);
+  it("keeps each joining branch's color", mergeLineKeepsBranchColor);
+  it("interleaves a side tip by date", sideTipInterleavesByDate);
+});

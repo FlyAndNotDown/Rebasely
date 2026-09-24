@@ -1,4 +1,13 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type UIEvent } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type UIEvent,
+} from "react";
 import {
   ArrowLeftRightIcon,
   CopyIcon,
@@ -43,6 +52,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { formatAbsoluteTime } from "@/lib/format";
 import { errorMessage, expandHistoryRevs, gitApi } from "@/lib/git";
 import { graphWidth, laneColor, layoutCommitGraph, type GraphRow } from "@/lib/commit-graph";
+import { useWindowedRows } from "@/lib/use-windowed-rows";
 import { cn } from "@/lib/utils";
 import { COMMIT_PAGE, useGit, type ResetMode } from "@/state/git-context";
 import type { AvatarProvider, CommitRef, CommitSummary } from "@/types/git";
@@ -112,6 +122,7 @@ const RESET_MODES: { id: ResetMode; label: string; detail: string }[] = [
 ];
 
 const ROW_HEIGHT = 32;
+const NO_COMMITS: CommitSummary[] = [];
 const LANE_GAP = 14;
 const NODE_RADIUS = 4.5;
 const LINE_WIDTH = 2;
@@ -162,18 +173,28 @@ export function HistoryPane() {
   const canRebase = canResetBranch && !snapshot?.repo.operation;
   const currentBranch = snapshot?.repo.currentBranch;
   const selectedId = historySelection?.id ?? null;
-  const searchRevs = useMemo(
-    () => expandHistoryRevs(historyRevs, snapshot?.branches.local),
-    [historyRevs, snapshot?.branches.local],
-  );
+  // Snapshot refreshes replace the branch array even when nothing changed, so
+  // key the revs by content to keep the search from re-running.
+  const searchRevsKey = expandHistoryRevs(historyRevs, snapshot?.branches.local).join("\0");
+  const searchRevs = useMemo(() => (searchRevsKey ? searchRevsKey.split("\0") : []), [searchRevsKey]);
+  const searchGeneration = useRef(0);
   const searchingMode = Boolean(applied);
-  const visible = searchingMode ? (results ?? []) : commits;
+  const visible = searchingMode ? (results ?? NO_COMMITS) : commits;
   const graph = useMemo(
     () => (searchingMode ? [] : layoutCommitGraph(visible)),
     [searchingMode, visible],
   );
   const loading = searchingMode ? searching : commitsLoading;
   const hasMore = searchingMode ? searchHasMore : commitsHasMore;
+  const effectiveSelection = useMemo(
+    () => (selectedIds.length > 0 ? selectedIds : selectedId ? [selectedId] : []),
+    [selectedId, selectedIds],
+  );
+  const selectionRef = useRef({ visible, effectiveSelection, selectedId });
+  useLayoutEffect(() => {
+    selectionRef.current = { visible, effectiveSelection, selectedId };
+  });
+  const rows = useWindowedRows(visible.length, ROW_HEIGHT);
   const onRowAction = useCallback(
     (action: CommitRowAction) => {
       switch (action.type) {
@@ -246,8 +267,8 @@ export function HistoryPane() {
 
   const selectRows = useCallback(
     (id: string, mode: "single" | "toggle" | "range") => {
+      const { visible, effectiveSelection: base, selectedId } = selectionRef.current;
       const ids = visible.map((commit) => commit.id);
-      const base = selectedIds.length > 0 ? selectedIds : selectedId ? [selectedId] : [];
       if (mode === "toggle") {
         const next = base.includes(id) ? base.filter((item) => item !== id) : [...base, id];
         setSelectedIds(next);
@@ -272,8 +293,14 @@ export function HistoryPane() {
       selectAnchor.current = id;
       void selectCommit(id);
     },
-    [selectCommit, selectedId, selectedIds, visible],
+    [selectCommit],
   );
+
+  const selectedCommits = useCallback(() => {
+    const { visible, effectiveSelection } = selectionRef.current;
+    const chosen = new Set(effectiveSelection);
+    return visible.filter((commit) => chosen.has(commit.id));
+  }, []);
 
   useEffect(() => {
     void ensureHistory();
@@ -288,29 +315,30 @@ export function HistoryPane() {
     }
     const repoPath = snapshot?.repo.path;
     if (!repoPath) return;
-    let cancelled = false;
+    const generation = ++searchGeneration.current;
     setSearching(true);
     void gitApi
       .getCommits(repoPath, COMMIT_PAGE, 0, applied, searchRevs)
       .then((items) => {
-        if (cancelled) return;
+        if (searchGeneration.current !== generation) return;
         setResults(items);
         setSearchHasMore(items.length === COMMIT_PAGE);
       })
       .catch((error) => {
-        if (!cancelled) toast.error(errorMessage(error));
+        if (searchGeneration.current === generation) toast.error(errorMessage(error));
       })
       .finally(() => {
-        if (!cancelled) setSearching(false);
+        if (searchGeneration.current === generation) setSearching(false);
       });
     return () => {
-      cancelled = true;
+      searchGeneration.current += 1;
     };
   }, [applied, searchRevs, snapshot?.repo.path]);
 
   async function loadMoreSearch() {
     const repoPath = snapshot?.repo.path;
     if (!repoPath || !applied || searching || !searchHasMore || !results) return;
+    const generation = searchGeneration.current;
     setSearching(true);
     try {
       const more = await gitApi.getCommits(
@@ -320,12 +348,13 @@ export function HistoryPane() {
         applied,
         searchRevs,
       );
+      if (searchGeneration.current !== generation) return;
       setResults((current) => [...(current ?? []), ...more]);
       setSearchHasMore(more.length === COMMIT_PAGE);
     } catch (error) {
-      toast.error(errorMessage(error));
+      if (searchGeneration.current === generation) toast.error(errorMessage(error));
     } finally {
-      setSearching(false);
+      if (searchGeneration.current === generation) setSearching(false);
     }
   }
 
@@ -360,7 +389,7 @@ export function HistoryPane() {
           />
         </div>
       </div>
-      <ScrollArea className="min-h-0 flex-1" onScroll={onScroll}>
+      <ScrollArea className="min-h-0 flex-1" viewportRef={rows.viewportRef} onScroll={onScroll}>
         {visible.length === 0 ? (
           loading ? (
             <HistorySkeleton label={searchingMode ? "Searching" : "Loading history"} />
@@ -370,22 +399,25 @@ export function HistoryPane() {
             </div>
           )
         ) : (
-          <>
-            <CommitList
-              commits={visible}
-              graph={graph}
-              showGraph={!searchingMode}
-              selectedIds={selectedIds.length > 0 ? selectedIds : selectedId ? [selectedId] : []}
-              avatarProvider={prefs.avatarProvider}
-              loading={loading}
-              searchingMode={searchingMode}
-              hasMore={hasMore}
-              canResetBranch={canResetBranch}
-              canRebase={canRebase}
-              onSelect={selectRows}
-              onAction={onRowAction}
-            />
-          </>
+          <CommitList
+            commits={visible}
+            graph={graph}
+            showGraph={!searchingMode}
+            selectedIds={effectiveSelection}
+            start={rows.start}
+            end={rows.end}
+            before={rows.before}
+            after={rows.after}
+            avatarProvider={prefs.avatarProvider}
+            loading={loading}
+            searchingMode={searchingMode}
+            hasMore={hasMore}
+            canResetBranch={canResetBranch}
+            canRebase={canRebase}
+            onSelect={selectRows}
+            onAction={onRowAction}
+            getSelectedCommits={selectedCommits}
+          />
         )}
       </ScrollArea>
       <Dialog
@@ -633,6 +665,10 @@ const CommitList = memo(function CommitList({
   graph,
   showGraph,
   selectedIds,
+  start,
+  end,
+  before,
+  after,
   avatarProvider,
   loading,
   searchingMode,
@@ -641,11 +677,16 @@ const CommitList = memo(function CommitList({
   canRebase,
   onSelect,
   onAction,
+  getSelectedCommits,
 }: {
   commits: CommitSummary[];
   graph: GraphRow[];
   showGraph: boolean;
   selectedIds: string[];
+  start: number;
+  end: number;
+  before: number;
+  after: number;
   avatarProvider: AvatarProvider;
   loading: boolean;
   searchingMode: boolean;
@@ -654,43 +695,43 @@ const CommitList = memo(function CommitList({
   canRebase: boolean;
   onSelect: (id: string, mode: "single" | "toggle" | "range") => void;
   onAction: (action: CommitRowAction) => void;
+  getSelectedCommits: () => CommitSummary[];
 }) {
-  const rows = useMemo(
+  const graphCells = useMemo(
     () =>
-      commits.map((commit, index) => ({
-        commit,
-        graph:
-          showGraph && graph[index]
-            ? {
-                width: rowGraphWidth(graph[index], graph[index - 1]),
-                row: graph[index],
-                previous: graph[index - 1],
-              }
-            : null,
-      })),
+      commits.map((_, index) =>
+        showGraph && graph[index]
+          ? {
+              width: rowGraphWidth(graph[index], graph[index - 1]),
+              row: graph[index],
+              previous: graph[index - 1],
+            }
+          : null,
+      ),
     [commits, graph, showGraph],
   );
+  const selected = useMemo(() => new Set(selectedIds), [selectedIds]);
+  const multi = selectedIds.length > 1;
 
   return (
     <>
-      {rows.map((row) => (
+      <div style={{ height: before }} />
+      {commits.slice(start, end).map((commit, offset) => (
         <CommitRow
-          key={row.commit.id}
-          commit={row.commit}
-          selected={selectedIds.includes(row.commit.id)}
-          group={
-            selectedIds.includes(row.commit.id) && selectedIds.length > 1
-              ? commits.filter((commit) => selectedIds.includes(commit.id))
-              : [row.commit]
-          }
+          key={commit.id}
+          commit={commit}
+          selected={selected.has(commit.id)}
+          multi={multi && selected.has(commit.id)}
           avatarProvider={avatarProvider}
-          graph={row.graph}
+          graph={graphCells[start + offset]}
           canResetBranch={canResetBranch}
           canRebase={canRebase}
           onSelect={onSelect}
           onAction={onAction}
+          getSelectedCommits={getSelectedCommits}
         />
       ))}
+      <div style={{ height: after }} />
       {loading ? (
         <HistorySkeleton
           rows={3}
@@ -708,23 +749,25 @@ const CommitList = memo(function CommitList({
 const CommitRow = memo(function CommitRow({
   commit,
   selected,
-  group,
+  multi,
   avatarProvider,
   graph,
   canResetBranch,
   canRebase,
   onSelect,
   onAction,
+  getSelectedCommits,
 }: {
   commit: CommitSummary;
   selected: boolean;
-  group: CommitSummary[];
+  multi: boolean;
   avatarProvider: AvatarProvider;
   graph: { width: number; row: GraphRow; previous?: GraphRow } | null;
   canResetBranch: boolean;
   canRebase: boolean;
   onSelect: (id: string, mode: "single" | "toggle" | "range") => void;
   onAction: (action: CommitRowAction) => void;
+  getSelectedCommits: () => CommitSummary[];
 }) {
   const message = [commit.summary, commit.body].filter(Boolean).join("\n\n");
 
@@ -793,8 +836,8 @@ const CommitRow = memo(function CommitRow({
         </button>
       </ContextMenuTrigger>
       <ContextMenuContent className="w-48">
-        {group.length > 1 ? (
-          <MultiCommitMenu commits={group} onAction={onAction} />
+        {multi ? (
+          <MultiCommitMenu getCommits={getSelectedCommits} onAction={onAction} />
         ) : (
         <>
         {canResetBranch ? (
@@ -882,12 +925,13 @@ const CommitRow = memo(function CommitRow({
 });
 
 function MultiCommitMenu({
-  commits,
+  getCommits,
   onAction,
 }: {
-  commits: CommitSummary[];
+  getCommits: () => CommitSummary[];
   onAction: (action: CommitRowAction) => void;
 }) {
+  const commits = getCommits();
   const canCherryPick = commits.every((commit) => !commit.onCurrentBranch);
   const canRevert = commits.every((commit) => commit.onCurrentBranch);
   return (

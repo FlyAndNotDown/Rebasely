@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
@@ -40,9 +40,17 @@ struct AttachRequest {
     path: PathBuf,
 }
 
+#[derive(Default)]
+struct WatchPlan {
+    wanted: HashSet<String>,
+    /// Roots whose watcher is still being built on a background thread.
+    starting: HashSet<String>,
+}
+
 pub struct WatchState {
     watchers: Arc<Mutex<HashMap<String, RecommendedWatcher>>>,
     pending: Arc<Mutex<HashMap<String, Pending>>>,
+    plan: Arc<Mutex<WatchPlan>>,
     attach: Mutex<Option<mpsc::Sender<AttachRequest>>>,
     started: Mutex<bool>,
 }
@@ -52,6 +60,7 @@ impl Default for WatchState {
         Self {
             watchers: Arc::new(Mutex::new(HashMap::new())),
             pending: Arc::new(Mutex::new(HashMap::new())),
+            plan: Arc::new(Mutex::new(WatchPlan::default())),
             attach: Mutex::new(None),
             started: Mutex::new(false),
         }
@@ -284,30 +293,48 @@ pub fn sync_watches(app: &AppHandle, state: &WatchState, paths: Vec<String>) -> 
         .clone()
         .ok_or_else(|| crate::error::AppError::msg("Could not watch folder"))?;
 
-    let wanted: Vec<String> = paths
+    let wanted: HashSet<String> = paths
         .into_iter()
         .map(|path| strip_verbatim_prefix(&path))
         .filter(|path| !path.is_empty() && Path::new(path).exists())
         .collect();
 
-    {
+    // This runs on the caller's thread in call order, so the wanted set is
+    // always the latest one. Building a watcher walks the tree, which can take
+    // seconds on a large repository, so that part happens on its own thread.
+    let to_start: Vec<String> = {
+        let mut plan = state.plan.lock().unwrap_or_else(|err| err.into_inner());
         let mut watchers = state.watchers.lock().unwrap_or_else(|err| err.into_inner());
         watchers.retain(|path, _| wanted.contains(path));
-    }
+        let to_start = wanted
+            .iter()
+            .filter(|path| !watchers.contains_key(*path) && !plan.starting.contains(*path))
+            .cloned()
+            .collect::<Vec<_>>();
+        plan.starting.extend(to_start.iter().cloned());
+        plan.wanted = wanted;
+        to_start
+    };
 
-    for path in wanted {
-        {
-            let watchers = state.watchers.lock().unwrap_or_else(|err| err.into_inner());
-            if watchers.contains_key(&path) {
-                continue;
+    for path in to_start {
+        let watchers = state.watchers.clone();
+        let pending = state.pending.clone();
+        let plan = state.plan.clone();
+        let attach = attach.clone();
+        thread::spawn(move || {
+            let watcher = watch_path(path.clone(), pending, attach).ok();
+            let mut plan = plan.lock().unwrap_or_else(|err| err.into_inner());
+            plan.starting.remove(&path);
+            let Some(watcher) = watcher else { return };
+            if !plan.wanted.contains(&path) {
+                return;
             }
-        }
-        if let Ok(watcher) = watch_path(path.clone(), state.pending.clone(), attach.clone()) {
-            let mut watchers = state.watchers.lock().unwrap_or_else(|err| err.into_inner());
-            if !watchers.contains_key(&path) {
-                watchers.insert(path, watcher);
-            }
-        }
+            watchers
+                .lock()
+                .unwrap_or_else(|err| err.into_inner())
+                .entry(path)
+                .or_insert(watcher);
+        });
     }
     Ok(())
 }

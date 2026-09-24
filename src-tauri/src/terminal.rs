@@ -177,7 +177,7 @@ fn spawn_terminal(id: &str, path: &str) -> AppResult<()> {
         }
         "cmd" => {
             let mut command = Command::new("cmd");
-            command.args(["/K", &format!("cd /d \"{path}\"")]);
+            command.arg("/K").current_dir(path);
             command
         }
         "git-bash" => {

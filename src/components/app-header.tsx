@@ -236,9 +236,11 @@ export function AppHeader() {
               event.preventDefault();
               const name = newBranch.trim();
               if (!name) return;
-              void createBranch(name, true);
-              setNewBranch("");
-              setBranchOpen(false);
+              void createBranch(name, true).then((ok) => {
+                if (!ok) return;
+                setNewBranch("");
+                setBranchOpen(false);
+              });
             }}
           >
             <DialogHeader>

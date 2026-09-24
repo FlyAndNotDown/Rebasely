@@ -6,11 +6,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import { useGit } from "@/state/git-context";
+import { useActivities } from "@/state/git-context";
 import type { Activity } from "@/types/git";
 
 export function ActivityMeter() {
-  const { activities } = useGit();
+  const activities = useActivities();
   const [expandedId, setExpandedId] = useState<string | null>(null);
   if (activities.length === 0) return null;
 

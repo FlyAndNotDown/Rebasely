@@ -47,7 +47,7 @@ fn default_terminal_id() -> String {
 }
 
 fn default_avatar_provider() -> String {
-    "dicebear".to_string()
+    "initials".to_string()
 }
 
 fn default_sidebar_order() -> Vec<String> {

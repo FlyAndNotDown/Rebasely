@@ -1,7 +1,8 @@
-import { diffLineSpans } from "./diff-text";
+import { describe, expect, it } from "vitest";
+import { diffLineSpans, textColumns } from "./diff-text";
 
 function assert(condition: boolean, message: string) {
-  if (!condition) throw new Error(message);
+  expect(condition, message).toBe(true);
 }
 
 function trailingSpace() {
@@ -74,10 +75,24 @@ function sharedIndentStaysPlain() {
   assert(spans[0].some((span) => span.changed && span.text === "alph"), "the word change is marked");
 }
 
-trailingSpace();
-lineEndingHighlightsFollowingText();
-returnInsideLineHighlightsTail();
-insertedReturnHighlightsFollowingCode();
-tabTypedOnALineStaysHighlighted();
-sharedIndentStaysPlain();
-console.log("diff-text tests passed");
+describe("diffLineSpans", () => {
+  it("highlights only a trailing space", trailingSpace);
+  it("highlights the text after a trailing CR", lineEndingHighlightsFollowingText);
+  it("highlights the tail after an inner CR", returnInsideLineHighlightsTail);
+  it("highlights code after an inserted line", insertedReturnHighlightsFollowingCode);
+  it("keeps a typed tab highlighted", tabTypedOnALineStaysHighlighted);
+  it("keeps shared indent plain", sharedIndentStaysPlain);
+});
+
+describe("textColumns", () => {
+  it("counts plain text one column per character", () => {
+    expect(textColumns("abc")).toBe(3);
+  });
+  it("expands tabs to the next stop of four", () => {
+    expect(textColumns("\tx")).toBe(5);
+    expect(textColumns("ab\tx")).toBe(5);
+  });
+  it("counts wide characters as two columns and ignores CR", () => {
+    expect(textColumns("ＡＢa\r")).toBe(5);
+  });
+});

@@ -113,6 +113,7 @@ export function ChangesPane() {
     useGit();
   const [message, setMessage] = useState("");
   const [amend, setAmend] = useState(false);
+  const [committing, setCommitting] = useState(false);
   const [discardTarget, setDiscardTarget] = useState<string[] | null>(null);
   const [stagedOpen, setStagedOpen] = useState(true);
   const [changesOpen, setChangesOpen] = useState(true);
@@ -120,31 +121,39 @@ export function ChangesPane() {
   const unstaged = snapshot?.status.unstaged ?? [];
   const selectedChange = changeSelection;
   const canAmend = Boolean(snapshot?.headCommit);
-  const canCommitAndPush = message.trim().length > 0 && staged.length > 0;
+  const canCommitAndPush = !committing && message.trim().length > 0 && staged.length > 0;
   const canOpenCommitMenu = canCommitAndPush || canAmend;
-  const canCommit = message.trim().length > 0 && (amend ? canAmend : staged.length > 0);
+  const canCommit =
+    !committing && message.trim().length > 0 && (amend ? canAmend : staged.length > 0);
 
   const counts = useMemo(
     () => ({ staged: staged.length, unstaged: unstaged.length }),
     [staged.length, unstaged.length],
   );
 
+  async function runCommit(next: string, nextAmend: boolean) {
+    setCommitting(true);
+    try {
+      const ok = await commit(next, nextAmend);
+      if (ok) {
+        setMessage((current) => (current === next ? "" : current));
+        setAmend(false);
+      }
+      return ok;
+    } finally {
+      setCommitting(false);
+    }
+  }
+
   function submitCommit() {
     if (!canCommit) return;
-    const next = message;
-    const nextAmend = amend;
-    setMessage("");
-    setAmend(false);
-    void commit(next, nextAmend);
+    void runCommit(message, amend);
   }
 
   function submitCommitAndPush() {
     if (!canCommitAndPush) return;
-    const next = message;
-    setMessage("");
-    setAmend(false);
     void (async () => {
-      if (await commit(next, false)) {
+      if (await runCommit(message, false)) {
         await pushRemote();
       }
     })();

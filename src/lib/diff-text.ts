@@ -117,6 +117,23 @@ function highlightAfterBreak(
   spans[next] = marked;
 }
 
+/** Approximate monospace width: tabs expand to the next stop of 4, wide CJK characters take two cells. */
+export function textColumns(text: string): number {
+  let columns = 0;
+  for (const char of text) {
+    if (char === "\t") columns += 4 - (columns % 4);
+    else if (char === "\r") continue;
+    else columns += (char.codePointAt(0) ?? 0) >= 0x1100 && isWide(char) ? 2 : 1;
+  }
+  return columns;
+}
+
+function isWide(char: string) {
+  return /[\u1100-\u115f\u2e80-\ua4cf\uac00-\ud7a3\uf900-\ufaff\ufe30-\ufe4f\uff00-\uff60\uffe0-\uffe6]|[\u{20000}-\u{3fffd}]/u.test(
+    char,
+  );
+}
+
 function revealReturns(row: TextSpan[]): TextSpan[] {
   let after = false;
   const out: TextSpan[] = [];

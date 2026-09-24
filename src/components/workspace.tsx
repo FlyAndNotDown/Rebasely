@@ -87,7 +87,7 @@ function HistoryWorkspace() {
               </ResizablePanel>
               <ResizableHandle />
               <ResizablePanel id="history-diff" defaultSize="66%" minSize="30%">
-                <DiffViewer />
+                <DiffViewer source="history" />
               </ResizablePanel>
             </ResizablePanelGroup>
           </ResizablePanel>
@@ -114,7 +114,7 @@ function ChangesWorkspace() {
       </ResizablePanel>
       <ResizableHandle />
       <ResizablePanel id="changes-diff" defaultSize="64%" minSize="36%">
-        <DiffViewer />
+        <DiffViewer source="changes" />
       </ResizablePanel>
     </ResizablePanelGroup>
   );
@@ -156,7 +156,7 @@ function StashWorkspace() {
           </ResizablePanel>
           <ResizableHandle withHandle />
           <ResizablePanel id="stash-diff" defaultSize="72%" minSize="30%">
-            <DiffViewer />
+            <DiffViewer source="stash" />
           </ResizablePanel>
         </ResizablePanelGroup>
       </ResizablePanel>

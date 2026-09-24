@@ -1,14 +1,20 @@
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 import { ConflictEditor } from "@/components/conflict-editor";
 import { DiffSkeleton } from "@/components/skeletons";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { diffLineSpans, type TextSpan } from "@/lib/diff-text";
+import { diffLineSpans, textColumns, type TextSpan } from "@/lib/diff-text";
+import { useWindowedRows } from "@/lib/use-windowed-rows";
 import { cn } from "@/lib/utils";
 import { useGit } from "@/state/git-context";
+import type { FileDiff } from "@/types/git";
 
-export function DiffViewer() {
+export type DiffSource = "changes" | "history" | "stash";
+
+const DIFF_ROW_HEIGHT = 20;
+const DIFF_GUTTER = "8.25rem";
+
+export function DiffViewer({ source }: { source: DiffSource }) {
   const {
-    view,
     changeSelection,
     historySelection,
     stashSelection,
@@ -20,29 +26,28 @@ export function DiffViewer() {
     snapshot,
     comparison,
   } = useGit();
-  const comparing = view === "history" && comparison != null;
+  const comparing = source === "history" && comparison != null;
   const selection = comparing
     ? comparison.path
       ? { type: "commit" as const, id: comparison.head.rev, path: comparison.path }
       : null
-    : view === "changes"
+    : source === "changes"
       ? changeSelection
-      : view === "stash"
+      : source === "stash"
         ? stashSelection
         : historySelection;
-  const diff = view === "changes" ? changeDiff : view === "stash" ? stashDiff : historyDiff;
+  const diff = source === "changes" ? changeDiff : source === "stash" ? stashDiff : historyDiff;
   const title =
     selection?.type === "change"
       ? selection.path
       : selection?.path
         ? selection.path
         : "Diff";
-  const lineSpans = useMemo(() => (diff ? diffLineSpans(diff.lines) : []), [diff]);
   const conflicted =
     selection?.type === "change" &&
     snapshot?.status.unstaged.some((file) => file.path === selection.path && file.kind === "conflicted");
 
-  if (view === "stash") {
+  if (source === "stash") {
     if (!stashSelection) {
       return (
         <div className="flex h-full items-center justify-center p-6 text-center text-sm text-muted-foreground">
@@ -105,52 +110,71 @@ export function DiffViewer() {
           path={selection.path}
           rebasing={snapshot?.repo.operation?.kind === "rebase"}
         />
+      ) : diff?.binary ? (
+        <p className="p-4 text-sm text-muted-foreground">Binary file</p>
+      ) : !diff ? (
+        <DiffSkeleton />
+      ) : diff.lines.length === 0 ? (
+        <p className="p-4 text-sm text-muted-foreground">No textual diff</p>
       ) : (
-      <ScrollArea className="min-h-0 flex-1">
-        {diff?.binary ? (
-          <p className="p-4 text-sm text-muted-foreground">Binary file</p>
-        ) : !diff ? (
-          <DiffSkeleton />
-        ) : diff.lines.length === 0 ? (
-          <p className="p-4 text-sm text-muted-foreground">No textual diff</p>
-        ) : (
-          <pre className="min-w-max font-mono text-[12px] leading-5 [tab-size:4]">
-            {diff.lines.map((line, index) => (
-              <div
-                key={`${line.kind}-${index}-${line.oldLineno}-${line.newLineno}`}
-                className={cn(
-                  "grid grid-cols-[3rem_3rem_1.25rem_minmax(0,1fr)] px-2",
-                  line.kind === "add" && "bg-diff-add-bg text-diff-add",
-                  line.kind === "delete" && "bg-diff-del-bg text-diff-del",
-                  line.kind === "hunk" && "bg-muted/50 text-diff-hunk",
-                )}
-              >
-                <span className="pr-2 text-right text-muted-foreground/70 tabular-nums">
-                  {line.kind === "hunk" ? "" : line.oldLineno ?? ""}
-                </span>
-                <span className="pr-2 text-right text-muted-foreground/70 tabular-nums">
-                  {line.kind === "hunk" ? "" : line.newLineno ?? ""}
-                </span>
-                <span className="text-center">
-                  {line.kind === "add" ? "+" : line.kind === "delete" ? "-" : line.kind === "hunk" ? "" : " "}
-                </span>
-                {line.kind === "hunk" ? (
-                  <span className="whitespace-pre">{line.content}</span>
-                ) : (
-                  <DiffLineText spans={lineSpans[index] ?? []} kind={line.kind} />
-                )}
-              </div>
-            ))}
-            {diff.truncated ? (
-              <div className="px-3 py-2 text-muted-foreground">Diff truncated</div>
-            ) : null}
-          </pre>
-        )}
-      </ScrollArea>
+        <DiffLines key={`${source}:${title}`} diff={diff} />
       )}
     </div>
   );
 }
+
+export const DiffLines = memo(function DiffLines({ diff }: { diff: FileDiff }) {
+  const lineSpans = useMemo(() => diffLineSpans(diff.lines), [diff]);
+  const widest = useMemo(
+    () => diff.lines.reduce((max, line) => Math.max(max, textColumns(line.content)), 0),
+    [diff],
+  );
+  const rows = useWindowedRows(diff.lines.length, DIFF_ROW_HEIGHT);
+
+  return (
+    <ScrollArea className="min-h-0 flex-1" viewportRef={rows.viewportRef}>
+      <pre
+        className="font-mono text-[12px] leading-5 [tab-size:4]"
+        style={{ minWidth: `calc(${DIFF_GUTTER} + ${widest}ch)` }}
+      >
+        <div style={{ height: rows.before }} />
+        {diff.lines.slice(rows.start, rows.end).map((line, offset) => {
+          const index = rows.start + offset;
+          return (
+            <div
+              key={index}
+              className={cn(
+                "grid h-5 grid-cols-[3rem_3rem_1.25rem_minmax(0,1fr)] px-2",
+                line.kind === "add" && "bg-diff-add-bg text-diff-add",
+                line.kind === "delete" && "bg-diff-del-bg text-diff-del",
+                line.kind === "hunk" && "bg-muted/50 text-diff-hunk",
+              )}
+            >
+              <span className="pr-2 text-right text-muted-foreground/70 tabular-nums">
+                {line.kind === "hunk" ? "" : line.oldLineno ?? ""}
+              </span>
+              <span className="pr-2 text-right text-muted-foreground/70 tabular-nums">
+                {line.kind === "hunk" ? "" : line.newLineno ?? ""}
+              </span>
+              <span className="text-center">
+                {line.kind === "add" ? "+" : line.kind === "delete" ? "-" : line.kind === "hunk" ? "" : " "}
+              </span>
+              {line.kind === "hunk" ? (
+                <span className="whitespace-pre">{line.content}</span>
+              ) : (
+                <DiffLineText spans={lineSpans[index] ?? []} kind={line.kind} />
+              )}
+            </div>
+          );
+        })}
+        <div style={{ height: rows.after }} />
+        {diff.truncated ? (
+          <div className="px-3 py-2 text-muted-foreground">Diff truncated</div>
+        ) : null}
+      </pre>
+    </ScrollArea>
+  );
+});
 
 function DiffLineText({ spans, kind }: { spans: TextSpan[]; kind: string }) {
   const body = spans.map((span, index) => {
@@ -165,4 +189,3 @@ function DiffLineText({ spans, kind }: { spans: TextSpan[]; kind: string }) {
   });
   return <span className="whitespace-pre">{body.every((part) => part === null) ? " " : body}</span>;
 }
-

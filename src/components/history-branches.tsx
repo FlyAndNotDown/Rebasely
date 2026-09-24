@@ -97,7 +97,7 @@ export function HistoryBranches() {
       if (upstream) ids.add(`remote:${upstream.split("/")[0]}`);
     }
     setHistoryExpanded([...ids]);
-  }, [branches?.current, historyExpanded, setHistoryExpanded]);
+  }, [branches, historyExpanded, setHistoryExpanded]);
 
   const localTree = useMemo(() => {
     const items = branches?.local ?? [];

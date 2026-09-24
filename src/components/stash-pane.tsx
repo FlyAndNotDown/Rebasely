@@ -90,10 +90,19 @@ export function StashComposer() {
   const { stashSave } = useGit();
   const [message, setMessage] = useState("");
   const [includeUntracked, setIncludeUntracked] = useState(true);
+  const [saving, setSaving] = useState(false);
 
-  function submitStash() {
-    void stashSave(message.trim(), includeUntracked);
-    setMessage("");
+  async function submitStash() {
+    if (saving) return;
+    const next = message;
+    setSaving(true);
+    try {
+      if (await stashSave(next.trim(), includeUntracked)) {
+        setMessage((current) => (current === next ? "" : current));
+      }
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -101,7 +110,7 @@ export function StashComposer() {
       className="shrink-0 border-t p-3"
       onSubmit={(event) => {
         event.preventDefault();
-        submitStash();
+        void submitStash();
       }}
     >
       <Textarea
@@ -121,7 +130,9 @@ export function StashComposer() {
             Include untracked
           </Label>
         </div>
-        <Button type="submit">Stash changes</Button>
+        <Button type="submit" disabled={saving}>
+          Stash changes
+        </Button>
       </div>
     </form>
   );

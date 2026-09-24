@@ -33,31 +33,42 @@ fn with_repo<T>(path: &str, f: impl FnOnce(&mut git2::Repository) -> AppResult<T
     f(&mut repo)
 }
 
+/// Synchronous commands run on the main thread, so anything that touches the
+/// disk or spawns processes goes through here instead.
+async fn blocking<T, F>(f: F) -> AppResult<T>
+where
+    T: Send + 'static,
+    F: FnOnce() -> AppResult<T> + Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(f)
+        .await
+        .map_err(|err| AppError::msg(err.to_string()))?
+}
+
 async fn with_repo_async<T, F>(path: String, f: F) -> AppResult<T>
 where
     T: Send + 'static,
     F: FnOnce(&mut git2::Repository) -> AppResult<T> + Send + 'static,
 {
-    tauri::async_runtime::spawn_blocking(move || with_repo(&path, f))
-        .await
-        .map_err(|err| AppError::msg(err.to_string()))?
+    blocking(move || with_repo(&path, f)).await
 }
 
 #[tauri::command]
-fn list_recents(app: AppHandle) -> AppResult<Vec<RecentRepo>> {
-    recents::load_recents(&app)
+async fn list_recents(app: AppHandle) -> AppResult<Vec<RecentRepo>> {
+    blocking(move || recents::load_recents(&app)).await
 }
 
 #[tauri::command]
-fn forget_recent(path: String, app: AppHandle) -> AppResult<Vec<RecentRepo>> {
-    recents::forget_repo(&app, &path)
+async fn forget_recent(path: String, app: AppHandle) -> AppResult<Vec<RecentRepo>> {
+    blocking(move || recents::forget_repo(&app, &path)).await
 }
 
 #[tauri::command]
-fn load_session(app: AppHandle) -> AppResult<AppSession> {
-    session::load_session(&app)
+async fn load_session(app: AppHandle) -> AppResult<AppSession> {
+    blocking(move || session::load_session(&app)).await
 }
 
+// Kept synchronous so rapid saves land in the order they were sent.
 #[tauri::command]
 fn save_session(session: AppSession, app: AppHandle) -> AppResult<AppSession> {
     session::save_session(&app, session)
@@ -70,23 +81,21 @@ async fn clone_repository(
     activity_id: Option<String>,
     app: AppHandle,
 ) -> AppResult<String> {
-    tauri::async_runtime::spawn_blocking(move || {
+    blocking(move || {
         git::clone_repository(&url, &destination, progress_sink(&app, activity_id.as_deref()))
     })
     .await
-    .map_err(|err| AppError::msg(err.to_string()))?
 }
 
 #[tauri::command]
 async fn open_repository(path: String, app: AppHandle) -> AppResult<WorkspaceSnapshot> {
-    tauri::async_runtime::spawn_blocking(move || {
+    blocking(move || {
         let mut repo = git::discover(&path)?;
         let snapshot = git::snapshot(&mut repo)?;
         recents::remember_repo(&app, &snapshot.repo.path, &snapshot.repo.name)?;
         Ok(snapshot)
     })
     .await
-    .map_err(|err| AppError::msg(err.to_string()))?
 }
 
 #[tauri::command]
@@ -571,14 +580,17 @@ async fn get_stash_diff(repo_path: String, oid: String, path: String) -> AppResu
 }
 
 #[tauri::command]
-fn get_git_identity() -> AppResult<GitIdentity> {
-    git::read_git_identity()
+async fn get_git_identity() -> AppResult<GitIdentity> {
+    blocking(git::read_git_identity).await
 }
 
 #[tauri::command]
-fn set_git_identity(identity: GitIdentity) -> AppResult<GitIdentity> {
-    git::write_git_identity(&identity.name, &identity.email)?;
-    git::read_git_identity()
+async fn set_git_identity(identity: GitIdentity) -> AppResult<GitIdentity> {
+    blocking(move || {
+        git::write_git_identity(&identity.name, &identity.email)?;
+        git::read_git_identity()
+    })
+    .await
 }
 
 #[tauri::command]
@@ -596,29 +608,33 @@ async fn set_local_git_identity(repo_path: String, identity: GitIdentity) -> App
 }
 
 #[tauri::command]
-fn open_in_file_manager(path: String) -> AppResult<()> {
-    git::open_in_file_manager(&path)
+async fn open_in_file_manager(path: String) -> AppResult<()> {
+    blocking(move || git::open_in_file_manager(&path)).await
 }
 
 #[tauri::command]
-fn list_terminals() -> Vec<TerminalOption> {
-    terminal::list_terminals()
+async fn list_terminals() -> AppResult<Vec<TerminalOption>> {
+    blocking(|| Ok(terminal::list_terminals())).await
 }
 
 #[tauri::command]
-fn get_prefs(app: AppHandle) -> AppResult<AppPrefs> {
-    prefs::load_prefs(&app)
+async fn get_prefs(app: AppHandle) -> AppResult<AppPrefs> {
+    blocking(move || prefs::load_prefs(&app)).await
 }
 
+// Kept synchronous so rapid saves land in the order they were sent.
 #[tauri::command]
 fn set_prefs(prefs: AppPrefs, app: AppHandle) -> AppResult<AppPrefs> {
     prefs::save_prefs(&app, prefs)
 }
 
 #[tauri::command]
-fn open_in_terminal(path: String, app: AppHandle) -> AppResult<()> {
-    let prefs = prefs::load_prefs(&app)?;
-    terminal::open_in_terminal(&path, &prefs.terminal_id)
+async fn open_in_terminal(path: String, app: AppHandle) -> AppResult<()> {
+    blocking(move || {
+        let prefs = prefs::load_prefs(&app)?;
+        terminal::open_in_terminal(&path, &prefs.terminal_id)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -683,7 +699,6 @@ unsafe fn dwm_set_color(hwnd: *mut std::ffi::c_void, attr: u32, color: u32) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(WatchState::default())
         .setup(|app| {

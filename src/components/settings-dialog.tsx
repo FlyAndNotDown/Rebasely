@@ -20,6 +20,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Label } from "@/components/ui/label";
+import { AVATAR_PROVIDERS } from "@/lib/avatar";
 import { errorMessage, gitApi } from "@/lib/git";
 import { normalizePrefs } from "@/lib/prefs";
 import { cn } from "@/lib/utils";
@@ -28,10 +29,6 @@ import type { AvatarProvider, TerminalOption } from "@/types/git";
 
 type SettingsSection = "git" | "general";
 type ThemeChoice = "dark" | "light" | "system";
-
-const avatarProviders: { id: AvatarProvider; label: string }[] = [
-  { id: "dicebear", label: "DiceBear" },
-];
 
 const themeOptions: { id: ThemeChoice; label: string }[] = [
   { id: "dark", label: "Dark" },
@@ -52,7 +49,7 @@ export function SettingsDialog({
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [terminalId, setTerminalId] = useState("auto");
-  const [avatarProvider, setAvatarProvider] = useState<AvatarProvider>("dicebear");
+  const [avatarProvider, setAvatarProvider] = useState<AvatarProvider>("initials");
   const [terminals, setTerminals] = useState<TerminalOption[]>([]);
   const [themeChoice, setThemeChoice] = useState<ThemeChoice>("dark");
   const [saving, setSaving] = useState(false);
@@ -163,7 +160,7 @@ export function SettingsDialog({
                       id="avatar-provider"
                       label="Avatar provider"
                       value={avatarProvider}
-                      options={avatarProviders}
+                      options={AVATAR_PROVIDERS}
                       onChange={setAvatarProvider}
                     />
                   </FieldGroup>
