@@ -418,7 +418,7 @@ interface GitContextValue {
   checkoutBranch: (name: string) => Promise<void>;
   fetchRemote: (remote?: string) => Promise<void>;
   fetchAllRemotes: () => Promise<void>;
-  pullRemote: (remote?: string) => Promise<void>;
+  pullRemote: (remote?: string, rebase?: boolean) => Promise<void>;
   pushRemote: (options?: { remote?: string; force?: boolean; setUpstream?: boolean }) => Promise<boolean>;
   publishPrompt: PublishPrompt | null;
   dismissPublish: () => void;
@@ -1603,7 +1603,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
     await refreshAfterFetch(ok);
   }, [refreshAfterFetch, runMutation]);
 
-  const pullRemote = useCallback(async (remote?: string) => {
+  const pullRemote = useCallback(async (remote?: string, rebase = false) => {
     const snapshot = sessionsRef.current[activeTabIdRef.current]?.snapshot;
     const target = remote?.trim() || primaryRemote(snapshot);
     if (!target) {
@@ -1611,9 +1611,9 @@ export function GitProvider({ children }: { children: ReactNode }) {
       return;
     }
     const ok = await runMutation(
-      `Pulling from ${target}`,
-      (repoPath, activityId) => gitApi.pullRemote(repoPath, activityId, target),
-      `Pulled from ${target}`,
+      rebase ? `Rebasing onto ${target}` : `Pulling from ${target}`,
+      (repoPath, activityId) => gitApi.pullRemote(repoPath, activityId, target, rebase),
+      rebase ? `Rebased onto ${target}` : `Pulled from ${target}`,
     );
     await ensureBranches(true);
     if (ok) invalidateHistory(activeTabIdRef.current, sessionsRef.current[activeTabIdRef.current]?.view === "history");

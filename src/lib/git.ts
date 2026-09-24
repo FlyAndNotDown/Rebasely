@@ -101,11 +101,12 @@ export const gitApi = {
     invoke<WorkspaceSnapshot>("delete_remote", { repoPath, name }),
   probeRemoteUrl: (repoPath: string, url: string) =>
     invoke<RemoteProbe>("probe_remote_url", { repoPath, url }),
-  pullRemote: (repoPath: string, activityId?: string, remote?: string) =>
+  pullRemote: (repoPath: string, activityId?: string, remote?: string, rebase = false) =>
     invoke<WorkspaceSnapshot>("pull_remote", {
       repoPath,
       activityId,
       remote: remote || null,
+      rebase,
     }),
   pushRemote: (
     repoPath: string,

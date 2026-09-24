@@ -205,13 +205,16 @@ async fn fetch_remote(
 async fn pull_remote(
     repo_path: String,
     remote: Option<String>,
+    rebase: Option<bool>,
     activity_id: Option<String>,
     app: AppHandle,
 ) -> AppResult<WorkspaceSnapshot> {
+    let rebase = rebase.unwrap_or(false);
     with_repo_async(repo_path, move |repo| {
         git::pull_remote(
             repo,
             remote.as_deref(),
+            rebase,
             progress_sink(&app, activity_id.as_deref()),
         )
     })

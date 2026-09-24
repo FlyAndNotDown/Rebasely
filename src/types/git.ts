@@ -165,6 +165,7 @@ export interface AppPrefs {
   avatarProvider: AvatarProvider;
   sidebarOrder: string[];
   panelLayouts: PanelLayouts;
+  pullRebase: boolean;
 }
 
 export interface RemoteInfo {

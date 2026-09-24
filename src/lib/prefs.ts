@@ -16,6 +16,7 @@ export const defaultPrefs: AppPrefs = {
   avatarProvider: "dicebear",
   sidebarOrder: [...SIDEBAR_VIEWS],
   panelLayouts: { ...DEFAULT_PANEL_LAYOUTS },
+  pullRebase: false,
 };
 
 export function normalizeSidebarOrder(order?: string[] | null): string[] {
@@ -90,5 +91,6 @@ export function normalizePrefs(prefs: Partial<AppPrefs> | null | undefined): App
     avatarProvider: "dicebear",
     sidebarOrder: normalizeSidebarOrder(prefs?.sidebarOrder),
     panelLayouts: normalizePanelLayouts(prefs?.panelLayouts),
+    pullRebase: prefs?.pullRebase === true,
   };
 }

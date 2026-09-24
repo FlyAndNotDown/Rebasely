@@ -34,6 +34,8 @@ pub struct AppPrefs {
     pub sidebar_order: Vec<String>,
     #[serde(default)]
     pub panel_layouts: PanelLayouts,
+    #[serde(default)]
+    pub pull_rebase: bool,
 }
 
 fn default_terminal_id() -> String {
@@ -59,6 +61,7 @@ impl Default for AppPrefs {
             avatar_provider: default_avatar_provider(),
             sidebar_order: default_sidebar_order(),
             panel_layouts: PanelLayouts::default(),
+            pull_rebase: false,
         }
     }
 }

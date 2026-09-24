@@ -469,9 +469,14 @@ pub fn fetch_remote(
 pub fn pull_remote(
     repo: &mut Repository,
     remote: Option<&str>,
+    rebase: bool,
     on_progress: impl FnMut(&str) + Send,
 ) -> AppResult<WorkspaceSnapshot> {
-    let mut args = vec!["pull".to_string(), "--progress".to_string()];
+    let mut args = vec![
+        "pull".to_string(),
+        "--progress".to_string(),
+        if rebase { "--rebase" } else { "--no-rebase" }.to_string(),
+    ];
     if let Some(remote) = remote.map(str::trim).filter(|name| !name.is_empty()) {
         let branch = repo_info(repo)?
             .current_branch
