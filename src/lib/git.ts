@@ -145,6 +145,14 @@ export const gitApi = {
     invoke<WorkspaceSnapshot>("rebase_continue", { repoPath }),
   rebaseSkip: (repoPath: string) => invoke<WorkspaceSnapshot>("rebase_skip", { repoPath }),
   rebaseAbort: (repoPath: string) => invoke<WorkspaceSnapshot>("rebase_abort", { repoPath }),
+  mergeRef: (repoPath: string, onto: string) =>
+    invoke<WorkspaceSnapshot>("merge_ref", { repoPath, onto }),
+  operationContinue: (repoPath: string) =>
+    invoke<WorkspaceSnapshot>("operation_continue", { repoPath }),
+  operationAbort: (repoPath: string) =>
+    invoke<WorkspaceSnapshot>("operation_abort", { repoPath }),
+  resolveConflict: (repoPath: string, path: string, side: "ours" | "theirs" | "both") =>
+    invoke<WorkspaceSnapshot>("resolve_conflict", { repoPath, path, side }),
   resetToCommit: (repoPath: string, oid: string, mode: string) =>
     invoke<WorkspaceSnapshot>("reset_to_commit", { repoPath, oid, mode }),
   writeCommitPatch: (repoPath: string, oid: string, dest: string) =>

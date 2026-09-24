@@ -18,6 +18,15 @@ export interface RepoInfo {
   behind: number | null;
   upstream: string | null;
   rebase: RebaseProgress | null;
+  operation: GitOperation | null;
+}
+
+export interface GitOperation {
+  kind: "merge" | "rebase" | "cherry-pick" | "revert" | string;
+  headName: string | null;
+  onto: string | null;
+  step: number | null;
+  total: number | null;
 }
 
 export interface RebaseProgress {

@@ -35,7 +35,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { InteractiveRebaseDialog, RebaseOntoDialog } from "@/components/rebase-dialog";
+import { InteractiveRebaseDialog, MergeDialog, RebaseOntoDialog } from "@/components/rebase-dialog";
 import { HistorySkeleton } from "@/components/skeletons";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { formatAbsoluteTime } from "@/lib/format";
@@ -54,6 +54,7 @@ type CommitRowAction =
   | { type: "reset"; commit: CommitSummary }
   | { type: "patch"; commit: CommitSummary }
   | { type: "rebase"; commit: CommitSummary }
+  | { type: "merge"; commit: CommitSummary }
   | { type: "interactive"; commit: CommitSummary };
 
 function commitSubject(summary: string) {
@@ -141,9 +142,10 @@ export function HistoryPane() {
   const [resetTarget, setResetTarget] = useState<CommitSummary | null>(null);
   const [resetMode, setResetMode] = useState<ResetMode>("mixed");
   const [rebaseTarget, setRebaseTarget] = useState<CommitSummary | null>(null);
+  const [mergeTarget, setMergeTarget] = useState<CommitSummary | null>(null);
   const [interactiveTarget, setInteractiveTarget] = useState<CommitSummary | null>(null);
   const canResetBranch = Boolean(snapshot?.repo.currentBranch) && !snapshot?.repo.isDetached;
-  const canRebase = canResetBranch && !snapshot?.repo.rebase;
+  const canRebase = canResetBranch && !snapshot?.repo.operation;
   const currentBranch = snapshot?.repo.currentBranch;
   const selectedId = historySelection?.id ?? null;
   const searchRevs = useMemo(
@@ -184,6 +186,9 @@ export function HistoryPane() {
           break;
         case "rebase":
           setRebaseTarget(action.commit);
+          break;
+        case "merge":
+          setMergeTarget(action.commit);
           break;
         case "interactive":
           setInteractiveTarget(action.commit);
@@ -442,6 +447,12 @@ export function HistoryPane() {
           </form>
         </DialogContent>
       </Dialog>
+      <MergeDialog
+        target={mergeTarget ? { onto: mergeTarget.id, label: mergeTarget.shortId } : null}
+        onOpenChange={(open) => {
+          if (!open) setMergeTarget(null);
+        }}
+      />
       <RebaseOntoDialog
         target={
           rebaseTarget
@@ -627,6 +638,13 @@ const CommitRow = memo(function CommitRow({
         >
           <CopyPlusIcon />
           Cherry-pick
+        </ContextMenuItem>
+        <ContextMenuItem
+          disabled={!canRebase || commit.onCurrentBranch}
+          onClick={() => onAction({ type: "merge", commit })}
+        >
+          <GitBranchIcon />
+          Merge
         </ContextMenuItem>
         <ContextMenuItem
           disabled={!commit.onCurrentBranch}

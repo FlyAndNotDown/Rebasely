@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ChevronRightIcon, EyeIcon, GitBranchIcon, PlusIcon, SearchIcon } from "lucide-react";
 import { AddRemoteDialog } from "@/components/add-remote-dialog";
-import { RebaseOntoDialog } from "@/components/rebase-dialog";
+import { MergeDialog, RebaseOntoDialog } from "@/components/rebase-dialog";
 import { Button } from "@/components/ui/button";
 import {
   ContextMenu,
@@ -53,7 +53,9 @@ export function HistoryBranches() {
   const [deleting, setDeleting] = useState<BranchInfo | null>(null);
   const [deletingRemote, setDeletingRemote] = useState<string | null>(null);
   const [rebasing, setRebasing] = useState<BranchInfo | null>(null);
-  const canRebase = Boolean(snapshot?.repo.currentBranch) && !snapshot?.repo.isDetached && !snapshot?.repo.rebase;
+  const [merging, setMerging] = useState<BranchInfo | null>(null);
+  const canRebase =
+    Boolean(snapshot?.repo.currentBranch) && !snapshot?.repo.isDetached && !snapshot?.repo.operation;
   const branches = snapshot?.branches;
   const watched = useMemo(() => new Set(historyRevs), [historyRevs]);
   const expanded = useMemo(
@@ -196,12 +198,19 @@ export function HistoryBranches() {
             onCheckout={(branch) => void checkoutBranch(branch.name)}
             onDelete={requestDelete}
             onRebase={canRebase ? setRebasing : undefined}
+            onMerge={canRebase ? setMerging : undefined}
             onDeleteRemote={setDeletingRemote}
             onFetchRemote={(name) => void fetchRemote(name)}
             onAddRemote={() => setAddOpen(true)}
           />
         )}
       </ScrollArea>
+      <MergeDialog
+        target={merging ? { onto: merging.name, label: merging.name } : null}
+        onOpenChange={(open) => {
+          if (!open) setMerging(null);
+        }}
+      />
       <RebaseOntoDialog
         target={rebasing ? { onto: rebasing.name, label: rebasing.name } : null}
         onOpenChange={(open) => {
@@ -287,6 +296,7 @@ function TreeRows({
   onCheckout,
   onDelete,
   onRebase,
+  onMerge,
   onDeleteRemote,
   onFetchRemote,
   onAddRemote,
@@ -301,6 +311,7 @@ function TreeRows({
   onCheckout: (branch: BranchInfo) => void;
   onDelete: (branch: BranchInfo) => void;
   onRebase?: (branch: BranchInfo) => void;
+  onMerge?: (branch: BranchInfo) => void;
   onDeleteRemote?: (name: string) => void;
   onFetchRemote?: (name: string) => void;
   onAddRemote?: () => void;
@@ -346,6 +357,11 @@ function TreeRows({
                 {onRebase ? (
                   <ContextMenuItem disabled={branch.isHead} onClick={() => onRebase(branch)}>
                     Rebase onto
+                  </ContextMenuItem>
+                ) : null}
+                {onMerge ? (
+                  <ContextMenuItem disabled={branch.isHead} onClick={() => onMerge(branch)}>
+                    Merge
                   </ContextMenuItem>
                 ) : null}
                 <ContextMenuItem
@@ -428,6 +444,7 @@ function TreeRows({
                 onCheckout={onCheckout}
                 onDelete={onDelete}
                 onRebase={onRebase}
+                onMerge={onMerge}
                 onDeleteRemote={onDeleteRemote}
                 onFetchRemote={onFetchRemote}
                 onAddRemote={onAddRemote}

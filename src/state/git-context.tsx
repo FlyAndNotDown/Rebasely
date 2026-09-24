@@ -249,6 +249,10 @@ function sameSnapshot(previous: WorkspaceSnapshot | null | undefined, next: Work
     before.rebase?.headName !== after.rebase?.headName ||
     before.rebase?.step !== after.rebase?.step ||
     before.rebase?.total !== after.rebase?.total ||
+    before.operation?.kind !== after.operation?.kind ||
+    before.operation?.onto !== after.operation?.onto ||
+    before.operation?.step !== after.operation?.step ||
+    before.operation?.total !== after.operation?.total ||
     (previous.headCommit?.id ?? null) !== (next.headCommit?.id ?? null)
   ) {
     return false;
@@ -428,6 +432,10 @@ interface GitContextValue {
   rebaseContinue: () => Promise<boolean>;
   rebaseSkip: () => Promise<boolean>;
   rebaseAbort: () => Promise<boolean>;
+  mergeRef: (onto: string, label: string) => Promise<boolean>;
+  operationContinue: () => Promise<boolean>;
+  operationAbort: () => Promise<boolean>;
+  resolveConflict: (path: string, side: "ours" | "theirs" | "both") => Promise<boolean>;
   resetCommit: (oid: string, mode: ResetMode) => Promise<boolean>;
   createPatch: (commit: CommitSummary) => Promise<void>;
   applyPatch: () => Promise<void>;
@@ -454,6 +462,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
   const [publishPrompt, setPublishPrompt] = useState<PublishPrompt | null>(null);
   const [prefs, setPrefs] = useState<AppPrefs>(defaultPrefs);
   const restoredRef = useRef(false);
+  const refreshAfterReplayRef = useRef<() => Promise<void>>(async () => {});
   const prefsRef = useRef(prefs);
   const persistPrefsTimer = useRef<number | null>(null);
 
@@ -1589,6 +1598,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
     );
     await ensureBranches(true);
     if (ok) invalidateHistory(activeTabIdRef.current, sessionsRef.current[activeTabIdRef.current]?.view === "history");
+    else await refreshAfterReplayRef.current();
   }, [ensureBranches, invalidateHistory, runMutation]);
 
   const pushRemote = useCallback(
@@ -1697,7 +1707,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       const headChanged = sessionsRef.current[tabId]?.snapshot?.repo.headId !== snapshot.repo.headId;
       patchSession(tabId, {
         snapshot,
-        ...(dirty ? { view: "changes" } : {}),
+        ...(dirty || snapshot.repo.operation ? { view: "changes" } : {}),
         ...(headChanged
           ? {
               commitsLoaded: false,
@@ -1712,6 +1722,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       /* the original error is already shown */
     }
   }, [activeRepoPath, loadHistoryPage, patchSession]);
+  refreshAfterReplayRef.current = refreshAfterReplay;
 
   const revertCommit = useCallback(
     async (oid: string) => {
@@ -1779,6 +1790,49 @@ export function GitProvider({ children }: { children: ReactNode }) {
       "Rebase aborted",
     );
   }, [runMutation]);
+
+  const mergeRef = useCallback(
+    async (onto: string, label: string) => {
+      const ok = await runMutation(
+        `Merging ${label}`,
+        (repoPath) => gitApi.mergeRef(repoPath, onto),
+        `Merged ${label}`,
+      );
+      if (!ok) await refreshAfterReplay();
+      return ok;
+    },
+    [refreshAfterReplay, runMutation],
+  );
+
+  const operationContinue = useCallback(async () => {
+    const kind = sessionsRef.current[activeTabIdRef.current]?.snapshot?.repo.operation?.kind;
+    const ok = await runMutation(
+      "Continuing",
+      (repoPath) => gitApi.operationContinue(repoPath),
+      kind === "merge" ? "Merge finished" : "Operation finished",
+    );
+    if (!ok) await refreshAfterReplay();
+    return ok;
+  }, [refreshAfterReplay, runMutation]);
+
+  const operationAbort = useCallback(async () => {
+    return runMutation(
+      "Aborting",
+      (repoPath) => gitApi.operationAbort(repoPath),
+      "Aborted",
+    );
+  }, [runMutation]);
+
+  const resolveConflict = useCallback(
+    async (path: string, side: "ours" | "theirs" | "both") => {
+      return runMutation(
+        "Resolving conflict",
+        (repoPath) => gitApi.resolveConflict(repoPath, path, side),
+        "Conflict resolved",
+      );
+    },
+    [runMutation],
+  );
 
   const cherryPickCommit = useCallback(
     async (oid: string) => {
@@ -2058,6 +2112,10 @@ export function GitProvider({ children }: { children: ReactNode }) {
       rebaseContinue,
       rebaseSkip,
       rebaseAbort,
+      mergeRef,
+      operationContinue,
+      operationAbort,
+      resolveConflict,
       resetCommit,
       createPatch,
       applyPatch,
@@ -2122,6 +2180,10 @@ export function GitProvider({ children }: { children: ReactNode }) {
       rebaseContinue,
       rebaseSkip,
       rebaseAbort,
+      mergeRef,
+      operationContinue,
+      operationAbort,
+      resolveConflict,
       resetCommit,
       createPatch,
       applyPatch,

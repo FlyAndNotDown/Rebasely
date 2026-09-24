@@ -337,6 +337,30 @@ async fn rebase_abort(repo_path: String) -> AppResult<WorkspaceSnapshot> {
 }
 
 #[tauri::command]
+async fn merge_ref(repo_path: String, onto: String) -> AppResult<WorkspaceSnapshot> {
+    with_repo_async(repo_path, move |repo| git::merge_ref(repo, &onto)).await
+}
+
+#[tauri::command]
+async fn operation_continue(repo_path: String) -> AppResult<WorkspaceSnapshot> {
+    with_repo_async(repo_path, |repo| git::operation_continue(repo)).await
+}
+
+#[tauri::command]
+async fn operation_abort(repo_path: String) -> AppResult<WorkspaceSnapshot> {
+    with_repo_async(repo_path, |repo| git::operation_abort(repo)).await
+}
+
+#[tauri::command]
+async fn resolve_conflict(
+    repo_path: String,
+    path: String,
+    side: String,
+) -> AppResult<WorkspaceSnapshot> {
+    with_repo_async(repo_path, move |repo| git::resolve_conflict(repo, &path, &side)).await
+}
+
+#[tauri::command]
 async fn reset_to_commit(
     repo_path: String,
     oid: String,
@@ -600,6 +624,10 @@ pub fn run() {
             rebase_continue,
             rebase_skip,
             rebase_abort,
+            merge_ref,
+            operation_continue,
+            operation_abort,
+            resolve_conflict,
             reset_to_commit,
             write_commit_patch,
             apply_patch,

@@ -234,38 +234,86 @@ export function InteractiveRebaseDialog({
   );
 }
 
+export function MergeDialog({
+  target,
+  onOpenChange,
+}: {
+  target: { onto: string; label: string } | null;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const { snapshot, mergeRef } = useGit();
+  const branch = snapshot?.repo.currentBranch;
+
+  return (
+    <Dialog open={Boolean(target)} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Merge {target?.label}?</DialogTitle>
+          <DialogDescription>
+            Merge it into{" "}
+            <span className="font-mono text-foreground">{branch ?? "the current branch"}</span>.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            onClick={() => {
+              const next = target;
+              if (!next) return;
+              onOpenChange(false);
+              void mergeRef(next.onto, next.label);
+            }}
+          >
+            Merge
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+const OPERATION_LABEL: Record<string, string> = {
+  merge: "Merge",
+  rebase: "Rebase",
+  "cherry-pick": "Cherry-pick",
+  revert: "Revert",
+};
+
 export function RebaseBanner() {
-  const { snapshot, rebaseContinue, rebaseSkip, rebaseAbort, setView } = useGit();
-  const rebase = snapshot?.repo.rebase;
-  if (!rebase) return null;
+  const { snapshot, operationContinue, operationAbort, rebaseSkip, setView } = useGit();
+  const operation = snapshot?.repo.operation;
+  if (!operation) return null;
+  const conflicted = (snapshot?.status.unstaged ?? []).some((file) => file.kind === "conflicted");
   const progress =
-    rebase.step && rebase.total ? ` · ${rebase.step} of ${rebase.total}` : "";
+    operation.step && operation.total ? ` · ${operation.step} of ${operation.total}` : "";
+  const title = OPERATION_LABEL[operation.kind] ?? "Operation";
 
   return (
     <div className="flex shrink-0 items-center gap-2 border-b bg-muted/60 px-3 py-1.5">
       <p className="min-w-0 flex-1 truncate text-sm">
-        Rebase in progress{progress}
-        {rebase.headName ? (
-          <>
-            {" "}
-            on <span className="font-mono">{rebase.headName}</span>
-          </>
-        ) : null}
+        {title} in progress{progress}
+        {conflicted ? ". Resolve conflicts on Changes, then continue." : "."}
       </p>
       <Button
         type="button"
         size="xs"
+        disabled={conflicted}
         onClick={() => {
           setView("changes");
-          void rebaseContinue();
+          void operationContinue();
         }}
       >
         Continue
       </Button>
-      <Button type="button" size="xs" variant="outline" onClick={() => void rebaseSkip()}>
-        Skip
-      </Button>
-      <Button type="button" size="xs" variant="destructive" onClick={() => void rebaseAbort()}>
+      {operation.kind === "rebase" ? (
+        <Button type="button" size="xs" variant="outline" onClick={() => void rebaseSkip()}>
+          Skip
+        </Button>
+      ) : null}
+      <Button type="button" size="xs" variant="destructive" onClick={() => void operationAbort()}>
         Abort
       </Button>
     </div>

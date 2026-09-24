@@ -28,6 +28,17 @@ pub struct RepoInfo {
     pub behind: Option<usize>,
     pub upstream: Option<String>,
     pub rebase: Option<RebaseProgress>,
+    pub operation: Option<GitOperation>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitOperation {
+    pub kind: String,
+    pub head_name: Option<String>,
+    pub onto: Option<String>,
+    pub step: Option<u32>,
+    pub total: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -370,6 +381,7 @@ pub fn repo_info(repo: &Repository) -> AppResult<RepoInfo> {
         behind,
         upstream,
         rebase: rebase_progress(repo),
+        operation: git_operation(repo),
     })
 }
 
@@ -469,7 +481,9 @@ pub fn pull_remote(
         args.push(branch);
     }
     let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
-    run_git_ok_progress(workdir(repo)?, &arg_refs, on_progress)?;
+    if let Err(err) = run_git_ok_progress(workdir(repo)?, &arg_refs, on_progress) {
+        return Err(operation_stop_error(repo, err));
+    }
     snapshot(repo)
 }
 
@@ -2233,10 +2247,13 @@ pub fn revert_commit(repo: &mut Repository, spec: &str) -> AppResult<WorkspaceSn
     };
     ensure_clean_for_replay(repo)?;
     let root = workdir(repo)?;
-    if is_merge {
-        run_git_stdout(root, &["revert", "--no-edit", "-m", "1", &oid])?;
+    let result = if is_merge {
+        run_git_stdout(root, &["revert", "--no-edit", "-m", "1", &oid])
     } else {
-        run_git_stdout(root, &["revert", "--no-edit", &oid])?;
+        run_git_stdout(root, &["revert", "--no-edit", &oid])
+    };
+    if let Err(err) = result {
+        return Err(operation_stop_error(repo, err));
     }
     snapshot(repo)
 }
@@ -2286,10 +2303,13 @@ pub fn cherry_pick_commit(repo: &mut Repository, spec: &str) -> AppResult<Worksp
     };
     ensure_clean_for_replay(repo)?;
     let root = workdir(repo)?;
-    if is_merge {
-        run_git_stdout(root, &["cherry-pick", "-m", "1", &oid])?;
+    let result = if is_merge {
+        run_git_stdout(root, &["cherry-pick", "-m", "1", &oid])
     } else {
-        run_git_stdout(root, &["cherry-pick", &oid])?;
+        run_git_stdout(root, &["cherry-pick", &oid])
+    };
+    if let Err(err) = result {
+        return Err(operation_stop_error(repo, err));
     }
     snapshot(repo)
 }
@@ -2346,6 +2366,141 @@ pub fn rebase_skip(repo: &mut Repository) -> AppResult<WorkspaceSnapshot> {
 
 pub fn rebase_abort(repo: &mut Repository) -> AppResult<WorkspaceSnapshot> {
     rebase_control(repo, "--abort")
+}
+
+pub fn merge_ref(repo: &mut Repository, spec: &str) -> AppResult<WorkspaceSnapshot> {
+    ensure_merge_ready(repo)?;
+    let target = peel_commit(repo, spec)?.id().to_string();
+    let root = workdir(repo)?.to_path_buf();
+    if let Err(err) = run_git_stdout(&root, &["merge", "--no-edit", &target]) {
+        return Err(operation_stop_error(repo, err));
+    }
+    snapshot(repo)
+}
+
+pub fn operation_continue(repo: &mut Repository) -> AppResult<WorkspaceSnapshot> {
+    let kind = git_operation(repo)
+        .ok_or_else(|| AppError::msg("No merge, rebase, cherry-pick, or revert is in progress"))?
+        .kind;
+    let flag = match kind.as_str() {
+        "rebase" => "rebase",
+        "merge" => "merge",
+        "cherry-pick" => "cherry-pick",
+        "revert" => "revert",
+        _ => return Err(AppError::msg("No operation is in progress")),
+    };
+    run_operation(repo, &[flag, "--continue"])
+}
+
+pub fn operation_abort(repo: &mut Repository) -> AppResult<WorkspaceSnapshot> {
+    let kind = git_operation(repo)
+        .ok_or_else(|| AppError::msg("No merge, rebase, cherry-pick, or revert is in progress"))?
+        .kind;
+    let flag = match kind.as_str() {
+        "rebase" => "rebase",
+        "merge" => "merge",
+        "cherry-pick" => "cherry-pick",
+        "revert" => "revert",
+        _ => return Err(AppError::msg("No operation is in progress")),
+    };
+    run_operation(repo, &[flag, "--abort"])
+}
+
+pub fn resolve_conflict(repo: &mut Repository, path: &str, side: &str) -> AppResult<WorkspaceSnapshot> {
+    if git_operation(repo).is_none() {
+        return Err(AppError::msg("No conflicted operation is in progress"));
+    }
+    let path = to_git_path(path);
+    if path.is_empty() {
+        return Err(AppError::msg("A file path is required"));
+    }
+    let root = workdir(repo)?.to_path_buf();
+    match side.trim() {
+        "ours" => run_git_stdout(&root, &["checkout", "--ours", "--", &path])?,
+        "theirs" => run_git_stdout(&root, &["checkout", "--theirs", "--", &path])?,
+        "both" => resolve_both_sides(&root, &path)?,
+        _ => {
+            return Err(AppError::msg(
+                "Choose a side: ours, theirs, or both",
+            ))
+        }
+    };
+    run_git_stdout(&root, &["add", "--", &path])?;
+    snapshot(repo)
+}
+
+fn resolve_both_sides(root: &Path, path: &str) -> AppResult<Vec<u8>> {
+    let file = root.join(path);
+    let text = fs::read_to_string(&file).map_err(|_| {
+        AppError::msg("This conflict has no text markers. Choose current or incoming.")
+    })?;
+    let resolved = take_both_sides(&text).ok_or_else(|| {
+        AppError::msg("This conflict has no text markers. Choose current or incoming.")
+    })?;
+    fs::write(&file, resolved)?;
+    Ok(Vec::new())
+}
+
+fn take_both_sides(text: &str) -> Option<String> {
+    let mut out = String::new();
+    let mut rest = text;
+    let mut found = false;
+    while let Some(start) = rest.find("<<<<<<<") {
+        found = true;
+        out.push_str(&rest[..start]);
+        let after = &rest[start..];
+        let line_end = after.find('\n').unwrap_or(after.len());
+        let body = &after[line_end + usize::from(line_end < after.len())..];
+        let mid = body.find("\n=======")?;
+        let mut ours = &body[..mid];
+        if let Some(base_at) = ours.find("\n|||||||") {
+            ours = &ours[..base_at];
+        }
+        let after_mid = &body[mid + 1..];
+        let marker_end = after_mid.find('\n').unwrap_or(after_mid.len());
+        let theirs_and_rest = &after_mid[marker_end + usize::from(marker_end < after_mid.len())..];
+        let end = theirs_and_rest.find(">>>>>>>")?;
+        let theirs = &theirs_and_rest[..end];
+        out.push_str(ours);
+        if !ours.ends_with('\n') && !theirs.is_empty() {
+            out.push('\n');
+        }
+        out.push_str(theirs);
+        let after_end = &theirs_and_rest[end..];
+        let end_line = after_end.find('\n').map(|index| index + 1).unwrap_or(after_end.len());
+        rest = &after_end[end_line..];
+    }
+    if !found {
+        return None;
+    }
+    out.push_str(rest);
+    Some(out)
+}
+
+fn run_operation(repo: &mut Repository, args: &[&str]) -> AppResult<WorkspaceSnapshot> {
+    let root = workdir(repo)?.to_path_buf();
+    let scratch = rebase_scratch_dir()?;
+    let editor = noop_editor(&scratch)?;
+    let result = run_git_env(&root, args, &[("GIT_EDITOR", editor.as_str())]);
+    let _ = fs::remove_dir_all(&scratch);
+    match result {
+        Ok(output) if output.status.success() => snapshot(repo),
+        Ok(output) => Err(operation_stop_error(repo, git_output_error(output))),
+        Err(err) => Err(operation_stop_error(repo, err)),
+    }
+}
+
+fn ensure_merge_ready(repo: &Repository) -> AppResult<()> {
+    if git_operation(repo).is_some() {
+        return Err(AppError::msg("Finish or abort the current operation first"));
+    }
+    let head = repo
+        .head()
+        .map_err(|_| AppError::msg("Merge needs a checked-out branch"))?;
+    if !head.is_branch() {
+        return Err(AppError::msg("Merge needs a checked-out branch"));
+    }
+    ensure_clean_for_replay(repo)
 }
 
 fn rebase_control(repo: &mut Repository, flag: &str) -> AppResult<WorkspaceSnapshot> {
@@ -2598,9 +2753,40 @@ fn rebase_progress(repo: &Repository) -> Option<RebaseProgress> {
     })
 }
 
+fn git_operation(repo: &Repository) -> Option<GitOperation> {
+    if let Some(rebase) = rebase_progress(repo) {
+        return Some(GitOperation {
+            kind: "rebase".to_string(),
+            head_name: rebase.head_name,
+            onto: rebase.onto,
+            step: rebase.step,
+            total: rebase.total,
+        });
+    }
+    let git_dir = repo.path();
+    let marker = [
+        ("MERGE_HEAD", "merge"),
+        ("CHERRY_PICK_HEAD", "cherry-pick"),
+        ("REVERT_HEAD", "revert"),
+    ]
+    .into_iter()
+    .find(|(name, _)| git_dir.join(name).is_file())?;
+    let onto = fs::read_to_string(git_dir.join(marker.0))
+        .ok()
+        .map(|value| value.trim().chars().take(7).collect())
+        .filter(|value: &String| !value.is_empty());
+    Some(GitOperation {
+        kind: marker.1.to_string(),
+        head_name: None,
+        onto,
+        step: None,
+        total: None,
+    })
+}
+
 fn ensure_rebase_ready(repo: &Repository) -> AppResult<()> {
-    if rebase_progress(repo).is_some() {
-        return Err(AppError::msg("A rebase is already in progress"));
+    if git_operation(repo).is_some() {
+        return Err(AppError::msg("Finish or abort the current operation first"));
     }
     let head = repo
         .head()
@@ -2612,11 +2798,21 @@ fn ensure_rebase_ready(repo: &Repository) -> AppResult<()> {
 }
 
 fn rebase_stop_error(repo: &Repository, err: AppError) -> AppError {
-    if rebase_progress(repo).is_none() {
+    operation_stop_error(repo, err)
+}
+
+fn operation_stop_error(repo: &Repository, err: AppError) -> AppError {
+    let Some(operation) = git_operation(repo) else {
         return err;
-    }
+    };
+    let name = match operation.kind.as_str() {
+        "merge" => "Merge",
+        "cherry-pick" => "Cherry-pick",
+        "revert" => "Revert",
+        _ => "Rebase",
+    };
     AppError::msg(format!(
-        "Rebase stopped with conflicts. Resolve them, then continue or abort.\n{err}"
+        "{name} stopped with conflicts. Resolve them on Changes, then continue or abort.\n{err}"
     ))
 }
 
@@ -3388,6 +3584,30 @@ mod tests {
         reset_to_commit(&mut repo, &other_tip.to_string(), "hard").unwrap();
         assert_eq!(repo.head().unwrap().target().unwrap(), other_tip);
         assert_eq!(head_summary(&repo), "side");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn merge_conflict_can_take_ours_and_continue() {
+        let (root, mut repo) = temp_repo();
+        commit_file(&mut repo, &root, "file.txt", "base\n", "base");
+        repo.branch("other", &repo.head().unwrap().peel_to_commit().unwrap(), false)
+            .unwrap();
+        commit_file(&mut repo, &root, "file.txt", "left\n", "left");
+        let incoming = repo.head().unwrap().target().unwrap().to_string();
+        repo.set_head("refs/heads/other").unwrap();
+        repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+            .unwrap();
+        commit_file(&mut repo, &root, "file.txt", "right\n", "right");
+        assert!(merge_ref(&mut repo, &incoming).unwrap_err().to_string().contains("conflicts"));
+        assert_eq!(git_operation(&repo).unwrap().kind, "merge");
+        resolve_conflict(&mut repo, "file.txt", "ours").unwrap();
+        operation_continue(&mut repo).unwrap();
+        assert!(git_operation(&repo).is_none());
+        assert_eq!(
+            fs::read_to_string(root.join("file.txt")).unwrap().replace("\r\n", "\n"),
+            "right\n"
+        );
         let _ = fs::remove_dir_all(&root);
     }
 }
