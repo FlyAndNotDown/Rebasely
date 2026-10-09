@@ -24,7 +24,11 @@ export function ConflictEditor({
   path: string;
   rebasing: boolean;
 }) {
-  const { saveConflict, resolveConflict } = useGitPick(["saveConflict", "resolveConflict"]);
+  const { saveConflict, resolveConflict, runMergetool } = useGitPick([
+    "saveConflict",
+    "resolveConflict",
+    "runMergetool",
+  ]);
   const [text, setText] = useState("");
   const [eol, setEol] = useState<"\n" | "\r\n">("\n");
   const [binary, setBinary] = useState(false);
@@ -188,6 +192,9 @@ export function ConflictEditor({
         <Button type="button" size="xs" variant="outline" onClick={() => void resolveConflict(path, "theirs")}>
           Use {incoming}
         </Button>
+        <Button type="button" size="xs" variant="outline" onClick={() => void runMergetool(path)}>
+          Open in merge tool
+        </Button>
       </div>
     );
   }
@@ -213,7 +220,15 @@ export function ConflictEditor({
         <Button
           type="button"
           size="xs"
+          variant="ghost"
           className="ml-auto"
+          onClick={() => void runMergetool(path)}
+        >
+          Open in merge tool
+        </Button>
+        <Button
+          type="button"
+          size="xs"
           disabled={hunks.length > 0}
           onClick={() => void saveConflict(path, eol === "\r\n" ? text.replace(/\n/g, "\r\n") : text)}
         >

@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
-import { Columns2Icon, PilcrowIcon } from "lucide-react";
+import { Columns2Icon, ExternalLinkIcon, PilcrowIcon } from "lucide-react";
 import { ConflictEditor } from "@/components/conflict-editor";
 import { ImageDiff, isImagePath } from "@/components/image-diff";
 import { DiffSkeleton } from "@/components/skeletons";
@@ -26,7 +26,7 @@ import {
 import { useWindowedRows } from "@/lib/use-windowed-rows";
 import { cn } from "@/lib/utils";
 import { useGitPick, useGitSelect } from "@/state/git-context";
-import type { DiffLine, FileDiff, ImageSource, LineAction, LineRef } from "@/types/git";
+import type { DiffLine, FileDiff, FileSource, LineAction, LineRef } from "@/types/git";
 
 type Highlighter = (lines: { kind: string; text: string }[], language: string) => TokenRange[][] | null;
 let loadedHighlighter: Highlighter | null = null;
@@ -87,6 +87,7 @@ export function DiffViewer({ source }: { source: DiffSource }) {
     prefs,
     applyLines,
     setDiffOptions,
+    openDifftool,
   } = useGitPick([
     "changeSelection",
     "historySelection",
@@ -101,6 +102,7 @@ export function DiffViewer({ source }: { source: DiffSource }) {
     "prefs",
     "applyLines",
     "setDiffOptions",
+    "openDifftool",
   ]);
   const ignoreWhitespace = prefs.diffIgnoreWhitespace;
   const comparing = source === "history" && comparison != null;
@@ -140,12 +142,12 @@ export function DiffViewer({ source }: { source: DiffSource }) {
     };
   }, [applyLines, changeKind, changePath, changeStaged, ignoreWhitespace]);
   const textual = Boolean(diff && !diff.binary && !conflicted);
-  let imageSource: ImageSource | null = null;
-  if (diff?.binary && selection && isImagePath(diff.path)) {
+  let fileSource: FileSource | null = null;
+  if (diff && selection) {
     if (selection.type === "change") {
-      imageSource = { kind: "workdir", path: selection.path, staged: selection.staged };
+      fileSource = { kind: "workdir", path: selection.path, staged: selection.staged };
     } else if (comparing && comparison.path) {
-      imageSource = {
+      fileSource = {
         kind: "compare",
         base: comparison.base.rev,
         head: comparison.head.rev,
@@ -153,11 +155,12 @@ export function DiffViewer({ source }: { source: DiffSource }) {
         oldPath: diff.oldPath,
       };
     } else if (selection.type === "stash" && selection.path) {
-      imageSource = { kind: "stash", oid: selection.id, path: selection.path };
+      fileSource = { kind: "stash", oid: selection.id, path: selection.path };
     } else if (selection.type === "commit" && selection.path) {
-      imageSource = { kind: "commit", oid: selection.id, path: selection.path, oldPath: diff.oldPath };
+      fileSource = { kind: "commit", oid: selection.id, path: selection.path, oldPath: diff.oldPath };
     }
   }
+  const imageSource = diff?.binary && isImagePath(diff.path) ? fileSource : null;
 
   if (source === "stash") {
     if (!stashSelection) {
@@ -245,6 +248,18 @@ export function DiffViewer({ source }: { source: DiffSource }) {
                 <PilcrowIcon />
               </Button>
             </>
+          ) : null}
+          {fileSource && !conflicted && changeKind !== "untracked" ? (
+            <Button
+              type="button"
+              size="icon-xs"
+              variant="ghost"
+              aria-label="Open in diff tool"
+              title="Open in diff tool"
+              onClick={() => fileSource && void openDifftool(fileSource)}
+            >
+              <ExternalLinkIcon />
+            </Button>
           ) : null}
         </div>
       </div>

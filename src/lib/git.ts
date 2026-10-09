@@ -17,12 +17,13 @@ import type {
   StashDetails,
   GitIdentity,
   ImagePair,
-  ImageSource,
+  FileSource,
   LineAction,
   LineRef,
   RecentRepo,
   RemoteProbe,
   TerminalOption,
+  ToolConfig,
   WorkspaceSnapshot,
 } from "@/types/git";
 
@@ -100,7 +101,7 @@ export const gitApi = {
     invoke<CommitDetails>("get_commit_details", { repoPath, oid }),
   getCommitDiff: (repoPath: string, oid: string, path: string, ignoreWhitespace = false) =>
     invoke<FileDiff>("get_commit_diff", { repoPath, oid, path, ignoreWhitespace }),
-  getImagePair: (repoPath: string, source: ImageSource) =>
+  getImagePair: (repoPath: string, source: FileSource) =>
     invoke<ImagePair>("get_image_pair", { repoPath, source }),
   compareRevisions: (repoPath: string, base: string, head: string) =>
     invoke<CommitFile[]>("compare_revisions", { repoPath, base, head }),
@@ -242,6 +243,14 @@ export const gitApi = {
     invoke<WorkspaceSnapshot>("ignore_patterns", { repoPath, patterns }),
   openInTerminal: (path: string) => invoke<void>("open_in_terminal", { path }),
   listTerminals: () => invoke<TerminalOption[]>("list_terminals"),
+  listEditors: () => invoke<TerminalOption[]>("list_editors"),
+  openInEditor: (path: string, line?: number | null) =>
+    invoke<void>("open_in_editor", { path, line: line ?? null }),
+  getToolConfig: (repoPath?: string) => invoke<ToolConfig>("get_tool_config", { repoPath: repoPath ?? null }),
+  setToolConfig: (config: ToolConfig) => invoke<ToolConfig>("set_tool_config", { config }),
+  openDifftool: (repoPath: string, source: FileSource) => invoke<void>("open_difftool", { repoPath, source }),
+  runMergetool: (repoPath: string, path: string) =>
+    invoke<WorkspaceSnapshot>("run_mergetool", { repoPath, path }),
   getPrefs: () => invoke<AppPrefs>("get_prefs"),
   setPrefs: (prefs: AppPrefs) => invoke<AppPrefs>("set_prefs", { prefs }),
   syncWatches: (paths: string[]) => invoke<void>("sync_watches", { paths }),

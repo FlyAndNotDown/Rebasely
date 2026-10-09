@@ -6,10 +6,11 @@ use base64::Engine;
 const MAX_IMAGE_BYTES: usize = 20 * 1024 * 1024;
 const LFS_POINTER: &[u8] = b"version https://git-lfs.github.com/spec/";
 
-/// Where the two sides of an image diff come from, mirroring the text diffs.
+/// Where the two sides of a file diff come from, for image diffs and external
+/// diff tools; mirrors the text diffs.
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
-pub enum ImageSource {
+pub enum FileSource {
     /// Index to working tree, or HEAD to index when `staged`.
     Workdir { path: String, staged: bool },
     /// A commit against its first parent.
@@ -89,10 +90,10 @@ fn head_tree(repo: &Repository) -> Option<git2::Tree<'_>> {
     repo.head().ok()?.peel_to_tree().ok()
 }
 
-pub fn image_pair(repo: &Repository, source: &ImageSource) -> AppResult<ImagePair> {
+pub fn image_pair(repo: &Repository, source: &FileSource) -> AppResult<ImagePair> {
     let side = |path: &str, bytes: Option<Vec<u8>>| bytes.map(|bytes| image_side(path, &bytes));
     let (before, after) = match source {
-        ImageSource::Workdir { path, staged } => {
+        FileSource::Workdir { path, staged } => {
             let rel = safe_repo_path(path)?;
             if *staged {
                 let head = head_tree(repo);
@@ -106,7 +107,7 @@ pub fn image_pair(repo: &Repository, source: &ImageSource) -> AppResult<ImagePai
                 (side(&rel, index_blob(repo, &rel)), side(&rel, current))
             }
         }
-        ImageSource::Commit { oid, path, old_path } => {
+        FileSource::Commit { oid, path, old_path } => {
             let rel = safe_repo_path(path)?;
             let old = safe_repo_path(old_path.as_deref().unwrap_or(path))?;
             let commit = peel_commit(repo, oid)?;
@@ -117,7 +118,7 @@ pub fn image_pair(repo: &Repository, source: &ImageSource) -> AppResult<ImagePai
                 side(&rel, tree_blob(repo, Some(&tree), &rel)),
             )
         }
-        ImageSource::Compare { base, head, path, old_path } => {
+        FileSource::Compare { base, head, path, old_path } => {
             let rel = safe_repo_path(path)?;
             let old = safe_repo_path(old_path.as_deref().unwrap_or(path))?;
             let base_tree = peel_commit(repo, base)?.tree()?;
@@ -127,7 +128,7 @@ pub fn image_pair(repo: &Repository, source: &ImageSource) -> AppResult<ImagePai
                 side(&rel, tree_blob(repo, Some(&head_tree), &rel)),
             )
         }
-        ImageSource::Stash { oid, path } => {
+        FileSource::Stash { oid, path } => {
             let rel = safe_repo_path(path)?;
             let stash = peel_commit(repo, oid)?;
             let base = stash.parent(0).ok().and_then(|parent| parent.tree().ok());

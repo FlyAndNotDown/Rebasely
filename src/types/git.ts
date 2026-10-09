@@ -114,8 +114,8 @@ export interface FileDiff {
   lines: DiffLine[];
 }
 
-/** Where the two sides of an image diff come from; mirrors `ImageSource` in Rust. */
-export type ImageSource =
+/** Where the two sides of a file diff come from; mirrors `FileSource` in Rust. */
+export type FileSource =
   | { kind: "workdir"; path: string; staged: boolean }
   | { kind: "commit"; oid: string; path: string; oldPath: string | null }
   | { kind: "compare"; base: string; head: string; path: string; oldPath: string | null }
@@ -230,8 +230,15 @@ export interface BlameHunk {
   time: number;
 }
 
+export interface ToolConfig {
+  diffTool: string;
+  mergeTool: string;
+}
+
 export interface AppPrefs {
   terminalId: string;
+  /** "auto", "system", or an id from `list_editors`. */
+  editorId: string;
   sidebarOrder: string[];
   panelLayouts: PanelLayouts;
   pullRebase: boolean;

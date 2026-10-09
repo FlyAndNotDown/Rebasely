@@ -24,9 +24,23 @@ import { errorMessage, gitApi } from "@/lib/git";
 import { normalizePrefs } from "@/lib/prefs";
 import { cn } from "@/lib/utils";
 import { useGitPick } from "@/state/git-context";
-import type { TerminalOption } from "@/types/git";
+import type { TerminalOption, ToolConfig } from "@/types/git";
 
 type SettingsSection = "git" | "general";
+
+/** Tools git drives without extra config, plus the editors Rebasely can set up. */
+const GIT_TOOLS = [
+  "bc",
+  "kdiff3",
+  "meld",
+  "p4merge",
+  "winmerge",
+  "tortoisemerge",
+  "smerge",
+  "araxis",
+  "vscode",
+  "cursor",
+];
 type ThemeChoice = "dark" | "light" | "system";
 
 const themeOptions: { id: ThemeChoice; label: string }[] = [
@@ -60,19 +74,31 @@ function SettingsForm({ onOpenChange }: { onOpenChange: (open: boolean) => void 
   const [email, setEmail] = useState("");
   const [terminalId, setTerminalId] = useState("auto");
   const [terminals, setTerminals] = useState<TerminalOption[]>([]);
+  const [editorId, setEditorId] = useState("auto");
+  const [editors, setEditors] = useState<TerminalOption[]>([]);
+  const [tools, setTools] = useState<ToolConfig>({ diffTool: "", mergeTool: "" });
   const [themeChoice, setThemeChoice] = useState<ThemeChoice>(() =>
     theme === "light" || theme === "dark" || theme === "system" ? theme : "dark",
   );
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    void Promise.all([gitApi.getGitIdentity(), gitApi.getPrefs(), gitApi.listTerminals()])
-      .then(([identity, loadedPrefs, options]) => {
+    void Promise.all([
+      gitApi.getGitIdentity(),
+      gitApi.getPrefs(),
+      gitApi.listTerminals(),
+      gitApi.listEditors(),
+      gitApi.getToolConfig(),
+    ])
+      .then(([identity, loadedPrefs, options, editorOptions, toolConfig]) => {
         const prefs = normalizePrefs(loadedPrefs);
         setName(identity.name);
         setEmail(identity.email);
         setTerminalId(prefs.terminalId);
         setTerminals(options);
+        setEditorId(prefs.editorId);
+        setEditors(editorOptions);
+        setTools(toolConfig);
       })
       .catch((error) => toast.error(errorMessage(error)));
   }, []);
@@ -82,7 +108,8 @@ function SettingsForm({ onOpenChange }: { onOpenChange: (open: boolean) => void 
     try {
       await Promise.all([
         gitApi.setGitIdentity({ name: name.trim(), email: email.trim() }),
-        updatePrefs({ ...prefs, terminalId }),
+        gitApi.setToolConfig({ diffTool: tools.diffTool.trim(), mergeTool: tools.mergeTool.trim() }),
+        updatePrefs({ ...prefs, terminalId, editorId }),
       ]);
       setTheme(themeChoice);
       toast.success("Saved settings");
@@ -112,7 +139,7 @@ function SettingsForm({ onOpenChange }: { onOpenChange: (open: boolean) => void 
               <DialogHeader>
                 <DialogTitle>Git</DialogTitle>
                 <DialogDescription>
-                  Global Git identity from your user Git config.
+                  Identity and external tools from your global Git config.
                 </DialogDescription>
               </DialogHeader>
               <div className="mt-6 grid gap-5">
@@ -135,13 +162,44 @@ function SettingsForm({ onOpenChange }: { onOpenChange: (open: boolean) => void 
                     placeholder="you@example.com"
                   />
                 </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="grid gap-2">
+                    <Label htmlFor="diff-tool">Diff tool</Label>
+                    <Input
+                      id="diff-tool"
+                      list="git-tool-names"
+                      value={tools.diffTool}
+                      onChange={(event) => setTools((current) => ({ ...current, diffTool: event.target.value }))}
+                      placeholder="e.g. bc, meld, vscode"
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="merge-tool">Merge tool</Label>
+                    <Input
+                      id="merge-tool"
+                      list="git-tool-names"
+                      value={tools.mergeTool}
+                      onChange={(event) => setTools((current) => ({ ...current, mergeTool: event.target.value }))}
+                      placeholder="e.g. kdiff3, p4merge, vscode"
+                    />
+                  </div>
+                  <datalist id="git-tool-names">
+                    {GIT_TOOLS.map((tool) => (
+                      <option key={tool} value={tool} />
+                    ))}
+                  </datalist>
+                  <p className="col-span-2 text-xs text-muted-foreground">
+                    Saved as diff.tool and merge.tool in your global Git config. Choosing vscode or
+                    cursor also sets up the command they need.
+                  </p>
+                </div>
               </div>
             </>
           ) : (
             <>
               <DialogHeader>
                 <DialogTitle>General</DialogTitle>
-                <DialogDescription>Theme and the terminal used to open a repository.</DialogDescription>
+                <DialogDescription>Theme, and the editor and terminal used to open a repository.</DialogDescription>
               </DialogHeader>
               <div className="mt-6 grid gap-8">
                 <FieldGroup title="Appearance">
@@ -153,48 +211,23 @@ function SettingsForm({ onOpenChange }: { onOpenChange: (open: boolean) => void 
                     onChange={setThemeChoice}
                   />
                 </FieldGroup>
+                <FieldGroup title="Editor">
+                  <AppPicker
+                    id="editor-app"
+                    options={[{ id: "auto", name: "First one found", available: true }, ...editors]}
+                    value={editorId}
+                    fallback="First one found"
+                    onChange={setEditorId}
+                  />
+                </FieldGroup>
                 <FieldGroup title="Terminal">
-                  <div className="grid gap-2">
-                    <Label htmlFor="terminal-app">Application</Label>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          id="terminal-app"
-                          type="button"
-                          variant="outline"
-                          className="w-full justify-between font-normal"
-                        >
-                          <span className="truncate">
-                            {terminals.find((item) => item.id === terminalId)?.name ??
-                              "System default"}
-                          </span>
-                          <ChevronDownIcon />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent
-                        align="start"
-                        className="w-(--radix-dropdown-menu-trigger-width)"
-                      >
-                        {terminals.map((option) => (
-                          <DropdownMenuItem
-                            key={option.id}
-                            disabled={!option.available}
-                            onClick={() => setTerminalId(option.id)}
-                          >
-                            <span className="min-w-4">
-                              {option.id === terminalId ? <CheckIcon className="size-3.5" /> : null}
-                            </span>
-                            <span className="truncate">{option.name}</span>
-                            {!option.available ? (
-                              <span className="ml-auto text-xs text-muted-foreground">
-                                Not found
-                              </span>
-                            ) : null}
-                          </DropdownMenuItem>
-                        ))}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
+                  <AppPicker
+                    id="terminal-app"
+                    options={terminals}
+                    value={terminalId}
+                    fallback="System default"
+                    onChange={setTerminalId}
+                  />
                 </FieldGroup>
               </div>
             </>
@@ -211,6 +244,45 @@ function SettingsForm({ onOpenChange }: { onOpenChange: (open: boolean) => void 
         </Button>
       </DialogFooter>
     </>
+  );
+}
+
+function AppPicker({
+  id,
+  options,
+  value,
+  fallback,
+  onChange,
+}: {
+  id: string;
+  options: TerminalOption[];
+  value: string;
+  fallback: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div className="grid gap-2">
+      <Label htmlFor={id}>Application</Label>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button id={id} type="button" variant="outline" className="w-full justify-between font-normal">
+            <span className="truncate">{options.find((item) => item.id === value)?.name ?? fallback}</span>
+            <ChevronDownIcon />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="w-(--radix-dropdown-menu-trigger-width)">
+          {options.map((option) => (
+            <DropdownMenuItem key={option.id} disabled={!option.available} onClick={() => onChange(option.id)}>
+              <span className="min-w-4">{option.id === value ? <CheckIcon className="size-3.5" /> : null}</span>
+              <span className="truncate">{option.name}</span>
+              {!option.available ? (
+                <span className="ml-auto text-xs text-muted-foreground">Not found</span>
+              ) : null}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
   );
 }
 

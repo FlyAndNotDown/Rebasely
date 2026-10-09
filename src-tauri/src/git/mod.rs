@@ -34,6 +34,7 @@ mod stash;
 mod status;
 #[cfg(test)]
 mod tests;
+mod tools;
 
 pub use changes::*;
 use cli::*;
@@ -51,6 +52,7 @@ pub use refs::*;
 pub use remote::*;
 pub use stash::*;
 pub use status::*;
+pub use tools::*;
 
 const MAX_TEXT_BYTES: u64 = 2_000_000;
 const MAX_DIFF_LINES: usize = 4000;

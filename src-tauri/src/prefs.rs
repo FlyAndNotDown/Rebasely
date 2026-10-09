@@ -32,6 +32,8 @@ pub struct PanelLayouts {
 pub struct AppPrefs {
     #[serde(default = "default_terminal_id")]
     pub terminal_id: String,
+    #[serde(default = "default_editor_id")]
+    pub editor_id: String,
     #[serde(default = "default_sidebar_order")]
     pub sidebar_order: Vec<String>,
     #[serde(default)]
@@ -50,6 +52,10 @@ fn default_terminal_id() -> String {
     "auto".to_string()
 }
 
+fn default_editor_id() -> String {
+    "auto".to_string()
+}
+
 fn default_sidebar_order() -> Vec<String> {
     vec![
         "changes".to_string(),
@@ -63,6 +69,7 @@ impl Default for AppPrefs {
     fn default() -> Self {
         Self {
             terminal_id: default_terminal_id(),
+            editor_id: default_editor_id(),
             sidebar_order: default_sidebar_order(),
             panel_layouts: PanelLayouts::default(),
             pull_rebase: false,

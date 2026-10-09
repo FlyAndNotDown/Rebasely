@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { errorMessage, gitApi } from "@/lib/git";
 import { cn } from "@/lib/utils";
 import { useGitSelect } from "@/state/git-context";
-import type { ImagePair, ImageSide, ImageSource } from "@/types/git";
+import type { ImagePair, ImageSide, FileSource } from "@/types/git";
 
 const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "avif"]);
 
@@ -29,7 +29,7 @@ function formatBytes(bytes: number) {
 }
 
 /** Before and after views of a changed image, side by side or overlaid. */
-export function ImageDiff({ source }: { source: ImageSource }) {
+export function ImageDiff({ source }: { source: FileSource }) {
   const repoPath = useGitSelect((state) => state.snapshot?.repo.path ?? "");
   const key = JSON.stringify(source);
   const [loaded, setLoaded] = useState<{ key: string; pair: ImagePair | null; error: string | null } | null>(
@@ -43,7 +43,7 @@ export function ImageDiff({ source }: { source: ImageSource }) {
     if (!repoPath) return;
     let live = true;
     gitApi
-      .getImagePair(repoPath, JSON.parse(key) as ImageSource)
+      .getImagePair(repoPath, JSON.parse(key) as FileSource)
       .then((pair) => {
         if (live) setLoaded({ key, pair, error: null });
       })

@@ -1037,7 +1037,7 @@ fn image_pairs_read_each_side_and_flag_lfs_pointers() {
     commit(&repo, "add icon", false).unwrap();
     fs::write(root.join("icon.png"), png_v2).unwrap();
 
-    let source = ImageSource::Workdir { path: "icon.png".into(), staged: false };
+    let source = FileSource::Workdir { path: "icon.png".into(), staged: false };
     let pair = image_pair(&repo, &source).unwrap();
     let before = pair.before.unwrap();
     let after = pair.after.unwrap();
@@ -1048,7 +1048,7 @@ fn image_pairs_read_each_side_and_flag_lfs_pointers() {
     stage_paths(&repo, &["icon.png".into()]).unwrap();
     commit(&repo, "update icon", false).unwrap();
     let head = repo.head().unwrap().target().unwrap().to_string();
-    let source = ImageSource::Commit { oid: head, path: "icon.png".into(), old_path: None };
+    let source = FileSource::Commit { oid: head, path: "icon.png".into(), old_path: None };
     let pair = image_pair(&repo, &source).unwrap();
     assert_eq!(pair.before.unwrap().size, png_v1.len() as u64);
     assert_eq!(pair.after.unwrap().size, png_v2.len() as u64);
@@ -1057,9 +1057,30 @@ fn image_pairs_read_each_side_and_flag_lfs_pointers() {
     assert!(pointer.lfs && pointer.data_url.is_none());
 
     fs::write(root.join("new.png"), png_v1).unwrap();
-    let source = ImageSource::Workdir { path: "new.png".into(), staged: false };
+    let source = FileSource::Workdir { path: "new.png".into(), staged: false };
     let pair = image_pair(&repo, &source).unwrap();
     assert!(pair.before.is_none() && pair.after.is_some());
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn difftool_arguments_mirror_each_diff_view() {
+    let (root, mut repo) = temp_repo();
+    commit_file(&mut repo, &root, "a.txt", "a\n", "root");
+    let root_commit = repo.head().unwrap().target().unwrap().to_string();
+    commit_file(&mut repo, &root, "a.txt", "b\n", "second");
+    let head = repo.head().unwrap().target().unwrap().to_string();
+
+    let staged = difftool_args(&repo, &FileSource::Workdir { path: "a.txt".into(), staged: true }).unwrap();
+    assert_eq!(staged, vec!["difftool", "--no-prompt", "--cached", "--", "a.txt"]);
+
+    let commit = FileSource::Commit { oid: head.clone(), path: "b.txt".into(), old_path: Some("a.txt".into()) };
+    let args = difftool_args(&repo, &commit).unwrap();
+    assert_eq!(args, vec!["difftool", "--no-prompt", "-M", &root_commit, &head, "--", "a.txt", "b.txt"]);
+
+    let first = FileSource::Commit { oid: root_commit.clone(), path: "a.txt".into(), old_path: None };
+    assert!(difftool_args(&repo, &first).unwrap().contains(&"4b825dc642cb6eb9a060e54bf8d69288fbee4904".to_string()));
+    assert!(difftool_args(&repo, &FileSource::Workdir { path: "../x".into(), staged: false }).is_err());
     let _ = fs::remove_dir_all(&root);
 }
 

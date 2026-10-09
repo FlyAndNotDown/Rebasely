@@ -62,6 +62,7 @@ import type {
   CompareRevision,
   RevisionComparison,
   FileDiff,
+  FileSource,
   LineAction,
   LineRef,
   RecentRepo,
@@ -111,6 +112,10 @@ interface GitContextValue {
   showFile: (path: string, mode: FileFocus["mode"]) => void;
   openRepoFile: (path: string) => Promise<void>;
   revealRepoFile: (path: string) => Promise<void>;
+  /** Opens a repository file, or the repository itself without a path, in the chosen editor. */
+  openInEditor: (path?: string, line?: number | null) => Promise<void>;
+  openDifftool: (source: FileSource) => Promise<void>;
+  runMergetool: (path: string) => Promise<boolean>;
   ignorePaths: (patterns: string[]) => Promise<boolean>;
   beginActivity: (label: string, detail?: string) => string;
   endActivity: (id: string) => void;
@@ -2089,6 +2094,57 @@ export function GitProvider({ children }: { children: ReactNode }) {
     [repoFilePath],
   );
 
+  const openInEditor = useCallback(
+    async (path?: string, line?: number | null) => {
+      const full = path ? repoFilePath(path) : activeRepoPath();
+      if (!full) return;
+      try {
+        await gitApi.openInEditor(full, line);
+      } catch (error) {
+        toast.error(errorMessage(error));
+      }
+    },
+    [activeRepoPath, repoFilePath],
+  );
+
+  const openDifftool = useCallback(
+    async (source: FileSource) => {
+      const repoPath = activeRepoPath();
+      if (!repoPath) return;
+      try {
+        await gitApi.openDifftool(repoPath, source);
+      } catch (error) {
+        toast.error(errorMessage(error));
+      }
+    },
+    [activeRepoPath],
+  );
+
+  const runMergetool = useCallback(
+    async (path: string) => {
+      return runMutation(
+        `Waiting for the merge tool: ${path}`,
+        (repoPath) => gitApi.runMergetool(repoPath, path),
+      );
+    },
+    [runMutation],
+  );
+
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void listen<{ message: string }>("tool-error", (event) => {
+      toast.error(event.payload.message);
+    }).then((fn) => {
+      if (disposed) fn();
+      else unlisten = fn;
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
+
   const stashApply = useCallback(
     async (id: string) => {
       await runMutation("Applying stash", (repoPath) => gitApi.stashApply(repoPath, id), "Applied stash");
@@ -2258,6 +2314,9 @@ export function GitProvider({ children }: { children: ReactNode }) {
       showFile,
       openRepoFile,
       revealRepoFile,
+      openInEditor,
+      openDifftool,
+      runMergetool,
       ignorePaths,
       beginActivity,
       endActivity,
@@ -2332,6 +2391,9 @@ export function GitProvider({ children }: { children: ReactNode }) {
       showFile,
       openRepoFile,
       revealRepoFile,
+      openInEditor,
+      openDifftool,
+      runMergetool,
       ignorePaths,
       beginActivity,
       endActivity,

@@ -53,7 +53,7 @@ pub fn conflict_view(repo: &Repository, path: &str) -> AppResult<ConflictView> {
 
 /// A stash apply can leave conflicts without any merge or rebase in progress,
 /// so the index entry decides whether a path can be resolved.
-fn ensure_conflicted(repo: &Repository, path: &str) -> AppResult<()> {
+pub(super) fn ensure_conflicted(repo: &Repository, path: &str) -> AppResult<()> {
     let mut index = repo.index()?;
     index.read(false)?;
     if (1..=3).any(|stage| index.get_path(Path::new(path), stage).is_some()) {

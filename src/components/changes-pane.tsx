@@ -105,6 +105,9 @@ export function ChangesPane() {
     showFile,
     openRepoFile,
     revealRepoFile,
+    openInEditor,
+    openDifftool,
+    runMergetool,
     updatePrefs,
   } = useGitPick([
     "snapshot",
@@ -122,6 +125,9 @@ export function ChangesPane() {
     "showFile",
     "openRepoFile",
     "revealRepoFile",
+    "openInEditor",
+    "openDifftool",
+    "runMergetool",
     "updatePrefs",
   ]);
   const operation = snapshot?.repo.operation ?? null;
@@ -437,7 +443,22 @@ export function ChangesPane() {
           <>
             <ContextMenuSeparator />
             {file.kind !== "deleted" ? (
-              <ContextMenuItem onClick={() => void openRepoFile(file.path)}>Open file</ContextMenuItem>
+              <>
+                <ContextMenuItem onClick={() => void openInEditor(file.path)}>Open in editor</ContextMenuItem>
+                <ContextMenuItem onClick={() => void openRepoFile(file.path)}>Open with default app</ContextMenuItem>
+              </>
+            ) : null}
+            {file.kind !== "untracked" && file.kind !== "conflicted" ? (
+              <ContextMenuItem
+                onClick={() =>
+                  void openDifftool({ kind: "workdir", path: file.path, staged: section === "staged" })
+                }
+              >
+                Open in diff tool
+              </ContextMenuItem>
+            ) : null}
+            {file.kind === "conflicted" ? (
+              <ContextMenuItem onClick={() => void runMergetool(file.path)}>Open in merge tool</ContextMenuItem>
             ) : null}
             <ContextMenuItem onClick={() => void revealRepoFile(file.kind === "deleted" ? folder : file.path)}>
               Reveal in file manager

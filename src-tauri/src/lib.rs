@@ -1,4 +1,5 @@
 mod askpass;
+mod editor;
 mod error;
 mod fsutil;
 mod git;
@@ -207,7 +208,7 @@ async fn get_commit_diff(
 }
 
 #[tauri::command]
-async fn get_image_pair(repo_path: String, source: git::ImageSource) -> AppResult<git::ImagePair> {
+async fn get_image_pair(repo_path: String, source: git::FileSource) -> AppResult<git::ImagePair> {
     with_repo_async(repo_path, move |repo| git::image_pair(repo, &source)).await
 }
 
@@ -706,6 +707,54 @@ async fn list_terminals() -> AppResult<Vec<TerminalOption>> {
 }
 
 #[tauri::command]
+async fn list_editors() -> AppResult<Vec<editor::EditorOption>> {
+    blocking(|| Ok(editor::list_editors())).await
+}
+
+#[tauri::command]
+async fn open_in_editor(path: String, line: Option<u32>, app: AppHandle) -> AppResult<()> {
+    blocking(move || {
+        let prefs = prefs::load_prefs(&app)?;
+        editor::open_in_editor(&path, line, &prefs.editor_id)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn get_tool_config(repo_path: Option<String>) -> AppResult<git::ToolConfig> {
+    blocking(move || match repo_path {
+        Some(path) => with_repo(&path, |repo| Ok(git::read_tool_config(Some(repo)))),
+        None => Ok(git::read_tool_config(None)),
+    })
+    .await
+}
+
+#[tauri::command]
+async fn set_tool_config(config: git::ToolConfig) -> AppResult<git::ToolConfig> {
+    blocking(move || git::write_tool_config(&config)).await
+}
+
+#[derive(Clone, Serialize)]
+struct ToolError {
+    message: String,
+}
+
+#[tauri::command]
+async fn open_difftool(repo_path: String, source: git::FileSource, app: AppHandle) -> AppResult<()> {
+    with_repo_async(repo_path, move |repo| {
+        git::launch_difftool(repo, &source, move |message| {
+            let _ = app.emit("tool-error", ToolError { message });
+        })
+    })
+    .await
+}
+
+#[tauri::command]
+async fn run_mergetool(repo_path: String, path: String) -> AppResult<WorkspaceSnapshot> {
+    with_repo_async(repo_path, move |repo| git::run_mergetool(repo, &path)).await
+}
+
+#[tauri::command]
 async fn get_prefs(app: AppHandle) -> AppResult<AppPrefs> {
     blocking(move || prefs::load_prefs(&app)).await
 }
@@ -875,6 +924,12 @@ pub fn run() {
             reveal_in_file_manager,
             ignore_patterns,
             list_terminals,
+            list_editors,
+            open_in_editor,
+            get_tool_config,
+            set_tool_config,
+            open_difftool,
+            run_mergetool,
             get_prefs,
             set_prefs,
             open_in_terminal,

@@ -10,6 +10,7 @@ import {
 import {
   CheckIcon,
   ChevronDownIcon,
+  CodeXmlIcon,
   FolderOpenIcon,
   GitBranchIcon,
   PlusIcon,
@@ -56,6 +57,7 @@ export function AppHeader() {
     revealRepo,
     openFolder,
     openTerminal,
+    openInEditor,
     ensureBranches,
     checkoutBranch,
   } = useGitPick([
@@ -68,6 +70,7 @@ export function AppHeader() {
     "revealRepo",
     "openFolder",
     "openTerminal",
+    "openInEditor",
     "ensureBranches",
     "checkoutBranch",
   ]);
@@ -214,8 +217,17 @@ export function AppHeader() {
                 variant="ghost"
                 size="icon-sm"
                 className="ml-auto"
-                onClick={() => void openTerminal()}
+                aria-label="Open in editor"
+                onClick={() => void openInEditor()}
               >
+                <CodeXmlIcon />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Open in editor</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon-sm" onClick={() => void openTerminal()}>
                 <SquareTerminalIcon />
               </Button>
             </TooltipTrigger>
