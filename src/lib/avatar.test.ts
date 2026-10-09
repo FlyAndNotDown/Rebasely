@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { avatarHue, avatarInitial, avatarSeed } from "./avatar";
+import { avatarColor, avatarHue, avatarInitial, avatarSeed } from "./avatar";
 
 describe("avatar", () => {
   it("falls back from name to email to a placeholder", () => {
@@ -19,5 +19,10 @@ describe("avatar", () => {
     expect(avatarHue("Ada")).toBe(avatarHue("Ada"));
     expect(avatarHue("Ada")).toBeGreaterThanOrEqual(0);
     expect(avatarHue("Ada")).toBeLessThan(360);
+  });
+
+  it("picks a stable color", () => {
+    expect(avatarColor("Ada")).toBe(avatarColor("Ada"));
+    expect(avatarColor("Ada")).toMatch(/^#[0-9a-f]{6}$/);
   });
 });

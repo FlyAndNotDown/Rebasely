@@ -14,3 +14,19 @@ export function avatarHue(seed: string): number {
   }
   return hash % 360;
 }
+
+// A short set of muted tones, so neighboring authors don't land on clashing hues.
+const AVATAR_COLORS = [
+  "#3e4e66",
+  "#3c5f59",
+  "#6a4b38",
+  "#53466a",
+  "#455a3c",
+  "#3b5570",
+  "#6a424c",
+  "#514c39",
+];
+
+export function avatarColor(seed: string): string {
+  return AVATAR_COLORS[avatarHue(seed) % AVATAR_COLORS.length];
+}
