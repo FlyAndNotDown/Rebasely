@@ -58,13 +58,15 @@ export function StashFiles() {
 
 function StashFilesSkeleton() {
   return (
-    <div role="status" aria-label="Loading stash files" className="space-y-1 px-3 py-2">
-      {Array.from({ length: 8 }, (_, index) => (
-        <div key={index} className="flex h-7 items-center gap-2">
-          <Skeleton className="h-3 w-3 shrink-0" />
-          <Skeleton className={cn("h-3", index % 2 === 0 ? "w-3/5" : "w-2/5")} />
-        </div>
-      ))}
+    <div role="status" aria-label="Loading stash files" className="relative h-full min-h-0">
+      <div className="absolute inset-0 overflow-hidden px-3 py-2">
+        {Array.from({ length: 80 }, (_, index) => (
+          <div key={index} className="flex h-7 items-center gap-2">
+            <Skeleton className="h-3 w-3 shrink-0" />
+            <Skeleton className="h-3 min-w-0 flex-1" />
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

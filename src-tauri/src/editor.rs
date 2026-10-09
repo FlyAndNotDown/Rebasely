@@ -176,23 +176,67 @@ pub fn list_editors() -> Vec<EditorOption> {
 }
 
 fn open_with_system(path: &str) -> AppResult<()> {
-    let mut command = if cfg!(windows) {
-        let mut command = Command::new("explorer");
-        command.arg(path);
+    #[cfg(windows)]
+    {
+        // explorer.exe treats a file path as a folder to browse. A file, or a
+        // path written with `/`, makes it open its default location instead of
+        // the file. ShellExecute uses the application registered for the file.
+        let path = path.replace('/', "\\");
+        let file = wide(&path);
+        let operation = wide("open");
+        let code = unsafe {
+            ShellExecuteW(
+                std::ptr::null_mut(),
+                operation.as_ptr(),
+                file.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                1,
+            )
+        };
+        if code <= 32 {
+            return Err(AppError::msg(format!("Could not open {path}")));
+        }
+        Ok(())
+    }
+    #[cfg(not(windows))]
+    {
+        let mut command = if cfg!(target_os = "macos") {
+            let mut command = Command::new("open");
+            command.arg(path);
+            command
+        } else {
+            let mut command = Command::new("xdg-open");
+            command.arg(path);
+            command
+        };
         command
-    } else if cfg!(target_os = "macos") {
-        let mut command = Command::new("open");
-        command.arg(path);
-        command
-    } else {
-        let mut command = Command::new("xdg-open");
-        command.arg(path);
-        command
-    };
-    command
-        .spawn()
-        .map_err(|err| AppError::msg(format!("Could not open {path}: {err}")))?;
-    Ok(())
+            .spawn()
+            .map_err(|err| AppError::msg(format!("Could not open {path}: {err}")))?;
+        Ok(())
+    }
+}
+
+#[cfg(windows)]
+fn wide(text: &str) -> Vec<u16> {
+    use std::os::windows::ffi::OsStrExt;
+    std::ffi::OsStr::new(text)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect()
+}
+
+#[cfg(windows)]
+#[link(name = "shell32")]
+unsafe extern "system" {
+    fn ShellExecuteW(
+        hwnd: *mut std::ffi::c_void,
+        operation: *const u16,
+        file: *const u16,
+        parameters: *const u16,
+        directory: *const u16,
+        show: i32,
+    ) -> isize;
 }
 
 /// Opens a file (at `line` when given) or a folder in the chosen editor.

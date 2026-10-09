@@ -1,5 +1,5 @@
-import { memo, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
-import { Columns2Icon, ExternalLinkIcon, PilcrowIcon } from "lucide-react";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { Columns2Icon, ExternalLinkIcon, PilcrowIcon, SquarePenIcon } from "lucide-react";
 import { ConflictEditor } from "@/components/conflict-editor";
 import { ImageDiff, isImagePath } from "@/components/image-diff";
 import { DiffSkeleton } from "@/components/skeletons";
@@ -88,6 +88,7 @@ export function DiffViewer({ source }: { source: DiffSource }) {
     applyLines,
     setDiffOptions,
     openDifftool,
+    openInEditor,
   } = useGitPick([
     "changeSelection",
     "historySelection",
@@ -103,6 +104,7 @@ export function DiffViewer({ source }: { source: DiffSource }) {
     "applyLines",
     "setDiffOptions",
     "openDifftool",
+    "openInEditor",
   ]);
   const ignoreWhitespace = prefs.diffIgnoreWhitespace;
   const comparing = source === "history" && comparison != null;
@@ -171,7 +173,7 @@ export function DiffViewer({ source }: { source: DiffSource }) {
       );
     }
     if (!stashDetails || stashDetails.id !== stashSelection.id) {
-      return <DiffSkeleton label="Loading files" />;
+      return <DiffSkeleton fill label="Loading files" />;
     }
     if (!stashSelection.path) {
       return (
@@ -181,7 +183,7 @@ export function DiffViewer({ source }: { source: DiffSource }) {
       );
     }
   } else if (comparing && comparison.files === null) {
-    return <DiffSkeleton label="Loading files" />;
+    return <DiffSkeleton fill label="Loading files" />;
   } else if (comparing && !comparison.path) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
@@ -192,7 +194,7 @@ export function DiffViewer({ source }: { source: DiffSource }) {
     const loadingFiles =
       selection?.type === "commit" &&
       (!commitDetails || commitDetails.commit.id !== selection.id);
-    if (loadingFiles) return <DiffSkeleton label="Loading files" />;
+    if (loadingFiles) return <DiffSkeleton fill label="Loading files" />;
     return (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
         Select a file to see its diff
@@ -261,6 +263,21 @@ export function DiffViewer({ source }: { source: DiffSource }) {
               <ExternalLinkIcon />
             </Button>
           ) : null}
+          {selection.path ? (
+            <Button
+              type="button"
+              size="icon-xs"
+              variant="ghost"
+              aria-label="Open in editor"
+              title="Open in editor"
+              onClick={() => {
+                const line = diff?.lines.find((item) => item.newLineno)?.newLineno ?? null;
+                void openInEditor(selection.path, line);
+              }}
+            >
+              <SquarePenIcon />
+            </Button>
+          ) : null}
         </div>
       </div>
       {conflicted && selection.type === "change" ? (
@@ -275,7 +292,9 @@ export function DiffViewer({ source }: { source: DiffSource }) {
       ) : diff?.binary ? (
         <p className="p-4 text-sm text-muted-foreground">Binary file</p>
       ) : !diff ? (
-        <DiffSkeleton />
+        <div className="min-h-0 flex-1 overflow-hidden">
+          <DiffSkeleton fill />
+        </div>
       ) : diff.lines.length === 0 ? (
         <p className="p-4 text-sm text-muted-foreground">No textual diff</p>
       ) : (
@@ -305,7 +324,30 @@ export const DiffLines = memo(function DiffLines({
   );
   const hunks = useMemo(() => hunkChanges(diff.lines), [diff]);
   const pairs = useMemo(() => (split ? splitRows(diff.lines) : null), [diff, split]);
-  const rows = useWindowedRows(pairs ? pairs.length : diff.lines.length, DIFF_ROW_HEIGHT);
+  const [paneWidth, setPaneWidth] = useState(0);
+  const [ch, setCh] = useState(7.2);
+  const charsPerSide = useMemo(() => {
+    if (!split || paneWidth <= 0) return 0;
+    const rem = Number.parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+    const side = (paneWidth - 16) / 2 - 4.25 * rem;
+    // One column short, so a rounding miss makes the row taller instead of overlapping the next one.
+    return Math.max(1, Math.floor(side / ch) - 1);
+  }, [ch, paneWidth, split]);
+  const splitHeights = useMemo(() => {
+    if (!pairs) return null;
+    return pairs.map((row) => {
+      if (row.kind === "hunk" || charsPerSide <= 0) return DIFF_ROW_HEIGHT;
+      const wraps = (index: number | null) => {
+        if (index === null) return 1;
+        return Math.max(1, Math.ceil(textColumns(diff.lines[index].content) / charsPerSide));
+      };
+      return Math.max(wraps(row.left), wraps(row.right)) * DIFF_ROW_HEIGHT;
+    });
+  }, [charsPerSide, diff, pairs]);
+  const rows = useWindowedRows(
+    splitHeights ?? (pairs ? pairs.length : diff.lines.length),
+    splitHeights ? 8 : DIFF_ROW_HEIGHT,
+  );
   // Picks belong to one diff; a reloaded diff starts with none.
   const [picks, setPicks] = useState<{ diff: FileDiff; set: ReadonlySet<number>; anchor: number | null }>(
     () => ({ diff, set: NO_PICKS, anchor: null }),
@@ -323,6 +365,26 @@ export const DiffLines = memo(function DiffLines({
     window.addEventListener("mouseup", end);
     return () => window.removeEventListener("mouseup", end);
   }, []);
+
+  useLayoutEffect(() => {
+    const node = rows.viewport;
+    if (!node || !split) return;
+    const measure = () => {
+      const pre = node.querySelector("pre");
+      const width = pre?.clientWidth || node.clientWidth;
+      setPaneWidth((current) => (current === width ? current : width));
+      if (!pre) return;
+      const context = document.createElement("canvas").getContext("2d");
+      if (!context) return;
+      context.font = getComputedStyle(pre).font;
+      const measured = context.measureText("0").width;
+      if (measured > 0) setCh((current) => (Math.abs(current - measured) < 0.05 ? current : measured));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [rows.viewport, split]);
 
   function setPicked(set: ReadonlySet<number>, nextAnchor: number | null) {
     setPicks({ diff, set, anchor: nextAnchor });
@@ -394,12 +456,12 @@ export const DiffLines = memo(function DiffLines({
     );
   }
 
-  function lineText(index: number, clip = false) {
+  function lineText(index: number, wrap = false) {
     return (
       <DiffLineText
         spans={styleSpans(lineSpans[index] ?? [], syntax?.[index])}
         kind={diff.lines[index].kind}
-        clip={clip}
+        wrap={wrap}
       />
     );
   }
@@ -455,19 +517,22 @@ export const DiffLines = memo(function DiffLines({
 
   function splitSide(index: number | null, side: "left" | "right") {
     if (index === null) {
-      return <span className={cn("bg-muted/30", side === "right" && "border-l border-border/60")} />;
+      return <span className={cn("h-full min-h-5 bg-muted/30", side === "right" && "border-l border-border")} />;
     }
     const line = diff.lines[index];
     return (
       <span
         className={cn(
-          "grid min-w-0 grid-cols-[3rem_1.25rem_minmax(0,1fr)]",
+          "grid h-full min-h-5 min-w-0 grid-cols-[3rem_1.25rem_minmax(0,1fr)] items-start",
           rowTone(line, highlighted),
           picked.has(index) && "shadow-[inset_3px_0_0_var(--diff-hunk)]",
-          side === "right" && "border-l border-border/60",
+          side === "right" && "border-l border-border",
         )}
       >
-        <span className={cn("col-span-2 grid grid-cols-[3rem_1.25rem]", gutterClass(index))} {...gutterProps(index)}>
+        <span
+          className={cn("col-span-2 grid grid-cols-[3rem_1.25rem] self-start", gutterClass(index))}
+          {...gutterProps(index)}
+        >
           <span className="pr-2 text-right text-muted-foreground/70 tabular-nums">
             {(side === "left" ? line.oldLineno : line.newLineno) ?? ""}
           </span>
@@ -483,13 +548,17 @@ export const DiffLines = memo(function DiffLines({
       return (
         <div key={key} className="flex h-5 items-center bg-muted/50 px-2 text-diff-hunk">
           <span className="w-[4.25rem] shrink-0" />
-          <span className="whitespace-pre">{diff.lines[row.index].content}</span>
+          <span className="min-w-0 flex-1 truncate">{diff.lines[row.index].content}</span>
           {hunkActions(row.index)}
         </div>
       );
     }
     return (
-      <div key={key} className="grid h-5 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] px-2">
+      <div
+        key={key}
+        className="grid min-h-5 w-full grid-cols-[minmax(0,1fr)_minmax(0,1fr)] px-2"
+        style={splitHeights ? { height: splitHeights[key] } : undefined}
+      >
         {splitSide(row.left, "left")}
         {splitSide(row.right, "right")}
       </div>
@@ -516,14 +585,10 @@ export const DiffLines = memo(function DiffLines({
           </Button>
         </div>
       ) : null}
-      <ScrollArea className="min-h-0 flex-1" viewportRef={rows.viewportRef}>
+      <ScrollArea className="min-h-0 flex-1" gutter={false} viewportRef={rows.viewportRef}>
         <pre
-          className="font-mono text-[12px] leading-5 [tab-size:4]"
-          style={{
-            minWidth: pairs
-              ? `calc(2 * (4.25rem + ${widest}ch) + 1rem)`
-              : `calc(${DIFF_GUTTER} + ${widest}ch)`,
-          }}
+          className={cn("font-mono text-[12px] leading-5 [tab-size:4]", pairs && "w-full")}
+          style={pairs ? undefined : { minWidth: `calc(${DIFF_GUTTER} + ${widest}ch)` }}
         >
           <div style={{ height: rows.before }} />
           {pairs
@@ -607,7 +672,7 @@ function marker(line: DiffLine) {
   return line.kind === "hunk" ? "" : " ";
 }
 
-function DiffLineText({ spans, kind, clip }: { spans: StyledSpan[]; kind: string; clip?: boolean }) {
+function DiffLineText({ spans, kind, wrap }: { spans: StyledSpan[]; kind: string; wrap?: boolean }) {
   const body = spans.map((span, index) => {
     if (!span.text) return null;
     const tone = span.tone ?? (span.changed ? kind : "");
@@ -619,7 +684,7 @@ function DiffLineText({ spans, kind, clip }: { spans: StyledSpan[]; kind: string
     );
   });
   return (
-    <span className={cn("whitespace-pre", clip && "overflow-hidden")}>
+    <span className={cn("min-w-0", wrap ? "whitespace-pre-wrap break-all" : "whitespace-pre")}>
       {body.every((part) => part === null) ? " " : body}
     </span>
   );

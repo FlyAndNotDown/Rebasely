@@ -29,7 +29,7 @@ import type { ReflogEntry } from "@/types/git";
 export function ReflogDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[min(40rem,calc(100vh-4rem))] flex-col gap-3 sm:max-w-3xl">
+      <DialogContent className="flex h-[min(40rem,calc(100vh-4rem))] flex-col gap-3 overflow-hidden sm:max-w-4xl">
         {/* Mounted per open so the list is read fresh each time. */}
         <ReflogList onClose={() => onOpenChange(false)} />
       </DialogContent>
@@ -92,23 +92,26 @@ function ReflogList({ onClose }: { onClose: () => void }) {
         </DialogDescription>
       </DialogHeader>
       <ScrollArea className="min-h-0 flex-1 rounded-md border">
+        <div className="sticky top-0 z-10 flex h-8 items-center gap-3 border-b bg-popover px-3 text-[11px] text-muted-foreground">
+          <span className="w-24 shrink-0">Ref</span>
+          <span className="w-16 shrink-0">Commit</span>
+          <span className="min-w-0 flex-1">Description</span>
+          <span className="w-20 shrink-0 text-right">When</span>
+          <span className="size-6 shrink-0" />
+        </div>
         {error ? <p className="p-4 text-sm text-destructive">{error}</p> : null}
         {!error && entries === null ? <p className="p-4 text-sm text-muted-foreground">Loading…</p> : null}
         {entries?.length === 0 ? <p className="p-4 text-sm text-muted-foreground">The reflog is empty.</p> : null}
         {entries?.map((entry) => {
           const { action, detail } = splitMessage(entry.message);
+          const title = [entry.message, entry.summary].filter(Boolean).join("\n");
           return (
-            <div key={entry.selector} className="flex items-center gap-3 border-b px-3 py-1.5 last:border-b-0">
-              <span className="w-20 shrink-0 font-mono text-[11px] text-muted-foreground">{entry.selector}</span>
+            <div key={entry.selector} className="flex h-8 items-center gap-3 border-b px-3 last:border-b-0 hover:bg-muted/50">
+              <span className="w-24 shrink-0 truncate font-mono text-[11px] text-muted-foreground">{entry.selector}</span>
               <span className="w-16 shrink-0 font-mono text-[11px]">{entry.shortId}</span>
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-sm">
-                  {action ? <span className="mr-1.5 font-medium">{action}</span> : null}
-                  <span className="text-muted-foreground">{detail}</span>
-                </div>
-                {entry.summary && !detail.includes(entry.summary) ? (
-                  <div className="truncate text-[11px] text-muted-foreground">{entry.summary}</div>
-                ) : null}
+              <div className="min-w-0 flex-1 truncate text-sm" title={title}>
+                {action ? <span className="mr-1.5 font-medium">{action}</span> : null}
+                <span className="text-muted-foreground">{detail}</span>
               </div>
               <span
                 className="w-20 shrink-0 text-right text-[11px] text-muted-foreground tabular-nums"

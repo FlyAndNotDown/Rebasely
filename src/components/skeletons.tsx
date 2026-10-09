@@ -74,27 +74,35 @@ export function CommitFilesSkeleton() {
 export function DiffSkeleton({
   label = "Loading diff",
   status = true,
+  fill = false,
 }: {
   label?: string;
   status?: boolean;
+  /** Cover the whole pane instead of a short block at the top. */
+  fill?: boolean;
 }) {
-  return (
+  const widths = fill ? Array.from({ length: 80 }, (_, index) => diffWidths[index % diffWidths.length]) : diffWidths;
+  const rows = widths.map((width, index) => (
     <div
-      role={status ? "status" : undefined}
-      aria-label={status ? label : undefined}
-      className="py-2"
+      key={index}
+      className="grid h-5 w-full grid-cols-[3rem_3rem_1.25rem_minmax(0,1fr)] items-center px-2"
     >
-      {diffWidths.map((width, index) => (
-        <div
-          key={index}
-          className="grid h-5 grid-cols-[3rem_3rem_1.25rem_minmax(0,1fr)] items-center px-2"
-        >
-          <Skeleton className="ml-auto h-2.5 w-4" />
-          <Skeleton className="ml-auto h-2.5 w-4" />
-          <span />
-          <Skeleton className={cn("h-2.5", width)} />
-        </div>
-      ))}
+      <Skeleton className="ml-auto h-2.5 w-4" />
+      <Skeleton className="ml-auto h-2.5 w-4" />
+      <span />
+      <Skeleton className={cn("h-2.5", width)} />
+    </div>
+  ));
+  if (fill) {
+    return (
+      <div role={status ? "status" : undefined} aria-label={status ? label : undefined} className="relative h-full min-h-0">
+        <div className="absolute inset-0 overflow-hidden py-2">{rows}</div>
+      </div>
+    );
+  }
+  return (
+    <div role={status ? "status" : undefined} aria-label={status ? label : undefined} className="py-2">
+      {rows}
     </div>
   );
 }

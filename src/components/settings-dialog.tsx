@@ -240,7 +240,7 @@ function SettingsForm({ onOpenChange }: { onOpenChange: (open: boolean) => void 
                     onChange={setThemeChoice}
                   />
                 </FieldGroup>
-                <FieldGroup title="Editor">
+                <FieldGroup title="External Editor">
                   <AppPicker
                     id="editor-app"
                     options={editors.filter((editor) => editor.available)}

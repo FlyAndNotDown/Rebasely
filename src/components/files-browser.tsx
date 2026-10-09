@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ChevronRightIcon, FileIcon, FolderIcon, FolderOpenIcon } from "lucide-react";
+import { ChevronRightIcon, FileIcon, FolderIcon, FolderOpenIcon, SquarePenIcon } from "lucide-react";
 import { toast } from "sonner";
 import { AuthorAvatar } from "@/components/author-avatar";
 import { DiffLines } from "@/components/diff-viewer";
@@ -29,6 +29,7 @@ function ancestorDirs(path: string): string[] {
 export function FilesBrowser() {
   const shell = usePanelGroupLayout("files");
   const repoPath = useGitSelect((state) => state.snapshot?.repo.path ?? "");
+  const { openInEditor } = useGitPick(["openInEditor"]);
   const fileFocus = useGitSelect((state) => state.fileFocus);
   const [entries, setEntries] = useState<Record<string, DirEntry[]>>({});
   const [open, setOpen] = useState<Set<string>>(
@@ -154,6 +155,16 @@ export function FilesBrowser() {
           <div className="flex h-full min-h-0 flex-col">
             <div className="flex h-10 shrink-0 items-center gap-2 border-b px-3">
               <span className="min-w-0 flex-1 truncate font-mono text-xs">{path}</span>
+              <Button
+                type="button"
+                size="icon-xs"
+                variant="ghost"
+                aria-label="Open in editor"
+                title="Open in editor"
+                onClick={() => void openInEditor(path)}
+              >
+                <SquarePenIcon />
+              </Button>
               <div className="flex shrink-0 rounded-md bg-muted p-0.5">
                 <Button
                   type="button"

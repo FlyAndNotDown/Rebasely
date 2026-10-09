@@ -663,28 +663,30 @@ export function ChangesPane() {
             ? `${totalSelected} selected`
             : plural(new Set([...files.unstaged, ...files.staged].map((file) => file.path)).size, "changed file")}
         </span>
-        <Button
-          type="button"
-          variant={tree ? "ghost" : "secondary"}
-          size="icon-xs"
-          aria-pressed={!tree}
-          aria-label="Show as list"
-          title="Show as list"
-          onClick={() => tree && void updatePrefs({ ...prefs, changesTree: false })}
-        >
-          <ListIcon />
-        </Button>
-        <Button
-          type="button"
-          variant={tree ? "secondary" : "ghost"}
-          size="icon-xs"
-          aria-pressed={tree}
-          aria-label="Group by folder"
-          title="Group by folder"
-          onClick={() => !tree && void updatePrefs({ ...prefs, changesTree: true })}
-        >
-          <FolderTreeIcon />
-        </Button>
+        <div role="group" aria-label="Changed files layout" className="flex shrink-0 rounded-md bg-muted p-0.5">
+          <Button
+            type="button"
+            variant={tree ? "ghost" : "secondary"}
+            size="icon-xs"
+            aria-pressed={!tree}
+            aria-label="Show as list"
+            title="Show as list"
+            onClick={() => tree && void updatePrefs({ ...prefs, changesTree: false })}
+          >
+            <ListIcon />
+          </Button>
+          <Button
+            type="button"
+            variant={tree ? "secondary" : "ghost"}
+            size="icon-xs"
+            aria-pressed={tree}
+            aria-label="Group by folder"
+            title="Group by folder"
+            onClick={() => !tree && void updatePrefs({ ...prefs, changesTree: true })}
+          >
+            <FolderTreeIcon />
+          </Button>
+        </div>
       </div>
       <ScrollArea className="min-h-0 flex-1" viewportRef={windowed.viewportRef}>
         <div

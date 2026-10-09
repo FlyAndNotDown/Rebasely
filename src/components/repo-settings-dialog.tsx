@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { RotateCcwIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -35,8 +36,8 @@ export function RepoSettingsDialog({
       .then(([globalIdentity, localIdentity]) => {
         setGlobalName(globalIdentity.name);
         setGlobalEmail(globalIdentity.email);
-        setName(localIdentity.name);
-        setEmail(localIdentity.email);
+        setName(localIdentity.name.trim() ? localIdentity.name : globalIdentity.name);
+        setEmail(localIdentity.email.trim() ? localIdentity.email : globalIdentity.email);
       })
       .catch((error) => toast.error(errorMessage(error)));
   }, [open, repoPath]);
@@ -45,7 +46,12 @@ export function RepoSettingsDialog({
     if (!repoPath) return;
     setSaving(true);
     try {
-      await gitApi.setLocalGitIdentity(repoPath, { name: name.trim(), email: email.trim() });
+      const nextName = name.trim();
+      const nextEmail = email.trim();
+      await gitApi.setLocalGitIdentity(repoPath, {
+        name: nextName === globalName.trim() ? "" : nextName,
+        email: nextEmail === globalEmail.trim() ? "" : nextEmail,
+      });
       toast.success("Saved repository settings");
       onOpenChange(false);
     } catch (error) {
@@ -59,33 +65,28 @@ export function RepoSettingsDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Repository</DialogTitle>
+          <DialogTitle>Repository Settings</DialogTitle>
           <DialogDescription>
-            Local Git identity for this repository, written to{" "}
-            <span className="font-mono">.git/config</span>. Blank fields inherit the global Git
-            config.
+            Starts from your global Git identity. A change is stored in this repository&apos;s{" "}
+            <span className="font-mono">.git/config</span>. Reset puts the global value back.
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-5">
-          <div className="grid gap-2">
-            <Label htmlFor="repo-git-name">User name</Label>
-            <Input
-              id="repo-git-name"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              placeholder={globalName || "Use global name"}
-            />
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="repo-git-email">Email</Label>
-            <Input
-              id="repo-git-email"
-              type="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              placeholder={globalEmail || "Use global email"}
-            />
-          </div>
+          <IdentityField
+            id="repo-git-name"
+            label="User name"
+            value={name}
+            fallback={globalName}
+            onChange={setName}
+          />
+          <IdentityField
+            id="repo-git-email"
+            label="Email"
+            type="email"
+            value={email}
+            fallback={globalEmail}
+            onChange={setEmail}
+          />
         </div>
         <DialogFooter>
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
@@ -97,5 +98,44 @@ export function RepoSettingsDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function IdentityField({
+  id,
+  label,
+  type = "text",
+  value,
+  fallback,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  type?: "text" | "email";
+  value: string;
+  fallback: string;
+  onChange: (value: string) => void;
+}) {
+  const changed = value.trim() !== fallback.trim();
+  return (
+    <div className="grid gap-2">
+      <Label htmlFor={id}>{label}</Label>
+      <div className="flex items-center gap-2">
+        <Input id={id} type={type} value={value} onChange={(event) => onChange(event.target.value)} />
+        {changed ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="shrink-0"
+            aria-label={`Reset ${label.toLowerCase()}`}
+            title="Reset to repository default"
+            onClick={() => onChange(fallback)}
+          >
+            <RotateCcwIcon />
+          </Button>
+        ) : null}
+      </div>
+    </div>
   );
 }

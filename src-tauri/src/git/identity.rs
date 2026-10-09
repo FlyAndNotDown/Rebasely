@@ -1,7 +1,14 @@
 use super::*;
 
 pub fn read_git_identity() -> AppResult<GitIdentity> {
-    let cfg = git2::Config::open_default().ok();
+    // The global file only. open_default also reads a repo discovered from the
+    // process cwd, which would show a local override as the shared identity.
+    let path = global_gitconfig_path()?;
+    let cfg = if path.is_file() {
+        git2::Config::open(&path).ok()
+    } else {
+        None
+    };
     Ok(GitIdentity {
         name: cfg
             .as_ref()
