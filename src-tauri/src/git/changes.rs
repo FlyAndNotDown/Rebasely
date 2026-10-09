@@ -1,23 +1,17 @@
 use super::*;
 
+/// Staging goes through `git add` so clean filters such as Git LFS run; libgit2
+/// would store the raw file instead of the pointer.
 pub fn stage_paths(repo: &Repository, paths: &[String]) -> AppResult<()> {
-    let mut index = repo.index()?;
-    let root = workdir_owned(repo)?;
-    for raw in paths {
-        let rel = to_git_path(raw);
-        if rel.is_empty() {
-            continue;
-        }
-        let full = root.join(rel.replace('/', std::path::MAIN_SEPARATOR_STR));
-        if full.is_dir() {
-            index.add_all([&rel], IndexAddOption::DEFAULT, None)?;
-        } else if full.exists() {
-            index.add_path(Path::new(&rel))?;
-        } else {
-            let _ = index.remove_path(Path::new(&rel));
-        }
+    let specs: Vec<String> = paths
+        .iter()
+        .map(|path| to_git_path(path))
+        .filter(|path| !path.is_empty())
+        .collect();
+    if specs.is_empty() {
+        return Ok(());
     }
-    index.write()?;
+    run_git_pathspecs(workdir(repo)?, &["add", "--all"], &specs)?;
     Ok(())
 }
 
@@ -156,61 +150,47 @@ pub(super) fn pathspec_chunks(paths: &[String]) -> Vec<&[String]> {
     chunks
 }
 
+/// Commits through `git commit` so hooks, signing, and an in-progress merge or
+/// cherry-pick (its extra parent and original author) are all honoured.
 pub fn commit(repo: &Repository, message: &str, amend: bool) -> AppResult<CommitSummary> {
     let message = message.trim();
     if message.is_empty() {
         return Err(AppError::msg("Commit message cannot be empty"));
     }
 
-    let signature = repo.signature().map_err(|_| {
+    repo.signature().map_err(|_| {
         AppError::msg("Set user.name and user.email in Git config before committing")
     })?;
 
-    let mut index = repo.index()?;
-    let tree_id = index.write_tree()?;
-    let tree = repo.find_tree(tree_id)?;
-
-    if amend {
-        let head = match repo.head() {
-            Ok(head) => head.peel_to_commit()?,
-            Err(err) if err.code() == ErrorCode::UnbornBranch => {
-                return Err(AppError::msg("Nothing to amend"));
-            }
-            Err(err) => return Err(err.into()),
-        };
-        let oid = head.amend(
-            Some("HEAD"),
-            None,
-            Some(&signature),
-            None,
-            Some(message),
-            Some(&tree),
-        )?;
-        return summarize_oid(repo, oid);
-    }
-
-    let parent_commit = match repo.head() {
+    let head = match repo.head() {
         Ok(head) => Some(head.peel_to_commit()?),
         Err(err) if err.code() == ErrorCode::UnbornBranch => None,
         Err(err) => return Err(err.into()),
     };
-
-    if let Some(parent) = &parent_commit {
-        if parent.tree_id() == tree_id {
+    if amend && head.is_none() {
+        return Err(AppError::msg("Nothing to amend"));
+    }
+    // A merge may legitimately record the same tree as HEAD.
+    if !amend && git_operation(repo).is_none() {
+        let mut index = repo.index()?;
+        index.read(false)?;
+        let unchanged = match &head {
+            Some(parent) => parent.tree_id() == index.write_tree()?,
+            None => index.is_empty(),
+        };
+        if unchanged {
             return Err(AppError::msg("Nothing to commit"));
         }
-    } else if index.is_empty() {
-        return Err(AppError::msg("Nothing to commit"));
     }
 
-    let parents: Vec<_> = parent_commit.iter().collect();
-    let oid = repo.commit(
-        Some("HEAD"),
-        &signature,
-        &signature,
-        message,
-        &tree,
-        &parents,
-    )?;
+    let mut args = vec!["commit", "--file=-"];
+    if amend {
+        args.push("--amend");
+    }
+    run_git_input(workdir(repo)?, &args, message.as_bytes())?;
+    let oid = repo
+        .head()?
+        .target()
+        .ok_or_else(|| AppError::msg("Commit did not move HEAD"))?;
     summarize_oid(repo, oid)
 }

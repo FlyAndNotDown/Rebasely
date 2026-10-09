@@ -196,8 +196,13 @@ export const gitApi = {
     invoke<void>("write_commit_patch", { repoPath, oid, dest }),
   applyPatch: (repoPath: string, patchPath: string) =>
     invoke<WorkspaceSnapshot>("apply_patch", { repoPath, patchPath }),
-  stashSave: (repoPath: string, message: string, includeUntracked: boolean) =>
-    invoke<WorkspaceSnapshot>("stash_save", { repoPath, message, includeUntracked }),
+  stashSave: (repoPath: string, message: string, includeUntracked: boolean, paths?: string[]) =>
+    invoke<WorkspaceSnapshot>("stash_save", {
+      repoPath,
+      message,
+      includeUntracked,
+      paths: paths?.length ? paths : null,
+    }),
   stashApply: (repoPath: string, id: string) =>
     invoke<WorkspaceSnapshot>("stash_apply", { repoPath, id }),
   stashPop: (repoPath: string, id: string) =>

@@ -9,7 +9,7 @@ use std::thread;
 use std::time::Duration;
 
 use git2::{
-    BranchType, DiffFormat, DiffOptions, ErrorCode, IndexAddOption, ObjectType, Oid, Repository,
+    BranchType, DiffFormat, DiffOptions, ErrorCode, ObjectType, Oid, Repository,
     Sort, Status, StatusOptions,
 };
 use serde::Serialize;

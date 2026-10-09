@@ -38,7 +38,7 @@ fn stash_diff_includes_tracked_and_untracked_files() {
     fs::write(root.join("tracked.txt"), "changed\n").unwrap();
     fs::remove_file(root.join("gone.txt")).unwrap();
     fs::write(root.join("extra.txt"), "new\n").unwrap();
-    stash_save(&mut repo, "wip", true).unwrap();
+    stash_save(&mut repo, "wip", true, &[]).unwrap();
 
     let mut id = String::new();
     repo.stash_foreach(|index, _, oid| {
@@ -391,10 +391,10 @@ fn stash_actions_follow_the_id_after_indexes_shift() {
     let (root, mut repo) = temp_repo();
     commit_file(&mut repo, &root, "file.txt", "base\n", "base");
     fs::write(root.join("file.txt"), "first\n").unwrap();
-    stash_save(&mut repo, "first", false).unwrap();
+    stash_save(&mut repo, "first", false, &[]).unwrap();
     let first = list_stashes(&mut repo).unwrap()[0].id.clone();
     fs::write(root.join("file.txt"), "second\n").unwrap();
-    stash_save(&mut repo, "second", false).unwrap();
+    stash_save(&mut repo, "second", false, &[]).unwrap();
 
     // "first" is now stash@{1}; dropping by id must not touch "second".
     stash_drop(&mut repo, &first).unwrap();
@@ -599,4 +599,159 @@ fn follow_log_parser_tracks_names_across_records() {
     let paths: Vec<_> = commits.iter().map(|commit| commit.path.clone().unwrap()).collect();
     assert_eq!(paths, vec!["new.txt", "old.txt", "old.txt"]);
     assert_eq!(commits[1].parents.len(), 2);
+}
+
+/// A clean/smudge pair standing in for Git LFS: the index stores `CLEAN` and the
+/// working tree reads `smudged`, so either side shows whether git ran the filter.
+fn use_test_filter(repo: &Repository, root: &Path) {
+    let mut config = repo.config().unwrap();
+    config
+        .set_str("filter.probe.clean", "sed -e s/plain/CLEAN/ -e s/smudged/CLEAN/")
+        .unwrap();
+    config.set_str("filter.probe.smudge", "sed s/CLEAN/smudged/").unwrap();
+    fs::write(root.join(".gitattributes"), "*.dat filter=probe\n").unwrap();
+}
+
+fn blob_text(repo: &Repository, spec: &str) -> String {
+    let bytes = run_git_stdout(repo.workdir().unwrap(), &["cat-file", "blob", spec]).unwrap();
+    String::from_utf8_lossy(&bytes).replace("\r\n", "\n")
+}
+
+fn workdir_text(root: &Path, name: &str) -> String {
+    fs::read_to_string(root.join(name)).unwrap().replace("\r\n", "\n")
+}
+
+#[test]
+fn staging_and_committing_run_the_clean_filter() {
+    let (root, mut repo) = temp_repo();
+    use_test_filter(&repo, &root);
+    fs::write(root.join("asset.dat"), "plain\n").unwrap();
+    stage_paths(&repo, &[".gitattributes".into(), "asset.dat".into()]).unwrap();
+    assert_eq!(blob_text(&repo, ":asset.dat"), "CLEAN\n");
+    commit(&repo, "add asset", false).unwrap();
+    assert_eq!(blob_text(&repo, "HEAD:asset.dat"), "CLEAN\n");
+    let _ = snapshot(&mut repo).unwrap();
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn checkout_runs_the_smudge_filter() {
+    let (root, mut repo) = temp_repo();
+    commit_file(&mut repo, &root, "readme.txt", "base\n", "base");
+    create_branch(&repo, "assets", true, None).unwrap();
+    use_test_filter(&repo, &root);
+    fs::write(root.join("asset.dat"), "plain\n").unwrap();
+    stage_paths(&repo, &[".gitattributes".into(), "asset.dat".into()]).unwrap();
+    commit(&repo, "add asset", false).unwrap();
+
+    let main = repo
+        .branches(Some(BranchType::Local))
+        .unwrap()
+        .flatten()
+        .map(|(branch, _)| branch.name().unwrap().unwrap().to_string())
+        .find(|name| name != "assets")
+        .unwrap();
+    checkout_branch(&repo, &main).unwrap();
+    assert!(!root.join("asset.dat").exists());
+    checkout_branch(&repo, "assets").unwrap();
+    assert_eq!(workdir_text(&root, "asset.dat"), "smudged\n");
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn stash_round_trip_runs_both_filters() {
+    let (root, mut repo) = temp_repo();
+    use_test_filter(&repo, &root);
+    fs::write(root.join("asset.dat"), "plain\n").unwrap();
+    stage_paths(&repo, &[".gitattributes".into(), "asset.dat".into()]).unwrap();
+    commit(&repo, "add asset", false).unwrap();
+    fs::write(root.join("asset.dat"), "plain\nplain\n").unwrap();
+
+    stash_save(&mut repo, "wip", false, &[]).unwrap();
+    let id = list_stashes(&mut repo).unwrap()[0].id.clone();
+    assert_eq!(blob_text(&repo, &format!("{id}:asset.dat")), "CLEAN\nCLEAN\n");
+    stash_pop(&mut repo, &id).unwrap();
+    assert_eq!(workdir_text(&root, "asset.dat"), "smudged\nsmudged\n");
+    assert!(list_stashes(&mut repo).unwrap().is_empty());
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn stashing_nothing_is_an_error_and_paths_limit_the_stash() {
+    let (root, mut repo) = temp_repo();
+    commit_file(&mut repo, &root, "a.txt", "a\n", "a");
+    commit_file(&mut repo, &root, "b.txt", "b\n", "b");
+    assert!(stash_save(&mut repo, "empty", false, &[]).is_err());
+
+    fs::write(root.join("a.txt"), "a2\n").unwrap();
+    fs::write(root.join("b.txt"), "b2\n").unwrap();
+    stash_save(&mut repo, "only a", false, &["a.txt".into()]).unwrap();
+    assert_eq!(workdir_text(&root, "a.txt"), "a\n");
+    assert_eq!(workdir_text(&root, "b.txt"), "b2\n");
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn commit_runs_the_pre_commit_hook() {
+    let (root, repo) = temp_repo();
+    let hook = repo.path().join("hooks").join("pre-commit");
+    fs::create_dir_all(hook.parent().unwrap()).unwrap();
+    fs::write(&hook, "#!/bin/sh\necho blocked-by-hook >&2\nexit 1\n").unwrap();
+    make_executable(&hook).unwrap();
+    fs::write(root.join("a.txt"), "a\n").unwrap();
+    stage_paths(&repo, &["a.txt".into()]).unwrap();
+    let err = commit(&repo, "first", false).unwrap_err().to_string();
+    assert!(err.contains("blocked-by-hook"), "{err}");
+    assert!(repo.head().is_err());
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn committing_during_a_merge_records_both_parents() {
+    let (root, mut repo) = temp_repo();
+    commit_file(&mut repo, &root, "file.txt", "base\n", "base");
+    repo.branch("other", &repo.head().unwrap().peel_to_commit().unwrap(), false)
+        .unwrap();
+    commit_file(&mut repo, &root, "file.txt", "left\n", "left");
+    let incoming = repo.head().unwrap().target().unwrap().to_string();
+    checkout_branch(&repo, "other").unwrap();
+    commit_file(&mut repo, &root, "file.txt", "right\n", "right");
+    assert!(merge_ref(&mut repo, &incoming).is_err());
+    resolve_conflict(&mut repo, "file.txt", "ours").unwrap();
+
+    commit(&repo, "merge left", false).unwrap();
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    assert_eq!(head.parent_count(), 2);
+    assert_eq!(head.summary(), Some("merge left"));
+    assert!(git_operation(&repo).is_none());
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn conflicts_from_a_stash_apply_can_be_resolved() {
+    let (root, mut repo) = temp_repo();
+    commit_file(&mut repo, &root, "file.txt", "base\n", "base");
+    fs::write(root.join("file.txt"), "stashed\n").unwrap();
+    stash_save(&mut repo, "wip", false, &[]).unwrap();
+    commit_file(&mut repo, &root, "file.txt", "committed\n", "move on");
+    let id = list_stashes(&mut repo).unwrap()[0].id.clone();
+    assert!(stash_apply(&mut repo, &id).is_err());
+    assert!(git_operation(&repo).is_none());
+    resolve_conflict(&mut repo, "file.txt", "theirs").unwrap();
+    assert_eq!(workdir_text(&root, "file.txt"), "stashed\n");
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn tags_go_through_git_and_reject_bad_names() {
+    let (root, mut repo) = temp_repo();
+    commit_file(&mut repo, &root, "a.txt", "a\n", "a");
+    create_tag(&repo, "v1.0", Some("first release"), None).unwrap();
+    create_tag(&repo, "light", None, None).unwrap();
+    assert!(create_tag(&repo, "bad name", None, None).is_err());
+    assert!(create_tag(&repo, "bad..name", None, None).is_err());
+    let annotated = repo.revparse_single("v1.0").unwrap();
+    assert_eq!(annotated.kind(), Some(ObjectType::Tag));
+    assert_eq!(annotated.as_tag().unwrap().message(), Some("first release\n"));
+    let _ = fs::remove_dir_all(&root);
 }

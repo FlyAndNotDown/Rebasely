@@ -535,9 +535,10 @@ async fn stash_save(
     repo_path: String,
     message: String,
     include_untracked: bool,
+    paths: Option<Vec<String>>,
 ) -> AppResult<WorkspaceSnapshot> {
     with_repo_async(repo_path, move |repo| {
-        git::stash_save(repo, &message, include_untracked)?;
+        git::stash_save(repo, &message, include_untracked, paths.as_deref().unwrap_or(&[]))?;
         git::snapshot(repo)
     })
     .await

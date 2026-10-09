@@ -27,6 +27,57 @@ pub(super) fn run_git_env(
         .map_err(|err| AppError::msg(err.to_string()))
 }
 
+/// Runs git with `input` on stdin, so messages and path lists never hit the
+/// command-line length limit or need quoting.
+pub(super) fn run_git_input(root: &Path, args: &[&str], input: &[u8]) -> AppResult<Vec<u8>> {
+    let git = find_git().ok_or_else(|| AppError::msg("Git executable was not found"))?;
+    let mut command = Command::new(git);
+    command.arg("-C").arg(root).args(args);
+    command.env("GIT_TERMINAL_PROMPT", "0");
+    command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    let mut child = command
+        .spawn()
+        .map_err(|err| AppError::msg(err.to_string()))?;
+    let mut stdin = child.stdin.take();
+    let input = input.to_vec();
+    let writer = thread::spawn(move || {
+        if let Some(pipe) = stdin.as_mut() {
+            let _ = std::io::Write::write_all(pipe, &input);
+        }
+    });
+    let output = child
+        .wait_with_output()
+        .map_err(|err| AppError::msg(err.to_string()))?;
+    let _ = writer.join();
+    if output.status.success() {
+        return Ok(output.stdout);
+    }
+    Err(git_output_error(output))
+}
+
+/// Runs a git command that takes pathspecs, passing them NUL-separated on
+/// stdin and matching them literally.
+pub(super) fn run_git_pathspecs(root: &Path, args: &[&str], paths: &[String]) -> AppResult<Vec<u8>> {
+    let mut argv = vec!["--literal-pathspecs"];
+    argv.extend_from_slice(args);
+    argv.extend_from_slice(&["--pathspec-from-file=-", "--pathspec-file-nul"]);
+    let mut input = Vec::new();
+    for path in paths {
+        input.extend_from_slice(path.as_bytes());
+        input.push(0);
+    }
+    run_git_input(root, &argv, &input)
+}
+
 pub(super) fn run_git_ok_progress(
     root: &Path,
     args: &[&str],

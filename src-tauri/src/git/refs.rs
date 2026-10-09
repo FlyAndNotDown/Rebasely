@@ -161,44 +161,39 @@ pub(super) fn remote_branches_from_git(root: &Path, remotes: &[String]) -> AppRe
     Ok(remote)
 }
 
-pub(super) fn checkout_local_branch(repo: &Repository, branch: &git2::Branch<'_>) -> AppResult<()> {
-    let reference = branch.get();
-    let commit = reference.peel_to_commit()?;
-    repo.checkout_tree(commit.as_object(), None)?;
-    let refname = reference
-        .name()
-        .ok_or_else(|| AppError::msg("Invalid branch reference"))?;
-    repo.set_head(refname)?;
+/// Switching goes through `git switch` so smudge filters such as Git LFS,
+/// sparse checkout, and the post-checkout hook all apply.
+fn switch(repo: &Repository, args: &[&str]) -> AppResult<()> {
+    let mut argv = vec!["switch", "--quiet"];
+    argv.extend_from_slice(args);
+    run_git_stdout(workdir(repo)?, &argv)?;
     Ok(())
 }
 
 pub fn checkout_branch(repo: &Repository, name: &str) -> AppResult<()> {
     let name = name.trim();
-    if let Ok(branch) = repo.find_branch(name, BranchType::Local) {
-        return checkout_local_branch(repo, &branch);
+    if repo.find_branch(name, BranchType::Local).is_ok() {
+        return switch(repo, &[name]);
     }
 
-    if repo.find_reference(&format!("refs/tags/{name}")).is_ok() {
-        let commit = peel_commit(repo, name)?;
-        repo.checkout_tree(commit.as_object(), None)?;
-        repo.set_head_detached(commit.id())?;
-        return Ok(());
+    let tag_ref = format!("refs/tags/{name}");
+    if repo.find_reference(&tag_ref).is_ok() {
+        return switch(repo, &["--detach", &tag_ref]);
     }
 
-    let remote = repo
-        .find_branch(name, BranchType::Remote)
+    repo.find_branch(name, BranchType::Remote)
         .map_err(|_| AppError::msg(format!("Branch not found: {name}")))?;
-    let local_name = name.split_once('/').map(|(_, rest)| rest).unwrap_or(name);
+    let local_name = split_remote_branch(repo, name)
+        .map(|(_, branch)| branch)
+        .unwrap_or_else(|_| name.split_once('/').map(|(_, rest)| rest).unwrap_or(name).to_string());
     if local_name.is_empty() || local_name == "HEAD" {
         return Err(AppError::msg("Cannot check out that remote ref"));
     }
-    if let Ok(existing) = repo.find_branch(local_name, BranchType::Local) {
-        return checkout_local_branch(repo, &existing);
+    if repo.find_branch(&local_name, BranchType::Local).is_ok() {
+        return switch(repo, &[&local_name]);
     }
-    let commit = remote.get().peel_to_commit()?;
-    let mut local = repo.branch(local_name, &commit, false)?;
-    let _ = local.set_upstream(Some(name));
-    checkout_local_branch(repo, &local)
+    let remote_ref = format!("refs/remotes/{name}");
+    switch(repo, &["--create", &local_name, "--track", &remote_ref])
 }
 
 pub fn create_tag(
@@ -208,8 +203,8 @@ pub fn create_tag(
     target: Option<&str>,
 ) -> AppResult<()> {
     let name = name.trim();
-    if name.is_empty() || name.ends_with('/') || name.contains("//") || name.contains([' ', '~', '^', ':', '?', '*', '[', '\\']) {
-        return Err(AppError::msg("Tag name is invalid"));
+    if name.is_empty() {
+        return Err(AppError::msg("Tag name cannot be empty"));
     }
     let target = if let Some(target) = target.map(str::trim).filter(|value| !value.is_empty()) {
         peel_commit(repo, target)?
@@ -218,11 +213,19 @@ pub fn create_tag(
             .map_err(|_| AppError::msg("Cannot create a tag before the first commit"))?
             .peel_to_commit()?
     };
-    if let Some(message) = message.map(str::trim).filter(|value| !value.is_empty()) {
-        let signature = repo.signature()?;
-        repo.tag(name, target.as_object(), &signature, message, false)?;
-    } else {
-        repo.tag_lightweight(name, target.as_object(), false)?;
+    let target = target.id().to_string();
+    let root = workdir(repo)?;
+    // `git tag` validates the name and honours tag.gpgSign for annotated tags.
+    match message.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(message) => {
+            repo.signature().map_err(|_| {
+                AppError::msg("Set user.name and user.email in Git config before tagging")
+            })?;
+            run_git_input(root, &["tag", "--annotate", "--file=-", name, &target], message.as_bytes())?;
+        }
+        None => {
+            run_git_stdout(root, &["tag", name, &target])?;
+        }
     }
     Ok(())
 }

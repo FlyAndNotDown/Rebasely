@@ -51,14 +51,23 @@ pub fn conflict_view(repo: &Repository, path: &str) -> AppResult<ConflictView> {
     })
 }
 
-pub fn save_conflict(repo: &mut Repository, path: &str, text: &str) -> AppResult<WorkspaceSnapshot> {
-    if git_operation(repo).is_none() {
-        return Err(AppError::msg("No conflicted operation is in progress"));
+/// A stash apply can leave conflicts without any merge or rebase in progress,
+/// so the index entry decides whether a path can be resolved.
+fn ensure_conflicted(repo: &Repository, path: &str) -> AppResult<()> {
+    let mut index = repo.index()?;
+    index.read(false)?;
+    if (1..=3).any(|stage| index.get_path(Path::new(path), stage).is_some()) {
+        return Ok(());
     }
+    Err(AppError::msg("This file has no conflict to resolve"))
+}
+
+pub fn save_conflict(repo: &mut Repository, path: &str, text: &str) -> AppResult<WorkspaceSnapshot> {
     let path = to_git_path(path);
     if path.is_empty() {
         return Err(AppError::msg("A file path is required"));
     }
+    ensure_conflicted(repo, &path)?;
     if text.contains("<<<<<<<") || text.contains(">>>>>>>") {
         return Err(AppError::msg("Conflict markers are still in the file"));
     }
@@ -92,13 +101,11 @@ pub(super) fn stage_text(repo: &Repository, path: &str, stage: i32) -> Option<St
 }
 
 pub fn resolve_conflict(repo: &mut Repository, path: &str, side: &str) -> AppResult<WorkspaceSnapshot> {
-    if git_operation(repo).is_none() {
-        return Err(AppError::msg("No conflicted operation is in progress"));
-    }
     let path = to_git_path(path);
     if path.is_empty() {
         return Err(AppError::msg("A file path is required"));
     }
+    ensure_conflicted(repo, &path)?;
     let root = workdir(repo)?.to_path_buf();
     match side.trim() {
         "ours" => run_git_stdout(&root, &["checkout", "--ours", "--", &path])?,

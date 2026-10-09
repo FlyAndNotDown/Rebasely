@@ -13,17 +13,47 @@ pub fn list_stashes(repo: &mut Repository) -> AppResult<Vec<StashInfo>> {
     Ok(stashes)
 }
 
-pub fn stash_save(repo: &mut Repository, message: &str, include_untracked: bool) -> AppResult<()> {
-    let signature = repo
-        .signature()
+fn top_stash(repo: &mut Repository) -> Option<Oid> {
+    let mut top = None;
+    let _ = repo.stash_foreach(|_, _, oid| {
+        top = Some(*oid);
+        false
+    });
+    top
+}
+
+/// Stashing goes through `git stash` so clean and smudge filters such as Git LFS
+/// run on the way in and out. An empty `paths` stashes every change.
+pub fn stash_save(
+    repo: &mut Repository,
+    message: &str,
+    include_untracked: bool,
+    paths: &[String],
+) -> AppResult<()> {
+    repo.signature()
         .map_err(|_| AppError::msg("Set user.name and user.email in Settings before stashing"))?;
-    let mut flags = git2::StashFlags::DEFAULT;
-    if include_untracked {
-        flags |= git2::StashFlags::INCLUDE_UNTRACKED;
-    }
     let message = message.trim();
     let message = if message.is_empty() { "WIP" } else { message };
-    repo.stash_save(&signature, message, Some(flags))?;
+    let before = top_stash(repo);
+    let mut args = vec!["stash", "push", "--message", message];
+    if include_untracked {
+        args.push("--include-untracked");
+    }
+    let root = workdir_owned(repo)?;
+    let specs: Vec<String> = paths
+        .iter()
+        .map(|path| to_git_path(path))
+        .filter(|path| !path.is_empty())
+        .collect();
+    if specs.is_empty() {
+        run_git_stdout(&root, &args)?;
+    } else {
+        run_git_pathspecs(&root, &args, &specs)?;
+    }
+    // `git stash push` exits cleanly when there is nothing to save.
+    if top_stash(repo) == before {
+        return Err(AppError::msg("No local changes to stash"));
+    }
     Ok(())
 }
 
@@ -42,16 +72,19 @@ fn stash_index(repo: &mut Repository, id: &str) -> AppResult<usize> {
     found.ok_or_else(|| AppError::msg("That stash no longer exists"))
 }
 
-pub fn stash_apply(repo: &mut Repository, id: &str) -> AppResult<()> {
+fn run_stash(repo: &mut Repository, action: &str, id: &str) -> AppResult<()> {
     let index = stash_index(repo, id)?;
-    repo.stash_apply(index, None)?;
+    let spec = format!("stash@{{{index}}}");
+    run_git_stdout(&workdir_owned(repo)?, &["stash", action, &spec])?;
     Ok(())
 }
 
+pub fn stash_apply(repo: &mut Repository, id: &str) -> AppResult<()> {
+    run_stash(repo, "apply", id)
+}
+
 pub fn stash_pop(repo: &mut Repository, id: &str) -> AppResult<()> {
-    let index = stash_index(repo, id)?;
-    repo.stash_pop(index, None)?;
-    Ok(())
+    run_stash(repo, "pop", id)
 }
 
 pub fn stash_drop(repo: &mut Repository, id: &str) -> AppResult<()> {
