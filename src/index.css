@@ -46,6 +46,15 @@
   --diff-del-bg: oklch(0.95 0.04 25);
   --diff-del-char: color-mix(in oklch, var(--diff-del) 22%, var(--diff-del-bg));
   --diff-hunk: oklch(0.48 0.09 250);
+  --syntax-comment: #6a737d;
+  --syntax-keyword: #cf222e;
+  --syntax-string: #0a3069;
+  --syntax-number: #0550ae;
+  --syntax-function: #8250df;
+  --syntax-type: #953800;
+  --syntax-property: #0550ae;
+  --syntax-tag: #116329;
+  --syntax-variable: #953800;
   --graph-1: #3a86ff;
   --graph-2: #12b886;
   --graph-3: #e6b007;
@@ -107,6 +116,15 @@
   --diff-del-bg: oklch(0.23 0.05 22);
   --diff-del-char: color-mix(in oklch, var(--diff-del) 34%, var(--diff-del-bg));
   --diff-hunk: oklch(0.76 0.08 250);
+  --syntax-comment: #8b949e;
+  --syntax-keyword: #ff7b72;
+  --syntax-string: #a5d6ff;
+  --syntax-number: #79c0ff;
+  --syntax-function: #d2a8ff;
+  --syntax-type: #ffa657;
+  --syntax-property: #79c0ff;
+  --syntax-tag: #7ee787;
+  --syntax-variable: #ffa657;
   --graph-1: #5b9dff;
   --graph-2: #3ee0b2;
   --graph-3: #ffe066;
@@ -222,6 +240,37 @@
 
 .activity-indeterminate {
   animation: activity-indeterminate 1.15s ease-in-out infinite;
+}
+
+/* Syntax colors from lib/highlight.ts; operators and punctuation keep the text color. */
+.tok-comment {
+  color: var(--syntax-comment);
+}
+.tok-keyword {
+  color: var(--syntax-keyword);
+}
+.tok-string,
+.tok-regex {
+  color: var(--syntax-string);
+}
+.tok-number,
+.tok-constant {
+  color: var(--syntax-number);
+}
+.tok-function {
+  color: var(--syntax-function);
+}
+.tok-type {
+  color: var(--syntax-type);
+}
+.tok-property {
+  color: var(--syntax-property);
+}
+.tok-tag {
+  color: var(--syntax-tag);
+}
+.tok-variable {
+  color: var(--syntax-variable);
 }
 
 @keyframes scroll-area-in {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { changeRange, hunkChanges, lineRefs } from "./diff-select";
+import { changeRange, hunkChanges, lineRefs, splitRows } from "./diff-select";
 import type { DiffLine } from "@/types/git";
 
 const line = (kind: string, oldLineno: number | null, newLineno: number | null): DiffLine => ({
@@ -29,6 +29,20 @@ describe("diff line selection", () => {
 
   it("selects only changed lines across a range in either direction", () => {
     expect(changeRange(lines, 6, 1)).toEqual([2, 3, 6]);
+  });
+
+  it("pairs removals with the additions after them for the split view", () => {
+    const extra = [...lines, line("delete", 21, null), line("delete", 22, null), line("add", null, 21)];
+    expect(splitRows(extra)).toEqual([
+      { kind: "hunk", index: 0 },
+      { kind: "pair", left: 1, right: 1 },
+      { kind: "pair", left: 2, right: 3 },
+      { kind: "pair", left: 4, right: 4 },
+      { kind: "hunk", index: 5 },
+      { kind: "pair", left: null, right: 6 },
+      { kind: "pair", left: 7, right: 9 },
+      { kind: "pair", left: 8, right: null },
+    ]);
   });
 
   it("names additions by their new number and removals by their old one", () => {

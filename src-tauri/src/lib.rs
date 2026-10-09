@@ -149,8 +149,17 @@ async fn get_branches(repo_path: String) -> AppResult<BranchList> {
 }
 
 #[tauri::command]
-async fn get_workdir_diff(repo_path: String, path: String, staged: bool) -> AppResult<FileDiff> {
-    with_repo_async(repo_path, move |repo| git::workdir_diff(repo, &path, staged)).await
+async fn get_workdir_diff(
+    repo_path: String,
+    path: String,
+    staged: bool,
+    ignore_whitespace: Option<bool>,
+) -> AppResult<FileDiff> {
+    let ignore_whitespace = ignore_whitespace.unwrap_or(false);
+    with_repo_async(repo_path, move |repo| {
+        git::workdir_diff(repo, &path, staged, ignore_whitespace)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -184,8 +193,17 @@ async fn get_commit_details(repo_path: String, oid: String) -> AppResult<CommitD
 }
 
 #[tauri::command]
-async fn get_commit_diff(repo_path: String, oid: String, path: String) -> AppResult<FileDiff> {
-    with_repo_async(repo_path, move |repo| git::commit_file_diff(repo, &oid, &path)).await
+async fn get_commit_diff(
+    repo_path: String,
+    oid: String,
+    path: String,
+    ignore_whitespace: Option<bool>,
+) -> AppResult<FileDiff> {
+    let ignore_whitespace = ignore_whitespace.unwrap_or(false);
+    with_repo_async(repo_path, move |repo| {
+        git::commit_file_diff(repo, &oid, &path, ignore_whitespace)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -203,9 +221,11 @@ async fn compare_file_diff(
     base: String,
     head: String,
     path: String,
+    ignore_whitespace: Option<bool>,
 ) -> AppResult<FileDiff> {
+    let ignore_whitespace = ignore_whitespace.unwrap_or(false);
     with_repo_async(repo_path, move |repo| {
-        git::compare_file_diff(repo, &base, &head, &path)
+        git::compare_file_diff(repo, &base, &head, &path, ignore_whitespace)
     })
     .await
 }
@@ -615,8 +635,17 @@ async fn get_stash_details(repo_path: String, oid: String) -> AppResult<StashDet
 }
 
 #[tauri::command]
-async fn get_stash_diff(repo_path: String, oid: String, path: String) -> AppResult<FileDiff> {
-    with_repo_async(repo_path, move |repo| git::stash_file_diff(repo, &oid, &path)).await
+async fn get_stash_diff(
+    repo_path: String,
+    oid: String,
+    path: String,
+    ignore_whitespace: Option<bool>,
+) -> AppResult<FileDiff> {
+    let ignore_whitespace = ignore_whitespace.unwrap_or(false);
+    with_repo_async(repo_path, move |repo| {
+        git::stash_file_diff(repo, &oid, &path, ignore_whitespace)
+    })
+    .await
 }
 
 #[tauri::command]

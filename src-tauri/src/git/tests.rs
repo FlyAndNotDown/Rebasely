@@ -61,9 +61,9 @@ fn stash_diff_includes_tracked_and_untracked_files() {
     assert_eq!(kind("gone.txt"), Some("deleted"), "{:?}", details.files);
     assert_eq!(kind("extra.txt"), Some("untracked"), "{:?}", details.files);
 
-    let tracked = stash_file_diff(&repo, &id, "tracked.txt").unwrap();
+    let tracked = stash_file_diff(&repo, &id, "tracked.txt", false).unwrap();
     assert!(tracked.lines.iter().any(|line| line.content.contains("changed")));
-    let extra = stash_file_diff(&repo, &id, "extra.txt").unwrap();
+    let extra = stash_file_diff(&repo, &id, "extra.txt", false).unwrap();
     assert!(
         extra
             .lines
@@ -896,7 +896,7 @@ fn numbered_lines(count: usize) -> String {
 
 /// Picks the changed lines in the displayed diff whose text matches `pick`.
 fn pick_lines(repo: &Repository, path: &str, staged: bool, pick: impl Fn(&str) -> bool) -> Vec<LineRef> {
-    workdir_diff(repo, path, staged)
+    workdir_diff(repo, path, staged, false)
         .unwrap()
         .lines
         .iter()
@@ -958,7 +958,7 @@ fn part_of_a_new_file_can_be_staged() {
     let (root, mut repo) = temp_repo();
     commit_file(&mut repo, &root, "base.txt", "base\n", "base");
     fs::write(root.join("new.txt"), "alpha\nbeta\ngamma\n").unwrap();
-    let diff = workdir_diff(&repo, "new.txt", false).unwrap();
+    let diff = workdir_diff(&repo, "new.txt", false, false).unwrap();
     assert_eq!(diff.lines[0].kind, "hunk");
     assert_eq!(diff.lines.len(), 4);
 
@@ -1000,6 +1000,18 @@ fn line_actions_work_on_crlf_working_trees() {
     apply_lines(&mut repo, "file.txt", false, "discard", &rest).unwrap();
     let on_disk = fs::read_to_string(root.join("file.txt")).unwrap();
     assert_eq!(on_disk, numbered_lines(12).replace("line 1\n", "line one\n").replace('\n', "\r\n"));
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn hiding_whitespace_drops_indentation_only_changes() {
+    let (root, mut repo) = temp_repo();
+    commit_file(&mut repo, &root, "file.txt", "fn main() {\nbody();\n}\n", "base");
+    fs::write(root.join("file.txt"), "fn main() {\n    body();\n}\n").unwrap();
+    let shown = workdir_diff(&repo, "file.txt", false, false).unwrap();
+    assert!(shown.lines.iter().any(|line| line.kind == "add"));
+    let hidden = workdir_diff(&repo, "file.txt", false, true).unwrap();
+    assert!(!hidden.lines.iter().any(|line| line.kind == "add" || line.kind == "delete"));
     let _ = fs::remove_dir_all(&root);
 }
 

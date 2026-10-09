@@ -86,8 +86,8 @@ export const gitApi = {
       rev: revs?.length ? revs : null,
     }),
   getBranches: (repoPath: string) => invoke<BranchList>("get_branches", { repoPath }),
-  getWorkdirDiff: (repoPath: string, path: string, staged: boolean) =>
-    invoke<FileDiff>("get_workdir_diff", { repoPath, path, staged }),
+  getWorkdirDiff: (repoPath: string, path: string, staged: boolean, ignoreWhitespace = false) =>
+    invoke<FileDiff>("get_workdir_diff", { repoPath, path, staged, ignoreWhitespace }),
   listDirectory: (repoPath: string, path: string) =>
     invoke<DirEntry[]>("list_directory", { repoPath, path }),
   readFile: (repoPath: string, path: string) => invoke<FileText>("read_file", { repoPath, path }),
@@ -96,12 +96,12 @@ export const gitApi = {
     invoke<CommitSummary[]>("file_commits", { repoPath, path, limit, skip }),
   getCommitDetails: (repoPath: string, oid: string) =>
     invoke<CommitDetails>("get_commit_details", { repoPath, oid }),
-  getCommitDiff: (repoPath: string, oid: string, path: string) =>
-    invoke<FileDiff>("get_commit_diff", { repoPath, oid, path }),
+  getCommitDiff: (repoPath: string, oid: string, path: string, ignoreWhitespace = false) =>
+    invoke<FileDiff>("get_commit_diff", { repoPath, oid, path, ignoreWhitespace }),
   compareRevisions: (repoPath: string, base: string, head: string) =>
     invoke<CommitFile[]>("compare_revisions", { repoPath, base, head }),
-  compareFileDiff: (repoPath: string, base: string, head: string, path: string) =>
-    invoke<FileDiff>("compare_file_diff", { repoPath, base, head, path }),
+  compareFileDiff: (repoPath: string, base: string, head: string, path: string, ignoreWhitespace = false) =>
+    invoke<FileDiff>("compare_file_diff", { repoPath, base, head, path, ignoreWhitespace }),
   stagePaths: (repoPath: string, paths: string[]) =>
     invoke<WorkspaceSnapshot>("stage_paths", { repoPath, paths }),
   unstagePaths: (repoPath: string, paths: string[]) =>
@@ -223,8 +223,8 @@ export const gitApi = {
     invoke<WorkspaceSnapshot>("stash_drop", { repoPath, id }),
   getStashDetails: (repoPath: string, oid: string) =>
     invoke<StashDetails>("get_stash_details", { repoPath, oid }),
-  getStashDiff: (repoPath: string, oid: string, path: string) =>
-    invoke<FileDiff>("get_stash_diff", { repoPath, oid, path }),
+  getStashDiff: (repoPath: string, oid: string, path: string, ignoreWhitespace = false) =>
+    invoke<FileDiff>("get_stash_diff", { repoPath, oid, path, ignoreWhitespace }),
   getGitIdentity: () => invoke<GitIdentity>("get_git_identity"),
   setGitIdentity: (identity: GitIdentity) =>
     invoke<GitIdentity>("set_git_identity", { identity }),

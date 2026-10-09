@@ -217,6 +217,10 @@ export interface AppPrefs {
   pullRebase: boolean;
   /** Group changed files by folder instead of listing them flat. */
   changesTree: boolean;
+  /** Show diffs side by side. */
+  diffSplit: boolean;
+  /** Hide whitespace-only changes in diffs; line staging is off while set. */
+  diffIgnoreWhitespace: boolean;
 }
 
 export interface RemoteInfo {

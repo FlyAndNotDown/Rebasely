@@ -30,6 +30,40 @@ export function changeRange(lines: DiffLine[], from: number, to: number): number
   return picked;
 }
 
+export type SplitRow =
+  | { kind: "hunk"; index: number }
+  | { kind: "pair"; left: number | null; right: number | null };
+
+/**
+ * Rows for a side-by-side view: context on both sides, and each run of
+ * removals paired line by line with the additions that follow it.
+ */
+export function splitRows(lines: DiffLine[]): SplitRow[] {
+  const rows: SplitRow[] = [];
+  let index = 0;
+  while (index < lines.length) {
+    const line = lines[index];
+    if (line.kind === "hunk") {
+      rows.push({ kind: "hunk", index });
+      index += 1;
+      continue;
+    }
+    if (line.kind !== "delete" && line.kind !== "add") {
+      rows.push({ kind: "pair", left: index, right: index });
+      index += 1;
+      continue;
+    }
+    const deletes: number[] = [];
+    while (index < lines.length && lines[index].kind === "delete") deletes.push(index++);
+    const adds: number[] = [];
+    while (index < lines.length && lines[index].kind === "add") adds.push(index++);
+    for (let pair = 0; pair < Math.max(deletes.length, adds.length); pair += 1) {
+      rows.push({ kind: "pair", left: deletes[pair] ?? null, right: adds[pair] ?? null });
+    }
+  }
+  return rows;
+}
+
 export function lineRefs(lines: DiffLine[], indices: Iterable<number>): LineRef[] {
   const refs: LineRef[] = [];
   for (const index of [...indices].sort((left, right) => left - right)) {

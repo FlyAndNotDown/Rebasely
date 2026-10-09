@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { diffLineSpans, textColumns } from "./diff-text";
+import { diffLineSpans, languageFor, styleSpans, textColumns } from "./diff-text";
 
 function assert(condition: boolean, message: string) {
   expect(condition, message).toBe(true);
@@ -82,6 +82,42 @@ describe("diffLineSpans", () => {
   it("highlights code after an inserted line", insertedReturnHighlightsFollowingCode);
   it("keeps a typed tab highlighted", tabTypedOnALineStaysHighlighted);
   it("keeps shared indent plain", sharedIndentStaysPlain);
+});
+
+describe("styleSpans", () => {
+  it("cuts change spans at token boundaries and keeps both marks", () => {
+    const styled = styleSpans(
+      [
+        { text: "let x", changed: false },
+        { text: " = 1", changed: true },
+      ],
+      [
+        { start: 0, end: 3, cls: "keyword" },
+        { start: 8, end: 9, cls: "number" },
+      ],
+    );
+    expect(styled.map((span) => [span.text, span.changed, span.cls])).toEqual([
+      ["let", false, "keyword"],
+      [" x", false, null],
+      [" = ", true, null],
+      ["1", true, "number"],
+    ]);
+  });
+
+  it("passes spans through when there are no tokens", () => {
+    expect(styleSpans([{ text: "a", changed: true }], null)).toEqual([{ text: "a", changed: true, cls: null }]);
+  });
+});
+
+describe("languageFor", () => {
+  it("maps extensions and well-known file names", () => {
+    expect(languageFor("Source/Game/Actor.h")).toBe("cpp");
+    expect(languageFor("src/App.tsx")).toBe("tsx");
+    expect(languageFor("Shaders/Common.ush")).toBe("hlsl");
+    expect(languageFor("docker/Dockerfile")).toBe("docker");
+    expect(languageFor("Content/Level.umap")).toBeNull();
+    expect(languageFor("LICENSE")).toBeNull();
+  });
 });
 
 describe("textColumns", () => {

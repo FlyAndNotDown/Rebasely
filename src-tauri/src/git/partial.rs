@@ -180,7 +180,7 @@ pub fn apply_lines(
     }
     let result = (|| {
         let patch = {
-            let diff = change_diff(repo, &rel, staged)?;
+            let diff = change_diff(repo, &rel, staged, false)?;
             selected_patch(&diff, &rel, lines, reverse)?
         };
         let mut args = vec!["apply", "--recount", "--whitespace=nowarn"];

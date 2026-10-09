@@ -330,14 +330,15 @@ function FileHistoryPane({ repoPath, path, pin }: { repoPath: string; path: stri
 
   // Before a rename the file had another name, and its diff lives under that one.
   const diffPath = commits.find((commit) => commit.id === selectedId)?.path ?? path;
-  const diffKey = selectedId ? `${selectedId}\0${diffPath}` : null;
+  const ignoreWhitespace = useGitSelect((state) => state.prefs.diffIgnoreWhitespace);
+  const diffKey = selectedId ? `${selectedId}\0${diffPath}\0${ignoreWhitespace}` : null;
   const diff = loadedDiff && loadedDiff.key === diffKey ? loadedDiff.diff : null;
 
   useEffect(() => {
     if (!selectedId || !diffKey) return;
     let cancelled = false;
     void gitApi
-      .getCommitDiff(repoPath, selectedId, diffPath)
+      .getCommitDiff(repoPath, selectedId, diffPath, ignoreWhitespace)
       .then((next) => {
         if (!cancelled) setLoadedDiff({ key: diffKey, diff: next });
       })
@@ -347,7 +348,7 @@ function FileHistoryPane({ repoPath, path, pin }: { repoPath: string; path: stri
     return () => {
       cancelled = true;
     };
-  }, [diffKey, diffPath, repoPath, selectedId]);
+  }, [diffKey, diffPath, ignoreWhitespace, repoPath, selectedId]);
 
   return (
     <ResizablePanelGroup

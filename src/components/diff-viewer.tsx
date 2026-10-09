@@ -1,4 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { Columns2Icon, PilcrowIcon } from "lucide-react";
 import { ConflictEditor } from "@/components/conflict-editor";
 import { DiffSkeleton } from "@/components/skeletons";
 import { Button } from "@/components/ui/button";
@@ -11,12 +12,50 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { changeRange, hunkChanges, isChange, lineRefs } from "@/lib/diff-select";
-import { diffLineSpans, textColumns, type TextSpan } from "@/lib/diff-text";
+import { changeRange, hunkChanges, isChange, lineRefs, splitRows, type SplitRow } from "@/lib/diff-select";
+import {
+  diffLineSpans,
+  languageFor,
+  styleSpans,
+  textColumns,
+  type StyledSpan,
+  type TextSpan,
+  type TokenRange,
+} from "@/lib/diff-text";
 import { useWindowedRows } from "@/lib/use-windowed-rows";
 import { cn } from "@/lib/utils";
-import { useGitPick } from "@/state/git-context";
-import type { FileDiff, LineAction, LineRef } from "@/types/git";
+import { useGitPick, useGitSelect } from "@/state/git-context";
+import type { DiffLine, FileDiff, LineAction, LineRef } from "@/types/git";
+
+type Highlighter = (lines: { kind: string; text: string }[], language: string) => TokenRange[][] | null;
+let loadedHighlighter: Highlighter | null = null;
+function loadHighlighter(): Promise<Highlighter> {
+  return import("@/lib/highlight").then((module) => (loadedHighlighter = module.highlightDiff));
+}
+
+/** Syntax ranges per line, once the highlighter has loaded; null for unknown languages. */
+function useSyntaxRanges(diff: FileDiff, spans: TextSpan[][]) {
+  const language = languageFor(diff.path);
+  const [highlighter, setHighlighter] = useState<Highlighter | null>(() => loadedHighlighter);
+  useEffect(() => {
+    if (!language || highlighter) return;
+    let live = true;
+    void loadHighlighter().then((next) => {
+      if (live) setHighlighter(() => next);
+    });
+    return () => {
+      live = false;
+    };
+  }, [highlighter, language]);
+  return useMemo(() => {
+    if (!language || !highlighter) return null;
+    const texts = diff.lines.map((line, index) => ({
+      kind: line.kind,
+      text: (spans[index] ?? []).map((span) => span.text).join(""),
+    }));
+    return highlighter(texts, language);
+  }, [diff, highlighter, language, spans]);
+}
 
 export type DiffSource = "changes" | "history" | "stash";
 
@@ -44,7 +83,9 @@ export function DiffViewer({ source }: { source: DiffSource }) {
     stashDetails,
     snapshot,
     comparison,
+    prefs,
     applyLines,
+    setDiffOptions,
   } = useGitPick([
     "changeSelection",
     "historySelection",
@@ -56,8 +97,11 @@ export function DiffViewer({ source }: { source: DiffSource }) {
     "stashDetails",
     "snapshot",
     "comparison",
+    "prefs",
     "applyLines",
+    "setDiffOptions",
   ]);
+  const ignoreWhitespace = prefs.diffIgnoreWhitespace;
   const comparing = source === "history" && comparison != null;
   const selection = comparing
     ? comparison.path
@@ -86,13 +130,15 @@ export function DiffViewer({ source }: { source: DiffSource }) {
   const changeStaged = changeSelection?.staged ?? false;
   const changeKind = changeFile?.kind;
   const lineActions = useMemo<DiffLineActions | undefined>(() => {
-    if (!changePath || !changeKind || !LINE_KINDS.has(changeKind)) return undefined;
+    // A whitespace-blind diff cannot be turned back into a patch that applies.
+    if (ignoreWhitespace || !changePath || !changeKind || !LINE_KINDS.has(changeKind)) return undefined;
     return {
       staged: changeStaged,
       allowDiscard: !changeStaged && changeKind !== "untracked",
       onApply: (action, lines) => applyLines(changePath, changeStaged, action, lines),
     };
-  }, [applyLines, changeKind, changePath, changeStaged]);
+  }, [applyLines, changeKind, changePath, changeStaged, ignoreWhitespace]);
+  const textual = Boolean(diff && !diff.binary && !conflicted);
 
   if (source === "stash") {
     if (!stashSelection) {
@@ -145,11 +191,43 @@ export function DiffViewer({ source }: { source: DiffSource }) {
             </div>
           ) : null}
         </div>
-        {selection.type === "change" ? (
-          <span className="text-[11px] text-muted-foreground">
-            {selection.staged ? "Staged" : "Unstaged"}
-          </span>
-        ) : null}
+        <div className="flex shrink-0 items-center gap-1">
+          {selection.type === "change" ? (
+            <span className="mr-1 text-[11px] text-muted-foreground">
+              {selection.staged ? "Staged" : "Unstaged"}
+            </span>
+          ) : null}
+          {textual ? (
+            <>
+              <Button
+                type="button"
+                size="icon-xs"
+                variant={prefs.diffSplit ? "secondary" : "ghost"}
+                aria-pressed={prefs.diffSplit}
+                aria-label="Side by side"
+                title="Side by side"
+                onClick={() => void setDiffOptions({ split: !prefs.diffSplit })}
+              >
+                <Columns2Icon />
+              </Button>
+              <Button
+                type="button"
+                size="icon-xs"
+                variant={ignoreWhitespace ? "secondary" : "ghost"}
+                aria-pressed={ignoreWhitespace}
+                aria-label="Hide whitespace changes"
+                title={
+                  ignoreWhitespace
+                    ? "Whitespace changes are hidden; line staging is off until they are shown"
+                    : "Hide whitespace changes"
+                }
+                onClick={() => void setDiffOptions({ ignoreWhitespace: !ignoreWhitespace })}
+              >
+                <PilcrowIcon />
+              </Button>
+            </>
+          ) : null}
+        </div>
       </div>
       {conflicted && selection.type === "change" ? (
         <ConflictEditor
@@ -182,13 +260,16 @@ export const DiffLines = memo(function DiffLines({
   diff: FileDiff;
   lineActions?: DiffLineActions;
 }) {
+  const split = useGitSelect((state) => state.prefs.diffSplit);
   const lineSpans = useMemo(() => diffLineSpans(diff.lines), [diff]);
+  const syntax = useSyntaxRanges(diff, lineSpans);
   const widest = useMemo(
     () => diff.lines.reduce((max, line) => Math.max(max, textColumns(line.content)), 0),
     [diff],
   );
   const hunks = useMemo(() => hunkChanges(diff.lines), [diff]);
-  const rows = useWindowedRows(diff.lines.length, DIFF_ROW_HEIGHT);
+  const pairs = useMemo(() => (split ? splitRows(diff.lines) : null), [diff, split]);
+  const rows = useWindowedRows(pairs ? pairs.length : diff.lines.length, DIFF_ROW_HEIGHT);
   // Picks belong to one diff; a reloaded diff starts with none.
   const [picks, setPicks] = useState<{ diff: FileDiff; set: ReadonlySet<number>; anchor: number | null }>(
     () => ({ diff, set: NO_PICKS, anchor: null }),
@@ -254,6 +335,130 @@ export const DiffLines = memo(function DiffLines({
 
   const forward: LineAction = lineActions?.staged ? "unstage" : "stage";
   const forwardLabel = forward === "stage" ? "Stage" : "Unstage";
+  const highlighted = Boolean(syntax);
+
+  function gutterProps(index: number) {
+    const line = diff.lines[index];
+    if (!lineActions || !isChange(line)) return {};
+    return {
+      role: "checkbox" as const,
+      "aria-checked": picked.has(index),
+      "aria-label": `Select line ${line.newLineno ?? line.oldLineno}`,
+      onMouseDown: (event: MouseEvent) => pressLine(event, index),
+      onMouseEnter: (event: MouseEvent) => enterLine(event, index),
+    };
+  }
+
+  function gutterClass(index: number) {
+    const selectable = Boolean(lineActions) && isChange(diff.lines[index]);
+    return cn(
+      "select-none",
+      selectable && "cursor-pointer hover:bg-diff-hunk/15",
+      picked.has(index) && "bg-diff-hunk/25",
+    );
+  }
+
+  function lineText(index: number, clip = false) {
+    return (
+      <DiffLineText
+        spans={styleSpans(lineSpans[index] ?? [], syntax?.[index])}
+        kind={diff.lines[index].kind}
+        clip={clip}
+      />
+    );
+  }
+
+  function hunkActions(index: number) {
+    const hunkLines = hunks.get(index);
+    if (!lineActions || !hunkLines?.length) return null;
+    return (
+      <span className="sticky right-2 ml-auto flex shrink-0 gap-1 pl-4 font-sans">
+        <HunkButton disabled={busy} onClick={() => request(forward, hunkLines)}>
+          {`${forwardLabel} hunk`}
+        </HunkButton>
+        {lineActions.allowDiscard ? (
+          <HunkButton disabled={busy} onClick={() => request("discard", hunkLines)}>
+            Discard hunk
+          </HunkButton>
+        ) : null}
+      </span>
+    );
+  }
+
+  function unifiedRow(index: number) {
+    const line = diff.lines[index];
+    return (
+      <div
+        key={index}
+        className={cn(
+          "grid h-5 grid-cols-[3rem_3rem_1.25rem_minmax(0,1fr)] px-2",
+          rowTone(line, highlighted),
+          picked.has(index) && "shadow-[inset_3px_0_0_var(--diff-hunk)]",
+        )}
+      >
+        <span className={cn("col-span-3 grid grid-cols-[3rem_3rem_1.25rem]", gutterClass(index))} {...gutterProps(index)}>
+          <span className="pr-2 text-right text-muted-foreground/70 tabular-nums">
+            {line.kind === "hunk" ? "" : line.oldLineno ?? ""}
+          </span>
+          <span className="pr-2 text-right text-muted-foreground/70 tabular-nums">
+            {line.kind === "hunk" ? "" : line.newLineno ?? ""}
+          </span>
+          <span className={cn("text-center", markerTone(line))}>{marker(line)}</span>
+        </span>
+        {line.kind === "hunk" ? (
+          <span className="flex min-w-0 items-center">
+            <span className="whitespace-pre">{line.content}</span>
+            {hunkActions(index)}
+          </span>
+        ) : (
+          lineText(index)
+        )}
+      </div>
+    );
+  }
+
+  function splitSide(index: number | null, side: "left" | "right") {
+    if (index === null) {
+      return <span className={cn("bg-muted/30", side === "right" && "border-l border-border/60")} />;
+    }
+    const line = diff.lines[index];
+    return (
+      <span
+        className={cn(
+          "grid min-w-0 grid-cols-[3rem_1.25rem_minmax(0,1fr)]",
+          rowTone(line, highlighted),
+          picked.has(index) && "shadow-[inset_3px_0_0_var(--diff-hunk)]",
+          side === "right" && "border-l border-border/60",
+        )}
+      >
+        <span className={cn("col-span-2 grid grid-cols-[3rem_1.25rem]", gutterClass(index))} {...gutterProps(index)}>
+          <span className="pr-2 text-right text-muted-foreground/70 tabular-nums">
+            {(side === "left" ? line.oldLineno : line.newLineno) ?? ""}
+          </span>
+          <span className={cn("text-center", markerTone(line))}>{marker(line)}</span>
+        </span>
+        {lineText(index, true)}
+      </span>
+    );
+  }
+
+  function splitRow(row: SplitRow, key: number) {
+    if (row.kind === "hunk") {
+      return (
+        <div key={key} className="flex h-5 items-center bg-muted/50 px-2 text-diff-hunk">
+          <span className="w-[4.25rem] shrink-0" />
+          <span className="whitespace-pre">{diff.lines[row.index].content}</span>
+          {hunkActions(row.index)}
+        </div>
+      );
+    }
+    return (
+      <div key={key} className="grid h-5 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] px-2">
+        {splitSide(row.left, "left")}
+        {splitSide(row.right, "right")}
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -278,74 +483,16 @@ export const DiffLines = memo(function DiffLines({
       <ScrollArea className="min-h-0 flex-1" viewportRef={rows.viewportRef}>
         <pre
           className="font-mono text-[12px] leading-5 [tab-size:4]"
-          style={{ minWidth: `calc(${DIFF_GUTTER} + ${widest}ch)` }}
+          style={{
+            minWidth: pairs
+              ? `calc(2 * (4.25rem + ${widest}ch) + 1rem)`
+              : `calc(${DIFF_GUTTER} + ${widest}ch)`,
+          }}
         >
           <div style={{ height: rows.before }} />
-          {diff.lines.slice(rows.start, rows.end).map((line, offset) => {
-            const index = rows.start + offset;
-            const selectable = Boolean(lineActions) && isChange(line);
-            const isPicked = picked.has(index);
-            const hunkLines = line.kind === "hunk" ? hunks.get(index) : undefined;
-            const gutter = selectable
-              ? {
-                  onMouseDown: (event: MouseEvent) => pressLine(event, index),
-                  onMouseEnter: (event: MouseEvent) => enterLine(event, index),
-                }
-              : {};
-            return (
-              <div
-                key={index}
-                className={cn(
-                  "grid h-5 grid-cols-[3rem_3rem_1.25rem_minmax(0,1fr)] px-2",
-                  line.kind === "add" && "bg-diff-add-bg text-diff-add",
-                  line.kind === "delete" && "bg-diff-del-bg text-diff-del",
-                  line.kind === "hunk" && "bg-muted/50 text-diff-hunk",
-                  isPicked && "shadow-[inset_3px_0_0_var(--diff-hunk)]",
-                )}
-              >
-                <span
-                  className={cn(
-                    "col-span-3 grid grid-cols-[3rem_3rem_1.25rem] select-none",
-                    selectable && "cursor-pointer hover:bg-diff-hunk/15",
-                    isPicked && "bg-diff-hunk/25",
-                  )}
-                  role={selectable ? "checkbox" : undefined}
-                  aria-checked={selectable ? isPicked : undefined}
-                  aria-label={selectable ? `Select line ${line.newLineno ?? line.oldLineno}` : undefined}
-                  {...gutter}
-                >
-                  <span className="pr-2 text-right text-muted-foreground/70 tabular-nums">
-                    {line.kind === "hunk" ? "" : line.oldLineno ?? ""}
-                  </span>
-                  <span className="pr-2 text-right text-muted-foreground/70 tabular-nums">
-                    {line.kind === "hunk" ? "" : line.newLineno ?? ""}
-                  </span>
-                  <span className="text-center">
-                    {line.kind === "add" ? "+" : line.kind === "delete" ? "-" : line.kind === "hunk" ? "" : " "}
-                  </span>
-                </span>
-                {line.kind === "hunk" ? (
-                  <span className="flex min-w-0 items-center">
-                    <span className="whitespace-pre">{line.content}</span>
-                    {lineActions && hunkLines?.length ? (
-                      <span className="sticky right-2 ml-auto flex shrink-0 gap-1 pl-4 font-sans">
-                        <HunkButton disabled={busy} onClick={() => request(forward, hunkLines)}>
-                          {`${forwardLabel} hunk`}
-                        </HunkButton>
-                        {lineActions.allowDiscard ? (
-                          <HunkButton disabled={busy} onClick={() => request("discard", hunkLines)}>
-                            Discard hunk
-                          </HunkButton>
-                        ) : null}
-                      </span>
-                    ) : null}
-                  </span>
-                ) : (
-                  <DiffLineText spans={lineSpans[index] ?? []} kind={line.kind} />
-                )}
-              </div>
-            );
-          })}
+          {pairs
+            ? pairs.slice(rows.start, rows.end).map((row, offset) => splitRow(row, rows.start + offset))
+            : diff.lines.slice(rows.start, rows.end).map((_, offset) => unifiedRow(rows.start + offset))}
           <div style={{ height: rows.after }} />
           {diff.truncated ? (
             <div className="px-3 py-2 text-muted-foreground">Diff truncated</div>
@@ -404,16 +551,40 @@ function HunkButton({
   );
 }
 
-function DiffLineText({ spans, kind }: { spans: TextSpan[]; kind: string }) {
+function rowTone(line: DiffLine, highlighted: boolean) {
+  // Syntax colors replace the green and red text; the background still marks the change.
+  if (line.kind === "add") return cn("bg-diff-add-bg", highlighted ? "text-foreground" : "text-diff-add");
+  if (line.kind === "delete") return cn("bg-diff-del-bg", highlighted ? "text-foreground" : "text-diff-del");
+  if (line.kind === "hunk") return "bg-muted/50 text-diff-hunk";
+  return undefined;
+}
+
+function markerTone(line: DiffLine) {
+  if (line.kind === "add") return "text-diff-add";
+  if (line.kind === "delete") return "text-diff-del";
+  return undefined;
+}
+
+function marker(line: DiffLine) {
+  if (line.kind === "add") return "+";
+  if (line.kind === "delete") return "-";
+  return line.kind === "hunk" ? "" : " ";
+}
+
+function DiffLineText({ spans, kind, clip }: { spans: StyledSpan[]; kind: string; clip?: boolean }) {
   const body = spans.map((span, index) => {
     if (!span.text) return null;
     const tone = span.tone ?? (span.changed ? kind : "");
     const mark = tone === "add" ? "bg-diff-add-char" : tone === "delete" ? "bg-diff-del-char" : undefined;
     return (
-      <span key={index} className={mark}>
+      <span key={index} className={cn(mark, span.cls && `tok-${span.cls}`)}>
         {span.text}
       </span>
     );
   });
-  return <span className="whitespace-pre">{body.every((part) => part === null) ? " " : body}</span>;
+  return (
+    <span className={cn("whitespace-pre", clip && "overflow-hidden")}>
+      {body.every((part) => part === null) ? " " : body}
+    </span>
+  );
 }

@@ -4,6 +4,134 @@ export interface TextSpan {
   tone?: "add" | "delete";
 }
 
+/** A syntax token within one line, by character offsets into the line's displayed text. */
+export interface TokenRange {
+  start: number;
+  end: number;
+  cls: string;
+}
+
+export interface StyledSpan extends TextSpan {
+  cls: string | null;
+}
+
+/** Splits change spans at token boundaries so each piece carries both marks. */
+export function styleSpans(spans: TextSpan[], ranges: TokenRange[] | null | undefined): StyledSpan[] {
+  if (!ranges?.length) return spans.map((span) => ({ ...span, cls: null }));
+  const out: StyledSpan[] = [];
+  let offset = 0;
+  let next = 0;
+  for (const span of spans) {
+    const end = offset + span.text.length;
+    let cursor = offset;
+    while (cursor < end) {
+      while (next < ranges.length && ranges[next].end <= cursor) next += 1;
+      const range = ranges[next];
+      let stop = end;
+      let cls: string | null = null;
+      if (range && range.start <= cursor) {
+        stop = Math.min(end, range.end);
+        cls = range.cls;
+      } else if (range && range.start < end) {
+        stop = range.start;
+      }
+      out.push({ ...span, text: span.text.slice(cursor - offset, stop - offset), cls });
+      cursor = stop;
+    }
+    offset = end;
+  }
+  return out;
+}
+
+const LANGUAGE_BY_EXTENSION: Record<string, string> = {
+  c: "c",
+  h: "cpp",
+  cc: "cpp",
+  cpp: "cpp",
+  cxx: "cpp",
+  hpp: "cpp",
+  hh: "cpp",
+  hxx: "cpp",
+  inl: "cpp",
+  ipp: "cpp",
+  cs: "csharp",
+  java: "java",
+  kt: "kotlin",
+  kts: "kotlin",
+  swift: "swift",
+  js: "javascript",
+  mjs: "javascript",
+  cjs: "javascript",
+  jsx: "jsx",
+  ts: "typescript",
+  mts: "typescript",
+  cts: "typescript",
+  tsx: "tsx",
+  json: "json",
+  jsonc: "json",
+  uproject: "json",
+  uplugin: "json",
+  rs: "rust",
+  py: "python",
+  go: "go",
+  rb: "ruby",
+  lua: "lua",
+  sql: "sql",
+  css: "css",
+  scss: "scss",
+  html: "markup",
+  htm: "markup",
+  xml: "markup",
+  svg: "markup",
+  vue: "markup",
+  xaml: "markup",
+  csproj: "markup",
+  vcxproj: "markup",
+  props: "markup",
+  targets: "markup",
+  md: "markdown",
+  markdown: "markdown",
+  yml: "yaml",
+  yaml: "yaml",
+  toml: "toml",
+  ini: "ini",
+  cfg: "ini",
+  sh: "bash",
+  bash: "bash",
+  zsh: "bash",
+  ps1: "powershell",
+  psm1: "powershell",
+  bat: "batch",
+  cmd: "batch",
+  glsl: "glsl",
+  vert: "glsl",
+  frag: "glsl",
+  hlsl: "hlsl",
+  usf: "hlsl",
+  ush: "hlsl",
+  proto: "protobuf",
+  graphql: "graphql",
+  gql: "graphql",
+  cmake: "cmake",
+};
+
+const LANGUAGE_BY_NAME: Record<string, string> = {
+  dockerfile: "docker",
+  makefile: "makefile",
+  gnumakefile: "makefile",
+  "cmakelists.txt": "cmake",
+  ".gitignore": "ignore",
+};
+
+/** The Prism language for a path, or null when it has none worth highlighting. */
+export function languageFor(path: string): string | null {
+  const name = (path.split("/").pop() ?? path).toLowerCase();
+  if (LANGUAGE_BY_NAME[name]) return LANGUAGE_BY_NAME[name] === "ignore" ? null : LANGUAGE_BY_NAME[name];
+  const dot = name.lastIndexOf(".");
+  if (dot < 0) return null;
+  return LANGUAGE_BY_EXTENSION[name.slice(dot + 1)] ?? null;
+}
+
 export function diffLineSpans(lines: { kind: string; content: string }[]): TextSpan[][] {
   const spans = lines.map((line) => emphasizeWhitespace(line));
   let index = 0;

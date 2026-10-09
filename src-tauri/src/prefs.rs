@@ -40,6 +40,10 @@ pub struct AppPrefs {
     pub pull_rebase: bool,
     #[serde(default)]
     pub changes_tree: bool,
+    #[serde(default)]
+    pub diff_split: bool,
+    #[serde(default)]
+    pub diff_ignore_whitespace: bool,
 }
 
 fn default_terminal_id() -> String {
@@ -63,6 +67,8 @@ impl Default for AppPrefs {
             panel_layouts: PanelLayouts::default(),
             pull_rebase: false,
             changes_tree: false,
+            diff_split: false,
+            diff_ignore_whitespace: false,
         }
     }
 }

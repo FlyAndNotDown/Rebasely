@@ -178,6 +178,7 @@ interface GitContextValue {
   stashPop: (id: string) => Promise<void>;
   stashDrop: (id: string) => Promise<void>;
   updatePrefs: (prefs: AppPrefs) => Promise<AppPrefs>;
+  setDiffOptions: (options: { split?: boolean; ignoreWhitespace?: boolean }) => Promise<void>;
   updatePanelLayout: (id: PanelLayoutId, layout: PanelLayout) => void;
 }
 
@@ -869,7 +870,12 @@ export function GitProvider({ children }: { children: ReactNode }) {
               const selection = current?.changeSelection;
               if (selection && shouldReloadWorkdirDiff(job, next, selection.path)) {
                 try {
-                  changeDiff = await gitApi.getWorkdirDiff(next, selection.path, selection.staged);
+                  changeDiff = await gitApi.getWorkdirDiff(
+                    next,
+                    selection.path,
+                    selection.staged,
+                    prefsRef.current.diffIgnoreWhitespace,
+                  );
                 } catch {
                   changeDiff = null;
                 }
@@ -993,7 +999,12 @@ export function GitProvider({ children }: { children: ReactNode }) {
         ...(samePath ? {} : { changeDiff: null }),
       });
       try {
-        const changeDiff = await gitApi.getWorkdirDiff(repoPath, path, staged);
+        const changeDiff = await gitApi.getWorkdirDiff(
+          repoPath,
+          path,
+          staged,
+          prefsRef.current.diffIgnoreWhitespace,
+        );
         if (changeLoadGen.current !== generation) return;
         patchSession(tabId, { changeDiff });
       } catch (error) {
@@ -1069,7 +1080,12 @@ export function GitProvider({ children }: { children: ReactNode }) {
           return;
         }
         patchActivity(activityId, { label: "Loading file diff", detail: first.path });
-        const historyDiff = await gitApi.getCommitDiff(repoPath, id, first.path);
+        const historyDiff = await gitApi.getCommitDiff(
+          repoPath,
+          id,
+          first.path,
+          prefsRef.current.diffIgnoreWhitespace,
+        );
         if (historyLoadGen.current !== generation) return;
         startTransition(() => {
           patchSession(tabId, { historyDiff }, generation);
@@ -1143,7 +1159,12 @@ export function GitProvider({ children }: { children: ReactNode }) {
         startTransition(() => {
           patchSession(tabId, { historyDiff: null }, generation);
         });
-        const historyDiff = await gitApi.getCommitDiff(repoPath, id, path);
+        const historyDiff = await gitApi.getCommitDiff(
+          repoPath,
+          id,
+          path,
+          prefsRef.current.diffIgnoreWhitespace,
+        );
         if (historyLoadGen.current !== generation) return;
         startTransition(() => {
           patchSession(tabId, { commitDetails: details, historyDiff }, generation);
@@ -1180,7 +1201,13 @@ export function GitProvider({ children }: { children: ReactNode }) {
           historyDiff: first?.binary ? emptyBinaryDiff(first.path, first.oldPath) : null,
         });
         if (!first || first.binary) return;
-        const historyDiff = await gitApi.compareFileDiff(repoPath, base.rev, head.rev, first.path);
+        const historyDiff = await gitApi.compareFileDiff(
+          repoPath,
+          base.rev,
+          head.rev,
+          first.path,
+          prefsRef.current.diffIgnoreWhitespace,
+        );
         if (compareLoadGen.current !== generation) return;
         patchSession(tabId, { historyDiff });
       } catch (error) {
@@ -1237,6 +1264,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
           current.base.rev,
           current.head.rev,
           path,
+          prefsRef.current.diffIgnoreWhitespace,
         );
         if (compareLoadGen.current !== generation) return;
         patchSession(tabId, { historyDiff });
@@ -1296,7 +1324,12 @@ export function GitProvider({ children }: { children: ReactNode }) {
         );
         if (!first || first.binary) return;
         patchActivity(activityId, { label: "Loading file diff", detail: first.path });
-        const stashDiff = await gitApi.getStashDiff(repoPath, stash.id, first.path);
+        const stashDiff = await gitApi.getStashDiff(
+          repoPath,
+          stash.id,
+          first.path,
+          prefsRef.current.diffIgnoreWhitespace,
+        );
         if (stashLoadGen.current !== generation) return;
         patchSession(tabId, { stashDiff }, generation, "stash");
       } catch (error) {
@@ -1344,7 +1377,12 @@ export function GitProvider({ children }: { children: ReactNode }) {
 
       const activityId = beginActivity("Loading file diff", path);
       try {
-        const stashDiff = await gitApi.getStashDiff(repoPath, id, path);
+        const stashDiff = await gitApi.getStashDiff(
+          repoPath,
+          id,
+          path,
+          prefsRef.current.diffIgnoreWhitespace,
+        );
         if (stashLoadGen.current !== generation) return;
         patchSession(tabId, { stashDiff }, generation, "stash");
       } catch (error) {
@@ -1382,6 +1420,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
                 repoPath,
                 changeSelection.path,
                 changeSelection.staged,
+                prefsRef.current.diffIgnoreWhitespace,
               );
             } catch {
               changeDiff = null;
@@ -2095,6 +2134,76 @@ export function GitProvider({ children }: { children: ReactNode }) {
     [flushPrefs],
   );
 
+  /** Refetches the diffs on screen, e.g. after the whitespace option changes. */
+  const reloadDiffs = useCallback(async () => {
+    const repoPath = activeRepoPath();
+    const tabId = activeTabIdRef.current;
+    const current = sessionsRef.current[tabId];
+    if (!repoPath || !current) return;
+    const ws = prefsRef.current.diffIgnoreWhitespace;
+    const jobs: Promise<void>[] = [];
+    const change = current.changeSelection;
+    if (change) {
+      const generation = ++changeLoadGen.current;
+      jobs.push(
+        gitApi.getWorkdirDiff(repoPath, change.path, change.staged, ws).then((changeDiff) => {
+          if (changeLoadGen.current === generation) patchSession(tabId, { changeDiff });
+        }),
+      );
+    }
+    const comparison = current.comparison;
+    const history = current.historySelection;
+    if (comparison?.path) {
+      const generation = ++compareLoadGen.current;
+      jobs.push(
+        gitApi
+          .compareFileDiff(repoPath, comparison.base.rev, comparison.head.rev, comparison.path, ws)
+          .then((historyDiff) => {
+            if (compareLoadGen.current === generation) patchSession(tabId, { historyDiff });
+          }),
+      );
+    } else if (history?.path && current.historyDiff && !current.historyDiff.binary) {
+      const generation = ++historyLoadGen.current;
+      jobs.push(
+        gitApi.getCommitDiff(repoPath, history.id, history.path, ws).then((historyDiff) => {
+          patchSession(tabId, { historyDiff }, generation);
+        }),
+      );
+    }
+    const stash = current.stashSelection;
+    if (stash?.path && current.stashDiff && !current.stashDiff.binary) {
+      const generation = ++stashLoadGen.current;
+      jobs.push(
+        gitApi.getStashDiff(repoPath, stash.id, stash.path, ws).then((stashDiff) => {
+          patchSession(tabId, { stashDiff }, generation, "stash");
+        }),
+      );
+    }
+    try {
+      await Promise.all(jobs);
+    } catch (error) {
+      toast.error(errorMessage(error));
+    }
+  }, [activeRepoPath, patchSession]);
+
+  const setDiffOptions = useCallback(
+    async (options: { split?: boolean; ignoreWhitespace?: boolean }) => {
+      const before = prefsRef.current;
+      await updatePrefs({
+        ...before,
+        diffSplit: options.split ?? before.diffSplit,
+        diffIgnoreWhitespace: options.ignoreWhitespace ?? before.diffIgnoreWhitespace,
+      });
+      if (
+        options.ignoreWhitespace !== undefined &&
+        options.ignoreWhitespace !== before.diffIgnoreWhitespace
+      ) {
+        await reloadDiffs();
+      }
+    },
+    [reloadDiffs, updatePrefs],
+  );
+
   const updatePanelLayout = useCallback((id: PanelLayoutId, layout: PanelLayout) => {
     const current = prefsRef.current;
     if (sameLayout(current.panelLayouts[id], layout)) return;
@@ -2215,6 +2324,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       stashPop,
       stashDrop,
       updatePrefs,
+      setDiffOptions,
       updatePanelLayout,
     }),
     [
@@ -2288,6 +2398,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       stashPop,
       stashDrop,
       updatePrefs,
+      setDiffOptions,
       updatePanelLayout,
     ],
   );

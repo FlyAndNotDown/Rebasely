@@ -135,6 +135,16 @@ pub(super) fn diff_options_for(path: &str, include_untracked: bool) -> DiffOptio
     opts
 }
 
+/// Options for a diff that is only displayed. Hiding whitespace makes it unfit
+/// for building patches, so line staging always uses `diff_options_for`.
+pub(super) fn view_options_for(path: &str, include_untracked: bool, ignore_whitespace: bool) -> DiffOptions {
+    let mut opts = diff_options_for(path, include_untracked);
+    if ignore_whitespace {
+        opts.ignore_whitespace(true);
+    }
+    opts
+}
+
 /// The diff shown for a changed file: HEAD to index when `staged`, otherwise
 /// index to working tree. Line staging rebuilds patches from this same diff,
 /// so the line numbers the UI sends always match.
@@ -142,8 +152,9 @@ pub(super) fn change_diff<'repo>(
     repo: &'repo Repository,
     rel: &str,
     staged: bool,
+    ignore_whitespace: bool,
 ) -> AppResult<git2::Diff<'repo>> {
-    let mut opts = diff_options_for(rel, !staged);
+    let mut opts = view_options_for(rel, !staged, ignore_whitespace);
     Ok(if staged {
         let head_tree = match repo.head() {
             Ok(head) => Some(head.peel_to_tree()?),
@@ -156,9 +167,14 @@ pub(super) fn change_diff<'repo>(
     })
 }
 
-pub fn workdir_diff(repo: &Repository, path: &str, staged: bool) -> AppResult<FileDiff> {
+pub fn workdir_diff(
+    repo: &Repository,
+    path: &str,
+    staged: bool,
+    ignore_whitespace: bool,
+) -> AppResult<FileDiff> {
     let rel = to_git_path(path);
-    let diff = change_diff(repo, &rel, staged)?;
+    let diff = change_diff(repo, &rel, staged, ignore_whitespace)?;
     let file_diff = collect_patch(diff, &rel)?;
     if !staged && !file_diff.binary && file_diff.lines.is_empty() {
         if let Some(fallback) = untracked_workdir_diff(repo, &rel)? {
@@ -440,16 +456,22 @@ pub fn compare_file_diff(
     base: &str,
     head: &str,
     path: &str,
+    ignore_whitespace: bool,
 ) -> AppResult<FileDiff> {
     let base_tree = peel_commit(repo, base.trim())?.tree()?;
     let head_tree = peel_commit(repo, head.trim())?.tree()?;
     let rel = to_git_path(path);
-    let mut opts = diff_options_for(&rel, false);
+    let mut opts = view_options_for(&rel, false, ignore_whitespace);
     let diff = repo.diff_tree_to_tree(Some(&base_tree), Some(&head_tree), Some(&mut opts))?;
     collect_patch(diff, &rel)
 }
 
-pub fn commit_file_diff(repo: &Repository, oid: &str, path: &str) -> AppResult<FileDiff> {
+pub fn commit_file_diff(
+    repo: &Repository,
+    oid: &str,
+    path: &str,
+    ignore_whitespace: bool,
+) -> AppResult<FileDiff> {
     let oid = Oid::from_str(oid.trim())?;
     let commit = repo.find_commit(oid)?;
     let tree = commit.tree()?;
@@ -459,7 +481,7 @@ pub fn commit_file_diff(repo: &Repository, oid: &str, path: &str) -> AppResult<F
         None
     };
     let rel = to_git_path(path);
-    let mut opts = diff_options_for(&rel, false);
+    let mut opts = view_options_for(&rel, false, ignore_whitespace);
     let diff = repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), Some(&mut opts))?;
     collect_patch(diff, &rel)
 }

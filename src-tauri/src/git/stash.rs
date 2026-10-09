@@ -125,10 +125,15 @@ pub fn stash_details(repo: &Repository, oid: &str) -> AppResult<StashDetails> {
     })
 }
 
-pub fn stash_file_diff(repo: &Repository, oid: &str, path: &str) -> AppResult<FileDiff> {
+pub fn stash_file_diff(
+    repo: &Repository,
+    oid: &str,
+    path: &str,
+    ignore_whitespace: bool,
+) -> AppResult<FileDiff> {
     let parsed = Oid::from_str(oid.trim())?;
     let commit = repo.find_commit(parsed)?;
-    let tracked = commit_file_diff(repo, oid, path)?;
+    let tracked = commit_file_diff(repo, oid, path, ignore_whitespace)?;
     if tracked.binary || !tracked.lines.is_empty() {
         return Ok(tracked);
     }
@@ -136,7 +141,7 @@ pub fn stash_file_diff(repo: &Repository, oid: &str, path: &str) -> AppResult<Fi
         if let Ok(untracked) = commit.parent(2) {
             let tree = untracked.tree()?;
             let rel = to_git_path(path);
-            let mut opts = diff_options_for(&rel, false);
+            let mut opts = view_options_for(&rel, false, ignore_whitespace);
             let diff = repo.diff_tree_to_tree(None, Some(&tree), Some(&mut opts))?;
             let file_diff = collect_patch(diff, &rel)?;
             if file_diff.binary || !file_diff.lines.is_empty() {

@@ -19,6 +19,8 @@ export const defaultPrefs: AppPrefs = {
   panelLayouts: { ...DEFAULT_PANEL_LAYOUTS },
   pullRebase: false,
   changesTree: false,
+  diffSplit: false,
+  diffIgnoreWhitespace: false,
 };
 
 export function normalizeSidebarOrder(order?: string[] | null): string[] {
@@ -96,5 +98,7 @@ export function normalizePrefs(prefs: Partial<AppPrefs> | null | undefined): App
     panelLayouts: normalizePanelLayouts(prefs?.panelLayouts),
     pullRebase: prefs?.pullRebase === true,
     changesTree: prefs?.changesTree === true,
+    diffSplit: prefs?.diffSplit === true,
+    diffIgnoreWhitespace: prefs?.diffIgnoreWhitespace === true,
   };
 }
