@@ -1,5 +1,6 @@
 import { AppHeader } from "@/components/app-header";
 import { AppSidebar } from "@/components/app-sidebar";
+import { AskpassDialog } from "@/components/askpass-dialog";
 import { WelcomeScreen } from "@/components/welcome-screen";
 import { Workspace } from "@/components/workspace";
 import { WELCOME_TAB_ID, useGitPick } from "@/state/git-context";
@@ -20,6 +21,7 @@ export default function App() {
           )}
         </div>
       </div>
+      <AskpassDialog />
     </div>
   );
 }

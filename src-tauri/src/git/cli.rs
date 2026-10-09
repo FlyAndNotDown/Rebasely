@@ -10,7 +10,7 @@ fn cancel_tokens() -> &'static Mutex<HashMap<String, Arc<AtomicBool>>> {
 }
 
 thread_local! {
-    static CURRENT_CANCEL: RefCell<Option<Arc<AtomicBool>>> = const { RefCell::new(None) };
+    static CURRENT_CANCEL: RefCell<Option<(String, Arc<AtomicBool>)>> = const { RefCell::new(None) };
 }
 
 struct CancelScope {
@@ -38,7 +38,7 @@ pub fn with_cancel<T>(activity_id: Option<&str>, f: impl FnOnce() -> T) -> T {
         .lock()
         .unwrap_or_else(|err| err.into_inner())
         .insert(id.to_string(), token.clone());
-    CURRENT_CANCEL.with(|current| *current.borrow_mut() = Some(token));
+    CURRENT_CANCEL.with(|current| *current.borrow_mut() = Some((id.to_string(), token)));
     let _scope = CancelScope { id: id.to_string() };
     f()
 }
@@ -54,7 +54,7 @@ pub fn cancel_activity(id: &str) -> bool {
     }
 }
 
-fn current_cancel() -> Option<Arc<AtomicBool>> {
+fn current_cancel() -> Option<(String, Arc<AtomicBool>)> {
     CURRENT_CANCEL.with(|current| current.borrow().clone())
 }
 
@@ -220,7 +220,11 @@ pub(super) fn run_git_progress(
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         command.creation_flags(CREATE_NO_WINDOW);
     }
-    let cancel = current_cancel();
+    let scope = current_cancel();
+    for (key, value) in crate::askpass::git_env(scope.as_ref().map(|(id, _)| id.as_str())) {
+        command.env(key, value);
+    }
+    let cancel = scope.map(|(_, token)| token);
     let started = SystemTime::now();
     let mut child = command
         .spawn()

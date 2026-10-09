@@ -1,3 +1,4 @@
+mod askpass;
 mod error;
 mod fsutil;
 mod git;
@@ -93,6 +94,17 @@ async fn clone_repository(
 #[tauri::command]
 fn cancel_activity(id: String) -> bool {
     git::cancel_activity(&id)
+}
+
+#[tauri::command]
+fn answer_askpass(id: u64, answer: Option<String>) -> AppResult<()> {
+    askpass::answer(id, answer)
+}
+
+/// Runs the askpass helper mode when git or ssh launched this executable for a
+/// credential prompt.
+pub fn askpass_client() -> Option<i32> {
+    askpass::run_client()
 }
 
 #[tauri::command]
@@ -717,6 +729,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(WatchState::default())
         .setup(|app| {
+            askpass::start(app.handle());
             if let Some(window) = app.get_webview_window("main") {
                 apply_window_chrome(&window, true);
                 if let Ok(icon) = Image::from_bytes(APP_ICON_PNG) {
@@ -736,6 +749,7 @@ pub fn run() {
             save_session,
             clone_repository,
             cancel_activity,
+            answer_askpass,
             open_repository,
             refresh_workspace,
             get_commits,

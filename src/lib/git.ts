@@ -71,6 +71,8 @@ export const gitApi = {
       activityId: activityId || null,
     }),
   cancelActivity: (id: string) => invoke<boolean>("cancel_activity", { id }),
+  answerAskpass: (id: number, answer: string | null) =>
+    invoke<void>("answer_askpass", { id, answer }),
   refreshWorkspace: (repoPath: string) =>
     invoke<WorkspaceSnapshot>("refresh_workspace", { repoPath }),
   getCommits: (repoPath: string, limit = 80, skip = 0, query?: string, revs?: string[] | null) =>
