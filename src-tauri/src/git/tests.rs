@@ -890,6 +890,131 @@ fn ignoring_appends_new_patterns_once_and_hides_the_files() {
     let _ = fs::remove_dir_all(&root);
 }
 
+fn numbered_lines(count: usize) -> String {
+    (1..=count).map(|n| format!("line {n}\n")).collect()
+}
+
+/// Picks the changed lines in the displayed diff whose text matches `pick`.
+fn pick_lines(repo: &Repository, path: &str, staged: bool, pick: impl Fn(&str) -> bool) -> Vec<LineRef> {
+    workdir_diff(repo, path, staged)
+        .unwrap()
+        .lines
+        .iter()
+        .filter(|line| matches!(line.kind.as_str(), "add" | "delete") && pick(&line.content))
+        .map(|line| LineRef {
+            old: if line.kind == "delete" { line.old_lineno } else { None },
+            new: if line.kind == "add" { line.new_lineno } else { None },
+        })
+        .collect()
+}
+
+#[test]
+fn staging_selected_lines_leaves_the_rest_unstaged() {
+    let (root, mut repo) = temp_repo();
+    commit_file(&mut repo, &root, "file.txt", &numbered_lines(20), "base");
+    let edited = numbered_lines(20)
+        .replace("line 2\n", "line two\nline two and a half\n")
+        .replace("line 15\n", "line fifteen\n");
+    fs::write(root.join("file.txt"), &edited).unwrap();
+
+    let lines = pick_lines(&repo, "file.txt", false, |text| text == "line 2" || text == "line two");
+    assert_eq!(lines.len(), 2);
+    apply_lines(&mut repo, "file.txt", false, "stage", &lines).unwrap();
+
+    let expected_index = numbered_lines(20).replace("line 2\n", "line two\n");
+    assert_eq!(blob_text(&repo, ":file.txt"), expected_index);
+    assert_eq!(workdir_text(&root, "file.txt"), edited);
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn unstaging_and_discarding_selected_lines_touch_only_those_lines() {
+    let (root, mut repo) = temp_repo();
+    commit_file(&mut repo, &root, "file.txt", &numbered_lines(20), "base");
+    let edited = numbered_lines(20)
+        .replace("line 2\n", "line two\n")
+        .replace("line 15\n", "line fifteen\n");
+    fs::write(root.join("file.txt"), &edited).unwrap();
+    stage_paths(&repo, &["file.txt".into()]).unwrap();
+
+    let fifteen = pick_lines(&repo, "file.txt", true, |text| text.contains("15") || text.contains("fifteen"));
+    apply_lines(&mut repo, "file.txt", true, "unstage", &fifteen).unwrap();
+    assert_eq!(
+        blob_text(&repo, ":file.txt"),
+        numbered_lines(20).replace("line 2\n", "line two\n")
+    );
+
+    let unstaged = pick_lines(&repo, "file.txt", false, |_| true);
+    apply_lines(&mut repo, "file.txt", false, "discard", &unstaged).unwrap();
+    assert_eq!(
+        workdir_text(&root, "file.txt"),
+        numbered_lines(20).replace("line 2\n", "line two\n")
+    );
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn part_of_a_new_file_can_be_staged() {
+    let (root, mut repo) = temp_repo();
+    commit_file(&mut repo, &root, "base.txt", "base\n", "base");
+    fs::write(root.join("new.txt"), "alpha\nbeta\ngamma\n").unwrap();
+    let diff = workdir_diff(&repo, "new.txt", false).unwrap();
+    assert_eq!(diff.lines[0].kind, "hunk");
+    assert_eq!(diff.lines.len(), 4);
+
+    let picked = pick_lines(&repo, "new.txt", false, |text| text != "beta");
+    apply_lines(&mut repo, "new.txt", false, "stage", &picked).unwrap();
+    assert_eq!(blob_text(&repo, ":new.txt"), "alpha\ngamma\n");
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn a_last_line_without_a_newline_can_be_staged() {
+    let (root, mut repo) = temp_repo();
+    commit_file(&mut repo, &root, "file.txt", "one\ntwo", "base");
+    fs::write(root.join("file.txt"), "one\nTWO").unwrap();
+    let picked = pick_lines(&repo, "file.txt", false, |_| true);
+    apply_lines(&mut repo, "file.txt", false, "stage", &picked).unwrap();
+    assert_eq!(blob_text(&repo, ":file.txt"), "one\nTWO");
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn line_actions_work_on_crlf_working_trees() {
+    let (root, mut repo) = temp_repo();
+    repo.config().unwrap().set_bool("core.autocrlf", true).unwrap();
+    fs::write(root.join("file.txt"), numbered_lines(12).replace('\n', "\r\n")).unwrap();
+    stage_paths(&repo, &["file.txt".into()]).unwrap();
+    commit(&repo, "base", false).unwrap();
+    let edited = numbered_lines(12)
+        .replace("line 1\n", "line one\n")
+        .replace("line 11\n", "line eleven\n")
+        .replace('\n', "\r\n");
+    fs::write(root.join("file.txt"), &edited).unwrap();
+
+    let first = pick_lines(&repo, "file.txt", false, |text| text.ends_with(" 1") || text == "line one");
+    apply_lines(&mut repo, "file.txt", false, "stage", &first).unwrap();
+    assert_eq!(blob_text(&repo, ":file.txt"), numbered_lines(12).replace("line 1\n", "line one\n"));
+
+    let rest = pick_lines(&repo, "file.txt", false, |_| true);
+    apply_lines(&mut repo, "file.txt", false, "discard", &rest).unwrap();
+    let on_disk = fs::read_to_string(root.join("file.txt")).unwrap();
+    assert_eq!(on_disk, numbered_lines(12).replace("line 1\n", "line one\n").replace('\n', "\r\n"));
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn stale_line_selections_are_rejected() {
+    let (root, mut repo) = temp_repo();
+    commit_file(&mut repo, &root, "file.txt", "one\ntwo\n", "base");
+    fs::write(root.join("file.txt"), "one\nTWO\n").unwrap();
+    let stale = vec![LineRef { old: Some(40), new: None }];
+    let err = apply_lines(&mut repo, "file.txt", false, "stage", &stale).unwrap_err();
+    assert!(err.to_string().contains("no longer changes"), "{err}");
+    assert!(apply_lines(&mut repo, "file.txt", true, "stage", &stale).is_err());
+    let _ = fs::remove_dir_all(&root);
+}
+
 #[test]
 fn tags_go_through_git_and_reject_bad_names() {
     let (root, mut repo) = temp_repo();

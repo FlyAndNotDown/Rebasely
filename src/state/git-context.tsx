@@ -62,6 +62,8 @@ import type {
   CompareRevision,
   RevisionComparison,
   FileDiff,
+  LineAction,
+  LineRef,
   RecentRepo,
   RebaseStep,
   StashDetails,
@@ -139,6 +141,7 @@ interface GitContextValue {
   stage: (paths: string[]) => Promise<void>;
   unstage: (paths: string[]) => Promise<void>;
   discard: (paths: string[]) => Promise<void>;
+  applyLines: (path: string, staged: boolean, action: LineAction, lines: LineRef[]) => Promise<boolean>;
   commit: (message: string, amend?: boolean) => Promise<boolean>;
   checkoutBranch: (name: string) => Promise<void>;
   fetchRemote: (remote?: string) => Promise<void>;
@@ -1445,6 +1448,20 @@ export function GitProvider({ children }: { children: ReactNode }) {
     [patchSession, runMutation],
   );
 
+  const applyLines = useCallback(
+    async (path: string, staged: boolean, action: LineAction, lines: LineRef[]) => {
+      const count = lines.length === 1 ? "1 line" : `${lines.length} lines`;
+      const label =
+        action === "stage" ? `Staging ${count}` : action === "unstage" ? `Unstaging ${count}` : `Discarding ${count}`;
+      return runMutation(
+        label,
+        (repoPath) => gitApi.applyLines(repoPath, path, staged, action, lines),
+        action === "discard" ? `Discarded ${count}` : undefined,
+      );
+    },
+    [runMutation],
+  );
+
   const commit = useCallback(
     async (message: string, amend = false) => {
       const ok = await runMutation(
@@ -2162,6 +2179,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       stage,
       unstage,
       discard,
+      applyLines,
       commit,
       checkoutBranch,
       fetchRemote,
@@ -2234,6 +2252,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       stage,
       unstage,
       discard,
+      applyLines,
       commit,
       checkoutBranch,
       fetchRemote,

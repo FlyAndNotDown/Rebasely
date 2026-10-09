@@ -135,10 +135,16 @@ pub(super) fn diff_options_for(path: &str, include_untracked: bool) -> DiffOptio
     opts
 }
 
-pub fn workdir_diff(repo: &Repository, path: &str, staged: bool) -> AppResult<FileDiff> {
-    let rel = to_git_path(path);
-    let mut opts = diff_options_for(&rel, !staged);
-    let diff = if staged {
+/// The diff shown for a changed file: HEAD to index when `staged`, otherwise
+/// index to working tree. Line staging rebuilds patches from this same diff,
+/// so the line numbers the UI sends always match.
+pub(super) fn change_diff<'repo>(
+    repo: &'repo Repository,
+    rel: &str,
+    staged: bool,
+) -> AppResult<git2::Diff<'repo>> {
+    let mut opts = diff_options_for(rel, !staged);
+    Ok(if staged {
         let head_tree = match repo.head() {
             Ok(head) => Some(head.peel_to_tree()?),
             Err(err) if err.code() == ErrorCode::UnbornBranch => None,
@@ -147,7 +153,12 @@ pub fn workdir_diff(repo: &Repository, path: &str, staged: bool) -> AppResult<Fi
         repo.diff_tree_to_index(head_tree.as_ref(), None, Some(&mut opts))?
     } else {
         repo.diff_index_to_workdir(None, Some(&mut opts))?
-    };
+    })
+}
+
+pub fn workdir_diff(repo: &Repository, path: &str, staged: bool) -> AppResult<FileDiff> {
+    let rel = to_git_path(path);
+    let diff = change_diff(repo, &rel, staged)?;
     let file_diff = collect_patch(diff, &rel)?;
     if !staged && !file_diff.binary && file_diff.lines.is_empty() {
         if let Some(fallback) = untracked_workdir_diff(repo, &rel)? {
@@ -191,20 +202,30 @@ pub(super) fn untracked_workdir_diff(repo: &Repository, path: &str) -> AppResult
     }
 
     let text = String::from_utf8_lossy(&bytes);
+    let body = text.strip_suffix('\n').unwrap_or(&text);
     let mut lines = Vec::new();
     let mut truncated = cut;
-    for (index, line) in text.split('\n').enumerate() {
-        if lines.len() >= MAX_DIFF_LINES {
-            truncated = true;
-            break;
-        }
-        let content = line.strip_suffix('\r').unwrap_or(line).to_string();
+    if !text.is_empty() {
+        let total = body.split('\n').count();
         lines.push(DiffLine {
-            kind: "add".to_string(),
-            content,
+            kind: "hunk".to_string(),
+            content: format!("@@ -0,0 +1,{total} @@"),
             old_lineno: None,
-            new_lineno: Some((index + 1) as u32),
+            new_lineno: None,
         });
+        for (index, line) in body.split('\n').enumerate() {
+            if lines.len() > MAX_DIFF_LINES {
+                truncated = true;
+                break;
+            }
+            let content = line.strip_suffix('\r').unwrap_or(line).to_string();
+            lines.push(DiffLine {
+                kind: "add".to_string(),
+                content,
+                old_lineno: None,
+                new_lineno: Some((index + 1) as u32),
+            });
+        }
     }
     Ok(Some(FileDiff {
         path: path.to_string(),

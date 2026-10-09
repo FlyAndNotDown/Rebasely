@@ -16,6 +16,8 @@ import type {
   FileDiff,
   StashDetails,
   GitIdentity,
+  LineAction,
+  LineRef,
   RecentRepo,
   RemoteProbe,
   TerminalOption,
@@ -104,6 +106,8 @@ export const gitApi = {
     invoke<WorkspaceSnapshot>("stage_paths", { repoPath, paths }),
   unstagePaths: (repoPath: string, paths: string[]) =>
     invoke<WorkspaceSnapshot>("unstage_paths", { repoPath, paths }),
+  applyLines: (repoPath: string, path: string, staged: boolean, action: LineAction, lines: LineRef[]) =>
+    invoke<WorkspaceSnapshot>("apply_lines", { repoPath, path, staged, action, lines }),
   discardPaths: (repoPath: string, paths: string[]) =>
     invoke<WorkspaceSnapshot>("discard_paths", { repoPath, paths }),
   commit: (repoPath: string, message: string, amend = false) =>

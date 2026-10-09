@@ -98,6 +98,14 @@ export interface DiffLine {
   newLineno: number | null;
 }
 
+/** A changed line picked for staging: an addition by its new number, a removal by its old one. */
+export interface LineRef {
+  old: number | null;
+  new: number | null;
+}
+
+export type LineAction = "stage" | "unstage" | "discard";
+
 export interface FileDiff {
   path: string;
   oldPath: string | null;

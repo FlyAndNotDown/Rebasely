@@ -229,6 +229,20 @@ async fn unstage_paths(repo_path: String, paths: Vec<String>) -> AppResult<Works
 }
 
 #[tauri::command]
+async fn apply_lines(
+    repo_path: String,
+    path: String,
+    staged: bool,
+    action: String,
+    lines: Vec<git::LineRef>,
+) -> AppResult<WorkspaceSnapshot> {
+    with_repo_async(repo_path, move |repo| {
+        git::apply_lines(repo, &path, staged, &action, &lines)
+    })
+    .await
+}
+
+#[tauri::command]
 async fn discard_paths(repo_path: String, paths: Vec<String>) -> AppResult<WorkspaceSnapshot> {
     with_repo_async(repo_path, move |repo| {
         git::discard_paths(repo, &paths)?;
@@ -780,6 +794,7 @@ pub fn run() {
             stage_paths,
             unstage_paths,
             discard_paths,
+            apply_lines,
             commit_changes,
             checkout_branch,
             fetch_remote,
