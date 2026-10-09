@@ -1,6 +1,7 @@
 import { AppHeader } from "@/components/app-header";
 import { AppSidebar } from "@/components/app-sidebar";
 import { AskpassDialog } from "@/components/askpass-dialog";
+import { CommandCenter } from "@/components/command-palette";
 import { ReflogDialog } from "@/components/lazy-dialogs";
 import { WelcomeScreen } from "@/components/welcome-screen";
 import { Workspace } from "@/components/workspace";
@@ -28,6 +29,7 @@ export default function App() {
         </div>
       </div>
       <AskpassDialog />
+      <CommandCenter />
       <ReflogDialog
         open={openPanel === "reflog" && activeTabId !== WELCOME_TAB_ID}
         onOpenChange={(open) => setOpenPanel(open ? "reflog" : null)}

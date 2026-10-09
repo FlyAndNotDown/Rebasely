@@ -60,6 +60,8 @@ export function AppHeader() {
     openInEditor,
     ensureBranches,
     checkoutBranch,
+    openPanel,
+    setOpenPanel,
   } = useGitPick([
     "snapshot",
     "tabs",
@@ -73,8 +75,11 @@ export function AppHeader() {
     "openInEditor",
     "ensureBranches",
     "checkoutBranch",
+    "openPanel",
+    "setOpenPanel",
   ]);
-  const [branchOpen, setBranchOpen] = useState(false);
+  const branchOpen = openPanel === "new-branch";
+  const setBranchOpen = (open: boolean) => setOpenPanel(open ? "new-branch" : null);
   const [branchMenuOpen, setBranchMenuOpen] = useState(false);
   const [branchQuery, setBranchQuery] = useState("");
   const repo = snapshot?.repo;

@@ -15,14 +15,17 @@ const itemMeta: Record<View, { label: string; icon: typeof CircleDotIcon }> = {
 };
 
 export function AppSidebar() {
-  const { view, setView, activeTab, prefs, updatePrefs } = useGitPick([
+  const { view, setView, activeTab, prefs, updatePrefs, openPanel, setOpenPanel } = useGitPick([
     "view",
     "setView",
     "activeTab",
     "prefs",
     "updatePrefs",
+    "openPanel",
+    "setOpenPanel",
   ]);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const settingsOpen = openPanel === "settings";
+  const setSettingsOpen = (open: boolean) => setOpenPanel(open ? "settings" : null);
   const [order, setOrder] = useState<View[]>(() => asViews(prefs.sidebarOrder));
   const [savedOrder, setSavedOrder] = useState(prefs.sidebarOrder);
   const [dragging, setDragging] = useState<View | null>(null);

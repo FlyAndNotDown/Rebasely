@@ -74,7 +74,7 @@ import type {
 } from "@/types/git";
 
 export { COMMIT_PAGE, WELCOME_TAB_ID, defaultFetchRemote, primaryRemote };
-export type Panel = "reflog" | "palette";
+export type Panel = "reflog" | "palette" | "settings" | "new-branch";
 export type { AppTab, PublishPrompt, RepoTab, ResetMode, StashSelection, View };
 
 function afterPaint() {
@@ -970,23 +970,6 @@ export function GitProvider({ children }: { children: ReactNode }) {
       unlisten?.();
     };
   }, [refreshRepo]);
-
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      const meta = event.ctrlKey || event.metaKey;
-      if (!meta) return;
-      if (event.key.toLowerCase() === "o") {
-        event.preventDefault();
-        void openFolder();
-      }
-      if (event.key.toLowerCase() === "w") {
-        event.preventDefault();
-        closeRepo();
-      }
-    }
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [closeRepo, openFolder]);
 
   const setView = useCallback(
     (view: View) => {
