@@ -155,7 +155,7 @@ interface GitContextValue {
   rebaseSkip: () => Promise<boolean>;
   rebaseAbort: () => Promise<boolean>;
   mergeRef: (onto: string, label: string) => Promise<boolean>;
-  operationContinue: () => Promise<boolean>;
+  operationContinue: (message?: string) => Promise<boolean>;
   operationAbort: () => Promise<boolean>;
   resolveConflict: (path: string, side: "ours" | "theirs" | "both") => Promise<boolean>;
   saveConflict: (path: string, text: string) => Promise<boolean>;
@@ -202,6 +202,13 @@ function createStore(initial: GitState): GitStore {
     },
   };
 }
+
+const OPERATION_FINISHED: Record<string, string> = {
+  merge: "Merge finished",
+  rebase: "Rebase finished",
+  "cherry-pick": "Cherry-pick finished",
+  revert: "Revert finished",
+};
 
 const NO_COMMITS: CommitSummary[] = [];
 const NO_REVS: string[] = [];
@@ -1768,12 +1775,12 @@ export function GitProvider({ children }: { children: ReactNode }) {
     [refreshAfterReplay, runMutation],
   );
 
-  const operationContinue = useCallback(async () => {
+  const operationContinue = useCallback(async (message?: string) => {
     const kind = sessionsRef.current[activeTabIdRef.current]?.snapshot?.repo.operation?.kind;
     const ok = await runMutation(
-      "Continuing",
-      (repoPath) => gitApi.operationContinue(repoPath),
-      kind === "merge" ? "Merge finished" : "Operation finished",
+      kind ? `Continuing ${kind}` : "Continuing",
+      (repoPath) => gitApi.operationContinue(repoPath, message),
+      (kind && OPERATION_FINISHED[kind]) || "Operation finished",
     );
     if (!ok) await refreshAfterReplay();
     return ok;

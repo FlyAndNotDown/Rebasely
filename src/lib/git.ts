@@ -180,8 +180,8 @@ export const gitApi = {
   rebaseAbort: (repoPath: string) => invoke<WorkspaceSnapshot>("rebase_abort", { repoPath }),
   mergeRef: (repoPath: string, onto: string) =>
     invoke<WorkspaceSnapshot>("merge_ref", { repoPath, onto }),
-  operationContinue: (repoPath: string) =>
-    invoke<WorkspaceSnapshot>("operation_continue", { repoPath }),
+  operationContinue: (repoPath: string, message?: string) =>
+    invoke<WorkspaceSnapshot>("operation_continue", { repoPath, message: message || null }),
   operationAbort: (repoPath: string) =>
     invoke<WorkspaceSnapshot>("operation_abort", { repoPath }),
   resolveConflict: (repoPath: string, path: string, side: "ours" | "theirs" | "both") =>

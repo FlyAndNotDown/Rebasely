@@ -73,6 +73,8 @@ pub struct GitOperation {
     pub onto: Option<String>,
     pub step: Option<u32>,
     pub total: Option<u32>,
+    /// The message git prepared for the commit that finishes this step.
+    pub message: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

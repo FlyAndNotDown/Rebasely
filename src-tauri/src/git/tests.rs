@@ -273,9 +273,13 @@ fn merge_conflict_can_take_ours_and_continue() {
     commit_file(&mut repo, &root, "file.txt", "right\n", "right");
     assert!(merge_ref(&mut repo, &incoming).unwrap_err().to_string().contains("conflicts"));
     assert_eq!(git_operation(&repo).unwrap().kind, "merge");
+    let prepared = git_operation(&repo).unwrap().message.unwrap();
+    assert!(prepared.starts_with("Merge commit"), "{prepared}");
+    assert!(!prepared.contains("Conflicts"), "{prepared}");
     resolve_conflict(&mut repo, "file.txt", "ours").unwrap();
-    operation_continue(&mut repo).unwrap();
+    operation_continue(&mut repo, None).unwrap();
     assert!(git_operation(&repo).is_none());
+    assert_eq!(head_summary(&repo), prepared.lines().next().unwrap());
     assert_eq!(
         fs::read_to_string(root.join("file.txt")).unwrap().replace("\r\n", "\n"),
         "right\n"
@@ -724,6 +728,69 @@ fn committing_during_a_merge_records_both_parents() {
     assert_eq!(head.parent_count(), 2);
     assert_eq!(head.summary(), Some("merge left"));
     assert!(git_operation(&repo).is_none());
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn continuing_a_cherry_pick_with_an_edited_message_keeps_the_author() {
+    let (root, mut repo) = temp_repo();
+    commit_file(&mut repo, &root, "file.txt", "base\n", "base");
+    create_branch(&repo, "side", true, None).unwrap();
+    fs::write(root.join("file.txt"), "side\n").unwrap();
+    stage_paths(&repo, &["file.txt".into()]).unwrap();
+    run_git_input(
+        &root,
+        &["-c", "user.name=Side Author", "-c", "user.email=side@example.com", "commit", "--file=-"],
+        b"side change",
+    )
+    .unwrap();
+    let picked = repo.head().unwrap().target().unwrap().to_string();
+    let main = repo
+        .branches(Some(BranchType::Local))
+        .unwrap()
+        .flatten()
+        .map(|(branch, _)| branch.name().unwrap().unwrap().to_string())
+        .find(|name| name != "side")
+        .unwrap();
+    checkout_branch(&repo, &main).unwrap();
+    commit_file(&mut repo, &root, "file.txt", "main\n", "main change");
+
+    assert!(cherry_pick_commit(&mut repo, &picked).is_err());
+    assert_eq!(git_operation(&repo).unwrap().message.as_deref(), Some("side change"));
+    resolve_conflict(&mut repo, "file.txt", "theirs").unwrap();
+    operation_continue(&mut repo, Some("side change, reworded")).unwrap();
+
+    assert!(git_operation(&repo).is_none());
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    assert_eq!(head.summary(), Some("side change, reworded"));
+    assert_eq!(head.author().name(), Some("Side Author"));
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn continuing_a_rebase_with_an_edited_message_uses_it() {
+    let (root, mut repo) = temp_repo();
+    commit_file(&mut repo, &root, "file.txt", "base\n", "base");
+    create_branch(&repo, "feature", true, None).unwrap();
+    commit_file(&mut repo, &root, "file.txt", "feature\n", "feature change");
+    let main = repo
+        .branches(Some(BranchType::Local))
+        .unwrap()
+        .flatten()
+        .map(|(branch, _)| branch.name().unwrap().unwrap().to_string())
+        .find(|name| name != "feature")
+        .unwrap();
+    checkout_branch(&repo, &main).unwrap();
+    commit_file(&mut repo, &root, "file.txt", "main\n", "main change");
+    checkout_branch(&repo, "feature").unwrap();
+
+    assert!(rebase_onto(&mut repo, &main).is_err());
+    assert_eq!(git_operation(&repo).unwrap().message.as_deref(), Some("feature change"));
+    resolve_conflict(&mut repo, "file.txt", "theirs").unwrap();
+    operation_continue(&mut repo, Some("feature change, rebased")).unwrap();
+
+    assert!(git_operation(&repo).is_none());
+    assert_eq!(head_summary(&repo), "feature change, rebased");
     let _ = fs::remove_dir_all(&root);
 }
 

@@ -138,10 +138,28 @@ pub fn merge_ref(repo: &mut Repository, spec: &str) -> AppResult<WorkspaceSnapsh
     snapshot(repo)
 }
 
-pub fn operation_continue(repo: &mut Repository) -> AppResult<WorkspaceSnapshot> {
+/// Finishes the current step. An edited `message` replaces the one git prepared.
+pub fn operation_continue(repo: &mut Repository, message: Option<&str>) -> AppResult<WorkspaceSnapshot> {
     let kind = git_operation(repo)
         .ok_or_else(|| AppError::msg("No merge, rebase, cherry-pick, or revert is in progress"))?
         .kind;
+    let message = message.map(str::trim).filter(|value| !value.is_empty());
+    if let Some(message) = message {
+        if kind == "rebase" {
+            // `rebase --continue` commits with rebase-merge/message.
+            let body = format!("{message}\n");
+            let rebase_dir = repo.path().join("rebase-merge");
+            if rebase_dir.is_dir() {
+                fs::write(rebase_dir.join("message"), &body)?;
+            }
+            fs::write(repo.path().join("MERGE_MSG"), &body)?;
+        } else {
+            // A plain `git commit` finishes a single merge, cherry-pick, or
+            // revert, keeping the extra parent or original author.
+            commit(repo, message, false)?;
+            return snapshot(repo);
+        }
+    }
     let flag = match kind.as_str() {
         "rebase" => "rebase",
         "merge" => "merge",
@@ -443,16 +461,19 @@ pub(super) fn rebase_progress(repo: &Repository) -> Option<RebaseProgress> {
 }
 
 pub(super) fn git_operation(repo: &Repository) -> Option<GitOperation> {
+    let git_dir = repo.path();
     if let Some(rebase) = rebase_progress(repo) {
+        let message = read_commit_message(&git_dir.join("rebase-merge").join("message"))
+            .or_else(|| read_commit_message(&git_dir.join("MERGE_MSG")));
         return Some(GitOperation {
             kind: "rebase".to_string(),
             head_name: rebase.head_name,
             onto: rebase.onto,
             step: rebase.step,
             total: rebase.total,
+            message,
         });
     }
-    let git_dir = repo.path();
     let marker = [
         ("MERGE_HEAD", "merge"),
         ("CHERRY_PICK_HEAD", "cherry-pick"),
@@ -470,7 +491,21 @@ pub(super) fn git_operation(repo: &Repository) -> Option<GitOperation> {
         onto,
         step: None,
         total: None,
+        message: read_commit_message(&git_dir.join("MERGE_MSG")),
     })
+}
+
+/// Reads a prepared commit message without the `#` comment lines git adds,
+/// such as the list of conflicted files.
+pub(super) fn read_commit_message(path: &Path) -> Option<String> {
+    let text = fs::read_to_string(path).ok()?;
+    let kept: Vec<&str> = text
+        .lines()
+        .take_while(|line| !line.starts_with("# ------------------------ >8"))
+        .filter(|line| !line.starts_with('#'))
+        .collect();
+    let message = kept.join("\n").trim().to_string();
+    (!message.is_empty()).then_some(message)
 }
 
 pub(super) fn ensure_rebase_ready(repo: &Repository) -> AppResult<()> {

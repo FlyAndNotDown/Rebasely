@@ -112,6 +112,7 @@ export function sameSnapshot(previous: WorkspaceSnapshot | null | undefined, nex
     before.operation?.onto !== after.operation?.onto ||
     before.operation?.step !== after.operation?.step ||
     before.operation?.total !== after.operation?.total ||
+    before.operation?.message !== after.operation?.message ||
     (previous.headCommit?.id ?? null) !== (next.headCommit?.id ?? null)
   ) {
     return false;

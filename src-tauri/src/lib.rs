@@ -448,8 +448,8 @@ async fn merge_ref(repo_path: String, onto: String) -> AppResult<WorkspaceSnapsh
 }
 
 #[tauri::command]
-async fn operation_continue(repo_path: String) -> AppResult<WorkspaceSnapshot> {
-    with_repo_async(repo_path, git::operation_continue).await
+async fn operation_continue(repo_path: String, message: Option<String>) -> AppResult<WorkspaceSnapshot> {
+    with_repo_async(repo_path, move |repo| git::operation_continue(repo, message.as_deref())).await
 }
 
 #[tauri::command]

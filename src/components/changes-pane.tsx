@@ -108,8 +108,25 @@ function headCommitMessage(snapshot: WorkspaceSnapshot) {
   return head.body ? `${head.summary}\n\n${head.body}` : head.summary;
 }
 
+const CONTINUE_LABEL: Record<string, string> = {
+  merge: "Continue merge",
+  rebase: "Continue rebase",
+  "cherry-pick": "Continue cherry-pick",
+  revert: "Continue revert",
+};
+
 export function ChangesPane() {
-  const { snapshot, changeSelection, selectChange, stage, unstage, discard, commit, pushRemote } = useGitPick([
+  const {
+    snapshot,
+    changeSelection,
+    selectChange,
+    stage,
+    unstage,
+    discard,
+    commit,
+    pushRemote,
+    operationContinue,
+  } = useGitPick([
     "snapshot",
     "changeSelection",
     "selectChange",
@@ -118,8 +135,16 @@ export function ChangesPane() {
     "discard",
     "commit",
     "pushRemote",
+    "operationContinue",
   ]);
-  const [message, setMessage] = useState("");
+  const operation = snapshot?.repo.operation ?? null;
+  const preparedMessage = operation?.message ?? "";
+  const [message, setMessage] = useState(preparedMessage);
+  const [shownPrepared, setShownPrepared] = useState(preparedMessage);
+  if (preparedMessage !== shownPrepared) {
+    setShownPrepared(preparedMessage);
+    if (!message.trim() || message === shownPrepared) setMessage(preparedMessage);
+  }
   const [amend, setAmend] = useState(false);
   const [committing, setCommitting] = useState(false);
   const [discardTarget, setDiscardTarget] = useState<string[] | null>(null);
@@ -128,11 +153,19 @@ export function ChangesPane() {
   const staged = snapshot?.status.staged ?? [];
   const unstaged = snapshot?.status.unstaged ?? [];
   const selectedChange = changeSelection;
-  const canAmend = Boolean(snapshot?.headCommit);
-  const canCommitAndPush = !committing && message.trim().length > 0 && staged.length > 0;
+  const conflicted = unstaged.some((file) => file.kind === "conflicted");
+  const canAmend = Boolean(snapshot?.headCommit) && !operation;
+  const canCommitAndPush =
+    !operation && !committing && message.trim().length > 0 && staged.length > 0;
   const canOpenCommitMenu = canCommitAndPush || canAmend;
-  const canCommit =
-    !committing && message.trim().length > 0 && (amend ? canAmend : staged.length > 0);
+  const canCommit = operation
+    ? !committing && !conflicted
+    : !committing && message.trim().length > 0 && (amend ? canAmend : staged.length > 0);
+  const primaryLabel = operation
+    ? (CONTINUE_LABEL[operation.kind] ?? "Continue")
+    : amend
+      ? "Amend"
+      : "Commit";
 
   const counts = useMemo(
     () => ({ staged: staged.length, unstaged: unstaged.length }),
@@ -153,9 +186,22 @@ export function ChangesPane() {
     }
   }
 
+  async function runContinue(next: string) {
+    setCommitting(true);
+    try {
+      const edited = next.trim() && next.trim() !== preparedMessage.trim() ? next : undefined;
+      if (await operationContinue(edited)) {
+        setMessage((current) => (current === next ? "" : current));
+      }
+    } finally {
+      setCommitting(false);
+    }
+  }
+
   function submitCommit() {
     if (!canCommit) return;
-    void runCommit(message, amend);
+    if (operation) void runContinue(message);
+    else void runCommit(message, amend);
   }
 
   function submitCommitAndPush() {
@@ -262,38 +308,45 @@ export function ChangesPane() {
             Discard all
           </Button>
           <div className="inline-flex overflow-hidden rounded-lg">
-            <Button type="submit" disabled={!canCommit} className="rounded-none">
-              {amend ? "Amend" : "Commit"}
+            <Button
+              type="submit"
+              disabled={!canCommit}
+              className="rounded-none"
+              title={operation && conflicted ? "Resolve every conflict first" : undefined}
+            >
+              {primaryLabel}
             </Button>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  type="button"
-                  disabled={!canOpenCommitMenu}
-                  aria-label="Commit options"
-                  className="rounded-none border-l border-primary-foreground/20 px-1.5"
-                >
-                  <ChevronDownIcon />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="min-w-max">
-                <DropdownMenuItem
-                  className="whitespace-nowrap"
-                  disabled={!canCommitAndPush}
-                  onClick={submitCommitAndPush}
-                >
-                  Commit and push
-                </DropdownMenuItem>
-                <DropdownMenuCheckboxItem
-                  checked={amend}
-                  disabled={!canAmend}
-                  className="whitespace-nowrap"
-                  onCheckedChange={(checked) => toggleAmend(checked === true)}
-                >
-                  Amend last commit
-                </DropdownMenuCheckboxItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            {operation ? null : (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    disabled={!canOpenCommitMenu}
+                    aria-label="Commit options"
+                    className="rounded-none border-l border-primary-foreground/20 px-1.5"
+                  >
+                    <ChevronDownIcon />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="min-w-max">
+                  <DropdownMenuItem
+                    className="whitespace-nowrap"
+                    disabled={!canCommitAndPush}
+                    onClick={submitCommitAndPush}
+                  >
+                    Commit and push
+                  </DropdownMenuItem>
+                  <DropdownMenuCheckboxItem
+                    checked={amend}
+                    disabled={!canAmend}
+                    className="whitespace-nowrap"
+                    onCheckedChange={(checked) => toggleAmend(checked === true)}
+                  >
+                    Amend last commit
+                  </DropdownMenuCheckboxItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
           </div>
         </div>
       </form>

@@ -27,6 +27,8 @@ export interface GitOperation {
   onto: string | null;
   step: number | null;
   total: number | null;
+  /** The message git prepared for the commit that finishes this step. */
+  message: string | null;
 }
 
 export interface RebaseProgress {
