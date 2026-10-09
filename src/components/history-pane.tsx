@@ -23,6 +23,7 @@ import {
   RotateCcwIcon,
   SearchIcon,
   Undo2Icon,
+  UndoDotIcon,
   UserIcon,
 } from "lucide-react";
 import { AuthorAvatar } from "@/components/author-avatar";
@@ -74,7 +75,8 @@ type CommitRowAction =
   | { type: "patch"; commit: CommitSummary }
   | { type: "rebase"; commit: CommitSummary }
   | { type: "merge"; commit: CommitSummary }
-  | { type: "interactive"; commit: CommitSummary };
+  | { type: "interactive"; commit: CommitSummary }
+  | { type: "undo" };
 
 const RESET_MODES: { id: ResetMode; label: string; detail: string }[] = [
   {
@@ -128,6 +130,7 @@ export function HistoryPane() {
     createPatch,
     openComparison,
     setOpenPanel,
+    undoLastCommit,
   } = useGitPick([
     "commits",
     "commitsHasMore",
@@ -144,6 +147,7 @@ export function HistoryPane() {
     "createPatch",
     "openComparison",
     "setOpenPanel",
+    "undoLastCommit",
   ]);
   const [query, setQuery] = useState("");
   const [applied, setApplied] = useState("");
@@ -165,6 +169,8 @@ export function HistoryPane() {
   const [rebaseTarget, setRebaseTarget] = useState<CommitSummary | null>(null);
   const [mergeTarget, setMergeTarget] = useState<CommitSummary | null>(null);
   const [interactiveTarget, setInteractiveTarget] = useState<CommitSummary | null>(null);
+  const [confirmUndo, setConfirmUndo] = useState(false);
+  const headPushed = Boolean(snapshot?.repo.upstream) && snapshot?.repo.ahead === 0;
   const canResetBranch = Boolean(snapshot?.repo.currentBranch) && !snapshot?.repo.isDetached;
   const canRebase = canResetBranch && !snapshot?.repo.operation;
   const currentBranch = snapshot?.repo.currentBranch;
@@ -258,9 +264,13 @@ export function HistoryPane() {
         case "interactive":
           setInteractiveTarget(action.commit);
           break;
+        case "undo":
+          if (headPushed) setConfirmUndo(true);
+          else void undoLastCommit();
+          break;
       }
     },
-    [createPatch, openComparison, selectCommit],
+    [createPatch, headPushed, openComparison, selectCommit, undoLastCommit],
   );
 
   const selectRows = useCallback(
@@ -440,6 +450,32 @@ export function HistoryPane() {
           if (!open) setBranchCommit(null);
         }}
       />
+      <Dialog open={confirmUndo} onOpenChange={setConfirmUndo}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Undo a pushed commit?</DialogTitle>
+            <DialogDescription>
+              {snapshot?.headCommit?.summary ? `“${snapshot.headCommit.summary}” ` : "The last commit "}
+              is already on {snapshot?.repo.upstream}. Undoing it here leaves the remote unchanged, so
+              publishing again needs a force push.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmUndo(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                setConfirmUndo(false);
+                void undoLastCommit();
+              }}
+            >
+              Undo commit
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <Dialog open={Boolean(confirm)} onOpenChange={(open) => !open && setConfirm(null)}>
         <DialogContent>
           <DialogHeader className="min-w-0">
@@ -688,6 +724,7 @@ const CommitRow = memo(function CommitRow({
   getSelectedCommits: () => CommitSummary[];
 }) {
   const message = [commit.summary, commit.body].filter(Boolean).join("\n\n");
+  const isHead = (commit.refs ?? []).some((ref) => ref.kind === "head");
 
   async function copyText(value: string, success: string) {
     if (!value) {
@@ -757,6 +794,12 @@ const CommitRow = memo(function CommitRow({
           <MultiCommitMenu getCommits={getSelectedCommits} onAction={onAction} />
         ) : (
         <>
+        {isHead ? (
+          <ContextMenuItem onClick={() => onAction({ type: "undo" })}>
+            <UndoDotIcon />
+            Undo
+          </ContextMenuItem>
+        ) : null}
         {canResetBranch ? (
           <ContextMenuItem onClick={() => onAction({ type: "reset", commit })}>
             <RotateCcwIcon />

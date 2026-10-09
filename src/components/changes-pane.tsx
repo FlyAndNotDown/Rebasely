@@ -110,11 +110,9 @@ export function ChangesPane() {
     runMergetool,
     updatePrefs,
     commitDraft,
-    undoLastCommit,
   } = useGitPick([
     "snapshot",
     "commitDraft",
-    "undoLastCommit",
     "changeSelection",
     "prefs",
     "selectChange",
@@ -147,9 +145,6 @@ export function ChangesPane() {
     setShownDraft(commitDraft.nonce);
     if (!message.trim()) setMessage(commitDraft.text);
   }
-  const [confirmUndo, setConfirmUndo] = useState(false);
-  // With an upstream and nothing ahead of it, HEAD is already pushed.
-  const headPushed = Boolean(snapshot?.repo.upstream) && snapshot?.repo.ahead === 0;
   const [amend, setAmend] = useState(false);
   const [committing, setCommitting] = useState(false);
   const [discardTarget, setDiscardTarget] = useState<string[] | null>(null);
@@ -772,16 +767,6 @@ export function ChangesPane() {
                   >
                     Amend last commit
                   </DropdownMenuCheckboxItem>
-                  <DropdownMenuItem
-                    className="whitespace-nowrap"
-                    disabled={!canAmend || committing}
-                    onClick={() => {
-                      if (headPushed) setConfirmUndo(true);
-                      else void undoLastCommit();
-                    }}
-                  >
-                    Undo last commit
-                  </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
             )}
@@ -814,33 +799,6 @@ export function ChangesPane() {
               }}
             >
               Discard
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={confirmUndo} onOpenChange={setConfirmUndo}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Undo a pushed commit?</DialogTitle>
-            <DialogDescription>
-              {snapshot?.headCommit?.summary ? `“${snapshot.headCommit.summary}” ` : "The last commit "}
-              is already on {snapshot?.repo.upstream}. Undoing it here leaves the remote unchanged, so
-              publishing again needs a force push.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setConfirmUndo(false)}>
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={() => {
-                setConfirmUndo(false);
-                void undoLastCommit();
-              }}
-            >
-              Undo commit
             </Button>
           </DialogFooter>
         </DialogContent>
