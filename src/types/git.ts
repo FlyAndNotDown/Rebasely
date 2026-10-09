@@ -230,6 +230,24 @@ export interface BlameHunk {
   time: number;
 }
 
+export interface SubmoduleInfo {
+  path: string;
+  url: string | null;
+  state: "clean" | "uninitialized" | "modified" | "conflicted" | string;
+  commit: string | null;
+}
+
+export interface WorktreeInfo {
+  path: string;
+  head: string | null;
+  branch: string | null;
+  detached: boolean;
+  locked: boolean;
+  prunable: boolean;
+  current: boolean;
+  main: boolean;
+}
+
 export interface ReflogEntry {
   /** `HEAD@{n}` */
   selector: string;

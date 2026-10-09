@@ -3,6 +3,7 @@ import { ArrowLeftRightIcon, ChevronRightIcon, EyeIcon, GitBranchIcon, PlusIcon,
 import { AddRemoteDialog } from "@/components/lazy-dialogs";
 import { CreateTagDialog } from "@/components/create-ref-dialogs";
 import { MergeDialog, RebaseOntoDialog } from "@/components/rebase-dialog";
+import { RepoStructure } from "@/components/repo-structure";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -334,6 +335,7 @@ export function HistoryBranches() {
             onDeleteBranches={setDeletingMany}
           />
         )}
+        {needle ? null : <RepoStructure />}
       </ScrollArea>
       <MergeDialog
         target={merging ? { onto: merging.name, label: merging.name } : null}

@@ -291,6 +291,59 @@ async fn commit_changes(
 }
 
 #[tauri::command]
+async fn list_submodules(repo_path: String) -> AppResult<Vec<git::SubmoduleInfo>> {
+    with_repo_async(repo_path, |repo| git::list_submodules(repo)).await
+}
+
+#[tauri::command]
+async fn update_submodules(
+    repo_path: String,
+    paths: Option<Vec<String>>,
+    activity_id: Option<String>,
+    app: AppHandle,
+) -> AppResult<WorkspaceSnapshot> {
+    with_repo_async(repo_path, move |repo| {
+        git::with_cancel(activity_id.as_deref(), || {
+            git::update_submodules(
+                repo,
+                paths.as_deref().unwrap_or(&[]),
+                progress_sink(&app, activity_id.as_deref()),
+            )
+        })
+    })
+    .await
+}
+
+#[tauri::command]
+async fn list_worktrees(repo_path: String) -> AppResult<Vec<git::WorktreeInfo>> {
+    with_repo_async(repo_path, |repo| git::list_worktrees(repo)).await
+}
+
+#[tauri::command]
+async fn add_worktree(
+    repo_path: String,
+    path: String,
+    branch: Option<String>,
+    new_branch: Option<String>,
+    start: Option<String>,
+) -> AppResult<String> {
+    with_repo_async(repo_path, move |repo| {
+        git::add_worktree(repo, &path, branch.as_deref(), new_branch.as_deref(), start.as_deref())
+    })
+    .await
+}
+
+#[tauri::command]
+async fn remove_worktree(repo_path: String, path: String, force: Option<bool>) -> AppResult<()> {
+    with_repo_async(repo_path, move |repo| git::remove_worktree(repo, &path, force.unwrap_or(false))).await
+}
+
+#[tauri::command]
+async fn prune_worktrees(repo_path: String) -> AppResult<()> {
+    with_repo_async(repo_path, |repo| git::prune_worktrees(repo)).await
+}
+
+#[tauri::command]
 async fn head_reflog(repo_path: String, limit: Option<usize>) -> AppResult<Vec<git::ReflogEntry>> {
     with_repo_async(repo_path, move |repo| git::head_reflog(repo, limit.unwrap_or(200))).await
 }
@@ -924,6 +977,12 @@ pub fn run() {
             checkout_detached,
             head_reflog,
             undo_last_commit,
+            list_submodules,
+            update_submodules,
+            list_worktrees,
+            add_worktree,
+            remove_worktree,
+            prune_worktrees,
             fetch_remote,
             pull_remote,
             push_remote,

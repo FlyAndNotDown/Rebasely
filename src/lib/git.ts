@@ -23,7 +23,9 @@ import type {
   RecentRepo,
   ReflogEntry,
   RemoteProbe,
+  SubmoduleInfo,
   UndoneCommit,
+  WorktreeInfo,
   TerminalOption,
   ToolConfig,
   WorkspaceSnapshot,
@@ -124,6 +126,29 @@ export const gitApi = {
   checkoutDetached: (repoPath: string, oid: string) =>
     invoke<WorkspaceSnapshot>("checkout_detached", { repoPath, oid }),
   headReflog: (repoPath: string, limit = 200) => invoke<ReflogEntry[]>("head_reflog", { repoPath, limit }),
+  listSubmodules: (repoPath: string) => invoke<SubmoduleInfo[]>("list_submodules", { repoPath }),
+  updateSubmodules: (repoPath: string, paths: string[], activityId?: string) =>
+    invoke<WorkspaceSnapshot>("update_submodules", {
+      repoPath,
+      paths: paths.length ? paths : null,
+      activityId: activityId || null,
+    }),
+  listWorktrees: (repoPath: string) => invoke<WorktreeInfo[]>("list_worktrees", { repoPath }),
+  addWorktree: (
+    repoPath: string,
+    path: string,
+    options: { branch?: string; newBranch?: string; start?: string },
+  ) =>
+    invoke<string>("add_worktree", {
+      repoPath,
+      path,
+      branch: options.branch || null,
+      newBranch: options.newBranch || null,
+      start: options.start || null,
+    }),
+  removeWorktree: (repoPath: string, path: string, force = false) =>
+    invoke<void>("remove_worktree", { repoPath, path, force }),
+  pruneWorktrees: (repoPath: string) => invoke<void>("prune_worktrees", { repoPath }),
   undoLastCommit: (repoPath: string) => invoke<UndoneCommit>("undo_last_commit", { repoPath }),
   fetchRemote: (
     repoPath: string,

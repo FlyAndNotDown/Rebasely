@@ -1183,6 +1183,80 @@ fn history_search_filters_by_author_path_and_content() {
 }
 
 #[test]
+fn submodule_status_lines_are_parsed() {
+    let text = " 1111111111111111111111111111111111111111 libs/core (v1.0)\n\
+                -2222222222222222222222222222222222222222 libs/new folder\n\
+                +3333333333333333333333333333333333333333 vendor/x (heads/main)\n";
+    let parsed = parse_submodule_status(text);
+    assert_eq!(
+        parsed,
+        vec![
+            ("clean".into(), "1111111111111111111111111111111111111111".into(), "libs/core".into()),
+            ("uninitialized".into(), "2222222222222222222222222222222222222222".into(), "libs/new folder".into()),
+            ("modified".into(), "3333333333333333333333333333333333333333".into(), "vendor/x".into()),
+        ]
+    );
+}
+
+#[test]
+fn submodules_are_listed_and_updated() {
+    let (sub_root, mut sub) = temp_repo();
+    commit_file(&mut sub, &sub_root, "lib.txt", "lib\n", "lib");
+    let (root, mut repo) = temp_repo();
+    commit_file(&mut repo, &root, "a.txt", "a\n", "base");
+    run_git_stdout(
+        &root,
+        &["-c", "protocol.file.allow=always", "submodule", "add", &sub_root.to_string_lossy(), "libs/sub"],
+    )
+    .unwrap();
+    run_git_stdout(&root, &["commit", "-q", "-m", "add submodule"]).unwrap();
+
+    let listed = list_submodules(&repo).unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].path, "libs/sub");
+    assert_eq!(listed[0].state, "clean");
+    assert!(listed[0].url.is_some());
+
+    run_git_stdout(&root, &["submodule", "deinit", "-q", "--force", "libs/sub"]).unwrap();
+    assert_eq!(list_submodules(&repo).unwrap()[0].state, "uninitialized");
+    std::env::set_var("GIT_CONFIG_COUNT", "1");
+    std::env::set_var("GIT_CONFIG_KEY_0", "protocol.file.allow");
+    std::env::set_var("GIT_CONFIG_VALUE_0", "always");
+    let result = update_submodules(&mut repo, &[], |_| {});
+    std::env::remove_var("GIT_CONFIG_COUNT");
+    result.unwrap();
+    assert_eq!(list_submodules(&repo).unwrap()[0].state, "clean");
+    assert!(root.join("libs/sub/lib.txt").is_file());
+    let _ = fs::remove_dir_all(&root);
+    let _ = fs::remove_dir_all(&sub_root);
+}
+
+#[test]
+fn worktrees_can_be_added_listed_and_removed() {
+    let (root, mut repo) = temp_repo();
+    commit_file(&mut repo, &root, "a.txt", "a\n", "base");
+    let tree = PathBuf::from(format!("{}-wt", root.display()));
+    let _ = fs::remove_dir_all(&tree);
+
+    let created = add_worktree(&repo, &tree.to_string_lossy(), None, Some("side"), None).unwrap();
+    assert!(Path::new(&created).join("a.txt").is_file());
+    let listed = list_worktrees(&repo).unwrap();
+    assert_eq!(listed.len(), 2);
+    assert!(listed[0].main && listed[0].current);
+    assert_eq!(listed[1].branch.as_deref(), Some("side"));
+    assert!(!listed[1].current);
+
+    let linked = open_at(Path::new(&created)).unwrap();
+    assert!(list_worktrees(&linked).unwrap()[1].current);
+    drop(linked);
+
+    assert!(add_worktree(&repo, &tree.to_string_lossy(), None, None, None).is_err());
+    remove_worktree(&repo, &created, false).unwrap();
+    assert_eq!(list_worktrees(&repo).unwrap().len(), 1);
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
 fn tags_go_through_git_and_reject_bad_names() {
     let (root, mut repo) = temp_repo();
     commit_file(&mut repo, &root, "a.txt", "a\n", "a");

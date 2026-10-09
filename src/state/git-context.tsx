@@ -156,6 +156,7 @@ interface GitContextValue {
   commit: (message: string, amend?: boolean) => Promise<boolean>;
   undoLastCommit: () => Promise<boolean>;
   checkoutDetached: (oid: string) => Promise<boolean>;
+  updateSubmodules: (paths: string[]) => Promise<boolean>;
   checkoutBranch: (name: string) => Promise<void>;
   fetchRemote: (remote?: string) => Promise<void>;
   fetchAllRemotes: () => Promise<void>;
@@ -1536,6 +1537,19 @@ export function GitProvider({ children }: { children: ReactNode }) {
     [patchSession, runMutation, undoLastCommit],
   );
 
+  const updateSubmodules = useCallback(
+    async (paths: string[]) => {
+      const label = paths.length === 1 ? `Updating submodule ${paths[0]}` : "Updating submodules";
+      return runMutation(
+        label,
+        (repoPath, activityId) => gitApi.updateSubmodules(repoPath, paths, activityId),
+        paths.length === 1 ? `Updated ${paths[0]}` : "Updated submodules",
+        { cancellable: true },
+      );
+    },
+    [runMutation],
+  );
+
   const checkoutDetached = useCallback(
     async (oid: string) => {
       const ok = await runMutation(
@@ -2471,6 +2485,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       commit,
       undoLastCommit,
       checkoutDetached,
+      updateSubmodules,
       checkoutBranch,
       fetchRemote,
       fetchAllRemotes,
@@ -2552,6 +2567,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       commit,
       undoLastCommit,
       checkoutDetached,
+      updateSubmodules,
       checkoutBranch,
       fetchRemote,
       fetchAllRemotes,

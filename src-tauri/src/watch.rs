@@ -236,13 +236,21 @@ fn watch_repo(watcher: &mut RecommendedWatcher, root: &Path, rules: &IgnoreRules
         crate::error::AppError::msg(format!("Could not watch folder: {err}"))
     })?;
 
-    let git_dir = root.join(".git");
+    // A linked worktree has a `.git` file pointing at its own git folder, and
+    // shares refs with the main repository's.
+    let (git_dir, common_dir) = match git2::Repository::open(root) {
+        Ok(repo) => (repo.path().to_path_buf(), repo.commondir().to_path_buf()),
+        Err(_) => (root.join(".git"), root.join(".git")),
+    };
     if git_dir.is_dir() {
         let _ = watcher.watch(&git_dir, RecursiveMode::NonRecursive);
-        let refs = git_dir.join("refs");
-        if refs.is_dir() {
-            let _ = watcher.watch(&refs, RecursiveMode::Recursive);
-        }
+    }
+    if common_dir != git_dir && common_dir.is_dir() {
+        let _ = watcher.watch(&common_dir, RecursiveMode::NonRecursive);
+    }
+    let refs = common_dir.join("refs");
+    if refs.is_dir() {
+        let _ = watcher.watch(&refs, RecursiveMode::Recursive);
     }
     Ok(())
 }

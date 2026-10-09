@@ -33,6 +33,7 @@ mod refs;
 mod remote;
 mod stash;
 mod status;
+mod structure;
 #[cfg(test)]
 mod tests;
 mod tools;
@@ -54,6 +55,7 @@ pub use refs::*;
 pub use remote::*;
 pub use stash::*;
 pub use status::*;
+pub use structure::*;
 pub use tools::*;
 
 const MAX_TEXT_BYTES: u64 = 2_000_000;
