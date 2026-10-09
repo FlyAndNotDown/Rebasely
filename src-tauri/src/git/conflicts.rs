@@ -62,7 +62,11 @@ pub(super) fn ensure_conflicted(repo: &Repository, path: &str) -> AppResult<()> 
     Err(AppError::msg("This file has no conflict to resolve"))
 }
 
-pub fn save_conflict(repo: &mut Repository, path: &str, text: &str) -> AppResult<WorkspaceSnapshot> {
+pub fn save_conflict(
+    repo: &mut Repository,
+    path: &str,
+    text: &str,
+) -> AppResult<WorkspaceSnapshot> {
     let path = to_git_path(path);
     if path.is_empty() {
         return Err(AppError::msg("A file path is required"));
@@ -100,7 +104,11 @@ pub(super) fn stage_text(repo: &Repository, path: &str, stage: i32) -> Option<St
     Some(String::from_utf8_lossy(bytes).into_owned())
 }
 
-pub fn resolve_conflict(repo: &mut Repository, path: &str, side: &str) -> AppResult<WorkspaceSnapshot> {
+pub fn resolve_conflict(
+    repo: &mut Repository,
+    path: &str,
+    side: &str,
+) -> AppResult<WorkspaceSnapshot> {
     let path = to_git_path(path);
     if path.is_empty() {
         return Err(AppError::msg("A file path is required"));
@@ -111,11 +119,7 @@ pub fn resolve_conflict(repo: &mut Repository, path: &str, side: &str) -> AppRes
         "ours" => run_git_stdout(&root, &["checkout", "--ours", "--", &path])?,
         "theirs" => run_git_stdout(&root, &["checkout", "--theirs", "--", &path])?,
         "both" => resolve_both_sides(&root, &path)?,
-        _ => {
-            return Err(AppError::msg(
-                "Choose a side: ours, theirs, or both",
-            ))
-        }
+        _ => return Err(AppError::msg("Choose a side: ours, theirs, or both")),
     };
     run_git_stdout(&root, &["add", "--", &path])?;
     snapshot(repo)
@@ -159,7 +163,10 @@ pub(super) fn take_both_sides(text: &str) -> Option<String> {
         }
         out.push_str(theirs);
         let after_end = &theirs_and_rest[end..];
-        let end_line = after_end.find('\n').map(|index| index + 1).unwrap_or(after_end.len());
+        let end_line = after_end
+            .find('\n')
+            .map(|index| index + 1)
+            .unwrap_or(after_end.len());
         rest = &after_end[end_line..];
     }
     if !found {

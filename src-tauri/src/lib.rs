@@ -21,8 +21,7 @@ const APP_ICON_PNG: &[u8] = include_bytes!("../icons/icon.png");
 use error::{AppError, AppResult};
 use git::{
     BlameHunk, BranchList, CommitDetails, CommitFile, CommitSummary, DirEntry, FileDiff, FileText,
-    GitIdentity, RebaseCommit,
-    RebaseStep, RemoteProbe, StashDetails, WorkspaceSnapshot,
+    GitIdentity, RebaseCommit, RebaseStep, RemoteProbe, StashDetails, WorkspaceSnapshot,
 };
 use prefs::AppPrefs;
 use recents::RecentRepo;
@@ -86,7 +85,11 @@ async fn clone_repository(
 ) -> AppResult<String> {
     blocking(move || {
         git::with_cancel(activity_id.as_deref(), || {
-            git::clone_repository(&url, &destination, progress_sink(&app, activity_id.as_deref()))
+            git::clone_repository(
+                &url,
+                &destination,
+                progress_sink(&app, activity_id.as_deref()),
+            )
         })
     })
     .await
@@ -185,7 +188,10 @@ async fn file_commits(
     limit: usize,
     skip: usize,
 ) -> AppResult<Vec<CommitSummary>> {
-    with_repo_async(repo_path, move |repo| git::file_commits(repo, &path, limit, skip)).await
+    with_repo_async(repo_path, move |repo| {
+        git::file_commits(repo, &path, limit, skip)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -218,7 +224,10 @@ async fn compare_revisions(
     base: String,
     head: String,
 ) -> AppResult<Vec<CommitFile>> {
-    with_repo_async(repo_path, move |repo| git::compare_files(repo, &base, &head)).await
+    with_repo_async(repo_path, move |repo| {
+        git::compare_files(repo, &base, &head)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -328,14 +337,23 @@ async fn add_worktree(
     start: Option<String>,
 ) -> AppResult<String> {
     with_repo_async(repo_path, move |repo| {
-        git::add_worktree(repo, &path, branch.as_deref(), new_branch.as_deref(), start.as_deref())
+        git::add_worktree(
+            repo,
+            &path,
+            branch.as_deref(),
+            new_branch.as_deref(),
+            start.as_deref(),
+        )
     })
     .await
 }
 
 #[tauri::command]
 async fn remove_worktree(repo_path: String, path: String, force: Option<bool>) -> AppResult<()> {
-    with_repo_async(repo_path, move |repo| git::remove_worktree(repo, &path, force.unwrap_or(false))).await
+    with_repo_async(repo_path, move |repo| {
+        git::remove_worktree(repo, &path, force.unwrap_or(false))
+    })
+    .await
 }
 
 #[tauri::command]
@@ -345,7 +363,10 @@ async fn prune_worktrees(repo_path: String) -> AppResult<()> {
 
 #[tauri::command]
 async fn head_reflog(repo_path: String, limit: Option<usize>) -> AppResult<Vec<git::ReflogEntry>> {
-    with_repo_async(repo_path, move |repo| git::head_reflog(repo, limit.unwrap_or(200))).await
+    with_repo_async(repo_path, move |repo| {
+        git::head_reflog(repo, limit.unwrap_or(200))
+    })
+    .await
 }
 
 #[tauri::command]
@@ -454,7 +475,9 @@ fn progress_sink(app: &AppHandle, activity_id: Option<&str>) -> impl FnMut(&str)
     let app = app.clone();
     let activity_id = activity_id.map(str::to_string);
     move |line: &str| {
-        let Some(id) = activity_id.clone() else { return };
+        let Some(id) = activity_id.clone() else {
+            return;
+        };
         let _ = app.emit(
             "git-progress",
             GitProgressEvent {
@@ -498,7 +521,12 @@ async fn push_tag(
 ) -> AppResult<WorkspaceSnapshot> {
     with_repo_async(repo_path, move |repo| {
         git::with_cancel(activity_id.as_deref(), || {
-            git::push_tag(repo, &remote, &name, progress_sink(&app, activity_id.as_deref()))
+            git::push_tag(
+                repo,
+                &remote,
+                &name,
+                progress_sink(&app, activity_id.as_deref()),
+            )
         })?;
         git::snapshot(repo)
     })
@@ -515,7 +543,12 @@ async fn delete_remote_tag(
 ) -> AppResult<WorkspaceSnapshot> {
     with_repo_async(repo_path, move |repo| {
         git::with_cancel(activity_id.as_deref(), || {
-            git::delete_remote_tag(repo, &remote, &name, progress_sink(&app, activity_id.as_deref()))
+            git::delete_remote_tag(
+                repo,
+                &remote,
+                &name,
+                progress_sink(&app, activity_id.as_deref()),
+            )
         })
     })
     .await
@@ -546,7 +579,12 @@ async fn delete_branch(
     let force = force.unwrap_or(false);
     with_repo_async(repo_path, move |repo| {
         git::with_cancel(activity_id.as_deref(), || {
-            git::delete_branch(repo, &name, force, progress_sink(&app, activity_id.as_deref()))
+            git::delete_branch(
+                repo,
+                &name,
+                force,
+                progress_sink(&app, activity_id.as_deref()),
+            )
         })
     })
     .await
@@ -605,8 +643,14 @@ async fn merge_ref(repo_path: String, onto: String) -> AppResult<WorkspaceSnapsh
 }
 
 #[tauri::command]
-async fn operation_continue(repo_path: String, message: Option<String>) -> AppResult<WorkspaceSnapshot> {
-    with_repo_async(repo_path, move |repo| git::operation_continue(repo, message.as_deref())).await
+async fn operation_continue(
+    repo_path: String,
+    message: Option<String>,
+) -> AppResult<WorkspaceSnapshot> {
+    with_repo_async(repo_path, move |repo| {
+        git::operation_continue(repo, message.as_deref())
+    })
+    .await
 }
 
 #[tauri::command]
@@ -620,7 +664,10 @@ async fn resolve_conflict(
     path: String,
     side: String,
 ) -> AppResult<WorkspaceSnapshot> {
-    with_repo_async(repo_path, move |repo| git::resolve_conflict(repo, &path, &side)).await
+    with_repo_async(repo_path, move |repo| {
+        git::resolve_conflict(repo, &path, &side)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -629,8 +676,15 @@ async fn conflict_view(repo_path: String, path: String) -> AppResult<git::Confli
 }
 
 #[tauri::command]
-async fn save_conflict(repo_path: String, path: String, text: String) -> AppResult<WorkspaceSnapshot> {
-    with_repo_async(repo_path, move |repo| git::save_conflict(repo, &path, &text)).await
+async fn save_conflict(
+    repo_path: String,
+    path: String,
+    text: String,
+) -> AppResult<WorkspaceSnapshot> {
+    with_repo_async(repo_path, move |repo| {
+        git::save_conflict(repo, &path, &text)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -647,7 +701,10 @@ async fn reset_to_commit(
 
 #[tauri::command]
 async fn write_commit_patch(repo_path: String, oid: String, dest: String) -> AppResult<()> {
-    with_repo_async(repo_path, move |repo| git::write_commit_patch(repo, &oid, &dest)).await
+    with_repo_async(repo_path, move |repo| {
+        git::write_commit_patch(repo, &oid, &dest)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -670,7 +727,11 @@ async fn probe_remote_url(repo_path: String, url: String) -> AppResult<RemotePro
 }
 
 #[tauri::command]
-async fn set_remote_url(repo_path: String, name: String, url: String) -> AppResult<WorkspaceSnapshot> {
+async fn set_remote_url(
+    repo_path: String,
+    name: String,
+    url: String,
+) -> AppResult<WorkspaceSnapshot> {
     with_repo_async(repo_path, move |repo| {
         git::set_remote_url(repo, &name, &url)?;
         git::snapshot(repo)
@@ -695,7 +756,12 @@ async fn stash_save(
     paths: Option<Vec<String>>,
 ) -> AppResult<WorkspaceSnapshot> {
     with_repo_async(repo_path, move |repo| {
-        git::stash_save(repo, &message, include_untracked, paths.as_deref().unwrap_or(&[]))?;
+        git::stash_save(
+            repo,
+            &message,
+            include_untracked,
+            paths.as_deref().unwrap_or(&[]),
+        )?;
         git::snapshot(repo)
     })
     .await
@@ -767,7 +833,10 @@ async fn get_local_git_identity(repo_path: String) -> AppResult<GitIdentity> {
 }
 
 #[tauri::command]
-async fn set_local_git_identity(repo_path: String, identity: GitIdentity) -> AppResult<GitIdentity> {
+async fn set_local_git_identity(
+    repo_path: String,
+    identity: GitIdentity,
+) -> AppResult<GitIdentity> {
     with_repo_async(repo_path, move |repo| {
         git::write_local_git_identity(repo, &identity.name, &identity.email)?;
         git::read_local_git_identity(repo)
@@ -833,7 +902,11 @@ struct ToolError {
 }
 
 #[tauri::command]
-async fn open_difftool(repo_path: String, source: git::FileSource, app: AppHandle) -> AppResult<()> {
+async fn open_difftool(
+    repo_path: String,
+    source: git::FileSource,
+    app: AppHandle,
+) -> AppResult<()> {
     with_repo_async(repo_path, move |repo| {
         git::launch_difftool(repo, &source, move |message| {
             let _ = app.emit("tool-error", ToolError { message });

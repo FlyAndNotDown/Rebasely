@@ -38,8 +38,15 @@ pub fn commits(
     if let Ok(root) = workdir(repo) {
         // Committer-date order, unlike author-date order, lets git stream from
         // the commit-graph instead of sorting all of history first.
-        let args = git_log_args(&revs, &["-c", "log.showSignature=false", "log", "--date-order"]);
-        let warming = if skip == 0 { warm_reachable(repo) } else { Vec::new() };
+        let args = git_log_args(
+            &revs,
+            &["-c", "log.showSignature=false", "log", "--date-order"],
+        );
+        let warming = if skip == 0 {
+            warm_reachable(repo)
+        } else {
+            Vec::new()
+        };
         let page = log_page(root, &args, skip, limit);
         for handle in warming {
             let _ = handle.join();
@@ -56,8 +63,7 @@ pub fn commits(
 }
 
 pub(super) fn normalize_revs(revs: &[String]) -> Vec<String> {
-    revs
-        .iter()
+    revs.iter()
         .map(|value| value.trim())
         .filter(|value| !value.is_empty())
         .map(|value| value.to_string())
@@ -161,8 +167,16 @@ pub(super) fn git_search_log_args(revs: &[String], query: &SearchQuery) -> Vec<S
         args.push("--remotes".to_string());
     }
     if !query.authors.is_empty() {
-        args.extend(["--regexp-ignore-case".to_string(), "--fixed-strings".to_string()]);
-        args.extend(query.authors.iter().map(|author| format!("--author={author}")));
+        args.extend([
+            "--regexp-ignore-case".to_string(),
+            "--fixed-strings".to_string(),
+        ]);
+        args.extend(
+            query
+                .authors
+                .iter()
+                .map(|author| format!("--author={author}")),
+        );
     }
     if let Some(content) = &query.content {
         args.push(format!("-S{content}"));
@@ -334,11 +348,21 @@ pub(super) fn parse_git_log(bytes: &[u8]) -> AppResult<Vec<CommitSummary>> {
         }
         let mut fields = line.split('\0');
         let Some(id) = fields.next() else { continue };
-        let Some(short_id) = fields.next() else { continue };
-        let Some(summary) = fields.next() else { continue };
-        let Some(author_name) = fields.next() else { continue };
-        let Some(author_email) = fields.next() else { continue };
-        let Some(timestamp) = fields.next() else { continue };
+        let Some(short_id) = fields.next() else {
+            continue;
+        };
+        let Some(summary) = fields.next() else {
+            continue;
+        };
+        let Some(author_name) = fields.next() else {
+            continue;
+        };
+        let Some(author_email) = fields.next() else {
+            continue;
+        };
+        let Some(timestamp) = fields.next() else {
+            continue;
+        };
         let parents = fields.next().unwrap_or("");
         items.push(CommitSummary {
             id: id.to_string(),
@@ -436,7 +460,9 @@ fn warm_reachable(repo: &Repository) -> Vec<thread::JoinHandle<()>> {
     if commit_graph_available(repo) {
         return Vec::new();
     }
-    let Ok(head) = repo.head() else { return Vec::new() };
+    let Ok(head) = repo.head() else {
+        return Vec::new();
+    };
     let mut tips: Vec<Oid> = [head.target(), upstream_oid_of(repo, &head)]
         .into_iter()
         .flatten()
@@ -652,7 +678,10 @@ pub fn file_commits(
             &rel,
         ],
     )?;
-    Ok(parse_follow_log(&stdout, &rel).into_iter().skip(skip).collect())
+    Ok(parse_follow_log(&stdout, &rel)
+        .into_iter()
+        .skip(skip)
+        .collect())
 }
 
 /// Parses `git log --follow --name-status -z` records. Each commit carries the
@@ -666,7 +695,9 @@ pub(super) fn parse_follow_log(bytes: &[u8], current: &str) -> Vec<CommitSummary
         if fields.len() < 7 {
             continue;
         }
-        let Some(id) = normalize_oid(fields[0]) else { continue };
+        let Some(id) = normalize_oid(fields[0]) else {
+            continue;
+        };
         let status: Vec<&str> = fields[7..]
             .iter()
             .map(|field| field.trim_start_matches('\n'))
@@ -693,7 +724,10 @@ pub(super) fn parse_follow_log(bytes: &[u8], current: &str) -> Vec<CommitSummary
             author_name: fields[3].to_string(),
             author_email: fields[4].to_string(),
             timestamp: fields[5].trim().parse().unwrap_or(0),
-            parents: fields[6].split_whitespace().filter_map(normalize_oid).collect(),
+            parents: fields[6]
+                .split_whitespace()
+                .filter_map(normalize_oid)
+                .collect(),
             refs: Vec::new(),
             on_current_branch: true,
             on_tracking_branch: false,

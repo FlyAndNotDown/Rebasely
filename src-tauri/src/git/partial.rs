@@ -77,8 +77,12 @@ pub(super) fn selected_patch(
             let line = patch.line_in_hunk(hunk_index, line_index)?;
             let origin = line.origin();
             let selected = match origin {
-                '+' => line.new_lineno().is_some_and(|number| news.contains(&number)),
-                '-' => line.old_lineno().is_some_and(|number| olds.contains(&number)),
+                '+' => line
+                    .new_lineno()
+                    .is_some_and(|number| news.contains(&number)),
+                '-' => line
+                    .old_lineno()
+                    .is_some_and(|number| olds.contains(&number)),
                 _ => false,
             };
             let mark = match (origin, selected, reverse) {
@@ -176,7 +180,11 @@ pub fn apply_lines(
             .ok()
             .is_some_and(is_untracked);
     if intent_to_add {
-        run_git_pathspecs(&root, &["add", "--intent-to-add"], std::slice::from_ref(&rel))?;
+        run_git_pathspecs(
+            &root,
+            &["add", "--intent-to-add"],
+            std::slice::from_ref(&rel),
+        )?;
     }
     let result = (|| {
         let patch = {

@@ -154,7 +154,10 @@ impl IgnoreRules {
         };
         // A trailing slash lets directory-only patterns such as `out/` match.
         let query = if dir { format!("{rel}/") } else { rel.clone() };
-        if !repo.status_should_ignore(Path::new(&query)).unwrap_or(false) {
+        if !repo
+            .status_should_ignore(Path::new(&query))
+            .unwrap_or(false)
+        {
             return false;
         }
         // Ignore rules do not apply to files git already tracks.
@@ -222,7 +225,10 @@ fn watch_tree(
         if !child.is_dir() {
             continue;
         }
-        let name = child.file_name().and_then(|name| name.to_str()).unwrap_or("");
+        let name = child
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("");
         if name.is_empty() || name == ".git" || rules.ignores_dir(&child) {
             continue;
         }
@@ -232,9 +238,8 @@ fn watch_tree(
 }
 
 fn watch_repo(watcher: &mut RecommendedWatcher, root: &Path, rules: &IgnoreRules) -> AppResult<()> {
-    watch_tree(watcher, root, 0, rules).map_err(|err| {
-        crate::error::AppError::msg(format!("Could not watch folder: {err}"))
-    })?;
+    watch_tree(watcher, root, 0, rules)
+        .map_err(|err| crate::error::AppError::msg(format!("Could not watch folder: {err}")))?;
 
     // A linked worktree has a `.git` file pointing at its own git folder, and
     // shares refs with the main repository's.
@@ -342,7 +347,8 @@ fn ensure_debouncer(app: &AppHandle, state: &WatchState) {
             if entry.rules.ignores_dir(&request.path) {
                 continue;
             }
-            let depth = relative_depth(&request.root, &request.path).unwrap_or(WATCH_SPLIT_DEPTH as usize);
+            let depth =
+                relative_depth(&request.root, &request.path).unwrap_or(WATCH_SPLIT_DEPTH as usize);
             let rules = entry.rules.clone();
             let _ = watch_tree(&mut entry.watcher, &request.path, depth as u8, &rules);
         }
@@ -360,11 +366,17 @@ fn ensure_debouncer(app: &AppHandle, state: &WatchState) {
             let payload = {
                 let mut map = pending.lock().unwrap_or_else(|err| err.into_inner());
                 match map.get(&path) {
-                    Some(item) if item.generation == generation && item.at.elapsed() >= DEBOUNCE => {
+                    Some(item)
+                        if item.generation == generation && item.at.elapsed() >= DEBOUNCE =>
+                    {
                         let item = map.remove(&path).expect("pending entry");
                         Some(RepoChanged {
                             path,
-                            paths: if item.overflow { Vec::new() } else { item.paths },
+                            paths: if item.overflow {
+                                Vec::new()
+                            } else {
+                                item.paths
+                            },
                             overflow: item.overflow,
                         })
                     }

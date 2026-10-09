@@ -14,10 +14,7 @@ pub(super) fn branch_list(
     let mut local = Vec::new();
     for item in repo.branches(Some(BranchType::Local))? {
         let (branch, _) = item?;
-        let name = branch
-            .name()?
-            .unwrap_or_default()
-            .to_string();
+        let name = branch.name()?.unwrap_or_default().to_string();
         let upstream = branch
             .upstream()
             .ok()
@@ -83,11 +80,7 @@ pub(super) fn list_tags(repo: &Repository) -> AppResult<Vec<TagInfo>> {
         }
         true
     })?;
-    tags.sort_by(|left, right| {
-        left.name
-            .to_lowercase()
-            .cmp(&right.name.to_lowercase())
-    });
+    tags.sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
     Ok(tags)
 }
 
@@ -115,7 +108,11 @@ pub(super) fn is_remote_branch_name(name: &str, remotes: &[String]) -> bool {
         .any(|remote| name.eq_ignore_ascii_case(remote))
 }
 
-pub(super) fn remote_tracking_branch_name(full_ref: &str, short_name: &str, remotes: &[String]) -> Option<String> {
+pub(super) fn remote_tracking_branch_name(
+    full_ref: &str,
+    short_name: &str,
+    remotes: &[String],
+) -> Option<String> {
     if let Some(rest) = full_ref.strip_prefix("refs/remotes/") {
         if !is_remote_branch_name(rest, remotes) {
             return None;
@@ -129,7 +126,10 @@ pub(super) fn remote_tracking_branch_name(full_ref: &str, short_name: &str, remo
     Some(short_name.trim().to_string())
 }
 
-pub(super) fn remote_branches_from_git(root: &Path, remotes: &[String]) -> AppResult<Vec<BranchInfo>> {
+pub(super) fn remote_branches_from_git(
+    root: &Path,
+    remotes: &[String],
+) -> AppResult<Vec<BranchInfo>> {
     let stdout = run_git_stdout(
         root,
         &[
@@ -185,7 +185,12 @@ pub fn checkout_branch(repo: &Repository, name: &str) -> AppResult<()> {
         .map_err(|_| AppError::msg(format!("Branch not found: {name}")))?;
     let local_name = split_remote_branch(repo, name)
         .map(|(_, branch)| branch)
-        .unwrap_or_else(|_| name.split_once('/').map(|(_, rest)| rest).unwrap_or(name).to_string());
+        .unwrap_or_else(|_| {
+            name.split_once('/')
+                .map(|(_, rest)| rest)
+                .unwrap_or(name)
+                .to_string()
+        });
     if local_name.is_empty() || local_name == "HEAD" {
         return Err(AppError::msg("Cannot check out that remote ref"));
     }
@@ -221,7 +226,11 @@ pub fn create_tag(
             repo.signature().map_err(|_| {
                 AppError::msg("Set user.name and user.email in Git config before tagging")
             })?;
-            run_git_input(root, &["tag", "--annotate", "--file=-", name, &target], message.as_bytes())?;
+            run_git_input(
+                root,
+                &["tag", "--annotate", "--file=-", name, &target],
+                message.as_bytes(),
+            )?;
         }
         None => {
             run_git_stdout(root, &["tag", name, &target])?;

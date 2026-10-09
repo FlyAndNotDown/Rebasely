@@ -180,11 +180,9 @@ pub fn list_remotes(repo: &Repository) -> AppResult<Vec<RemoteInfo>> {
                 1
             }
         }
-        rank(&left.name).cmp(&rank(&right.name)).then_with(|| {
-            left.name
-                .to_lowercase()
-                .cmp(&right.name.to_lowercase())
-        })
+        rank(&left.name)
+            .cmp(&rank(&right.name))
+            .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
     });
     Ok(remotes)
 }
@@ -213,7 +211,10 @@ pub fn probe_remote_url(repo: &Repository, url: &str) -> AppResult<RemoteProbe> 
         url,
     ]);
     command.env("GIT_TERMINAL_PROMPT", "0");
-    command.env("GIT_SSH_COMMAND", "ssh -o BatchMode=yes -o ConnectTimeout=15");
+    command.env(
+        "GIT_SSH_COMMAND",
+        "ssh -o BatchMode=yes -o ConnectTimeout=15",
+    );
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -263,7 +264,11 @@ pub fn add_remote(repo: &Repository, name: &str, url: &str) -> AppResult<()> {
 }
 
 pub(super) fn is_valid_remote_name(name: &str) -> bool {
-    if name.is_empty() || name == "." || name == ".." || name.starts_with('-') || name.ends_with('.')
+    if name.is_empty()
+        || name == "."
+        || name == ".."
+        || name.starts_with('-')
+        || name.ends_with('.')
     {
         return false;
     }

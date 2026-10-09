@@ -75,7 +75,10 @@ pub fn discard_paths(repo: &Repository, paths: &[String]) -> AppResult<()> {
         Err(err) if err.code() == ErrorCode::UnbornBranch => None,
         Err(err) => return Err(err.into()),
     };
-    let head_tree = head.as_ref().map(|object| object.peel_to_tree()).transpose()?;
+    let head_tree = head
+        .as_ref()
+        .map(|object| object.peel_to_tree())
+        .transpose()?;
 
     let mut in_head = Vec::new();
     let mut not_in_head = Vec::new();
@@ -85,7 +88,11 @@ pub fn discard_paths(repo: &Repository, paths: &[String]) -> AppResult<()> {
             continue;
         }
         let full = ensure_inside_workdir(repo, &rel)?;
-        if repo.status_file(Path::new(&rel)).ok().is_some_and(is_untracked) {
+        if repo
+            .status_file(Path::new(&rel))
+            .ok()
+            .is_some_and(is_untracked)
+        {
             remove_worktree_path(&full)?;
             continue;
         }
@@ -155,8 +162,15 @@ pub(super) fn pathspec_chunks(paths: &[String]) -> Vec<&[String]> {
 pub fn ignore_patterns(repo: &Repository, patterns: &[String]) -> AppResult<()> {
     let path = workdir(repo)?.join(".gitignore");
     let existing = fs::read_to_string(&path).unwrap_or_default();
-    let newline = if existing.contains("\r\n") { "\r\n" } else { "\n" };
-    let mut listed: HashSet<String> = existing.lines().map(|line| line.trim().to_string()).collect();
+    let newline = if existing.contains("\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    };
+    let mut listed: HashSet<String> = existing
+        .lines()
+        .map(|line| line.trim().to_string())
+        .collect();
     let mut text = existing.clone();
     for pattern in patterns.iter().map(|pattern| pattern.trim()) {
         if pattern.is_empty() || !listed.insert(pattern.to_string()) {

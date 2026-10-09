@@ -9,13 +9,26 @@ const LFS_POINTER: &[u8] = b"version https://git-lfs.github.com/spec/";
 /// Where the two sides of a file diff come from, for image diffs and external
 /// diff tools; mirrors the text diffs.
 #[derive(Debug, Clone, serde::Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum FileSource {
     /// Index to working tree, or HEAD to index when `staged`.
     Workdir { path: String, staged: bool },
     /// A commit against its first parent.
-    Commit { oid: String, path: String, old_path: Option<String> },
-    Compare { base: String, head: String, path: String, old_path: Option<String> },
+    Commit {
+        oid: String,
+        path: String,
+        old_path: Option<String>,
+    },
+    Compare {
+        base: String,
+        head: String,
+        path: String,
+        old_path: Option<String>,
+    },
     /// A stash against the commit it was made on.
     Stash { oid: String, path: String },
 }
@@ -59,10 +72,20 @@ fn mime_for(path: &str) -> &'static str {
 pub(super) fn image_side(path: &str, bytes: &[u8]) -> ImageSide {
     let size = bytes.len() as u64;
     if bytes.starts_with(LFS_POINTER) {
-        return ImageSide { data_url: None, size, lfs: true, too_large: false };
+        return ImageSide {
+            data_url: None,
+            size,
+            lfs: true,
+            too_large: false,
+        };
     }
     if bytes.len() > MAX_IMAGE_BYTES {
-        return ImageSide { data_url: None, size, lfs: false, too_large: true };
+        return ImageSide {
+            data_url: None,
+            size,
+            lfs: false,
+            too_large: true,
+        };
     }
     let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
     ImageSide {
@@ -103,11 +126,19 @@ pub fn image_pair(repo: &Repository, source: &FileSource) -> AppResult<ImagePair
                 )
             } else {
                 let full = ensure_inside_workdir(repo, &rel)?;
-                let current = if full.is_file() { Some(fs::read(&full)?) } else { None };
+                let current = if full.is_file() {
+                    Some(fs::read(&full)?)
+                } else {
+                    None
+                };
                 (side(&rel, index_blob(repo, &rel)), side(&rel, current))
             }
         }
-        FileSource::Commit { oid, path, old_path } => {
+        FileSource::Commit {
+            oid,
+            path,
+            old_path,
+        } => {
             let rel = safe_repo_path(path)?;
             let old = safe_repo_path(old_path.as_deref().unwrap_or(path))?;
             let commit = peel_commit(repo, oid)?;
@@ -118,7 +149,12 @@ pub fn image_pair(repo: &Repository, source: &FileSource) -> AppResult<ImagePair
                 side(&rel, tree_blob(repo, Some(&tree), &rel)),
             )
         }
-        FileSource::Compare { base, head, path, old_path } => {
+        FileSource::Compare {
+            base,
+            head,
+            path,
+            old_path,
+        } => {
             let rel = safe_repo_path(path)?;
             let old = safe_repo_path(old_path.as_deref().unwrap_or(path))?;
             let base_tree = peel_commit(repo, base)?.tree()?;
@@ -135,8 +171,12 @@ pub fn image_pair(repo: &Repository, source: &FileSource) -> AppResult<ImagePair
             let tree = stash.tree()?;
             // Untracked files live in the stash's third parent.
             let untracked = stash.parent(2).ok().and_then(|parent| parent.tree().ok());
-            let current = tree_blob(repo, Some(&tree), &rel).or_else(|| tree_blob(repo, untracked.as_ref(), &rel));
-            (side(&rel, tree_blob(repo, base.as_ref(), &rel)), side(&rel, current))
+            let current = tree_blob(repo, Some(&tree), &rel)
+                .or_else(|| tree_blob(repo, untracked.as_ref(), &rel));
+            (
+                side(&rel, tree_blob(repo, base.as_ref(), &rel)),
+                side(&rel, current),
+            )
         }
     };
     Ok(ImagePair { before, after })

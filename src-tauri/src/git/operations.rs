@@ -139,7 +139,10 @@ pub fn merge_ref(repo: &mut Repository, spec: &str) -> AppResult<WorkspaceSnapsh
 }
 
 /// Finishes the current step. An edited `message` replaces the one git prepared.
-pub fn operation_continue(repo: &mut Repository, message: Option<&str>) -> AppResult<WorkspaceSnapshot> {
+pub fn operation_continue(
+    repo: &mut Repository,
+    message: Option<&str>,
+) -> AppResult<WorkspaceSnapshot> {
     let kind = git_operation(repo)
         .ok_or_else(|| AppError::msg("No merge, rebase, cherry-pick, or revert is in progress"))?
         .kind;
@@ -217,11 +220,7 @@ pub(super) fn rebase_control(repo: &mut Repository, flag: &str) -> AppResult<Wor
     let root = workdir(repo)?.to_path_buf();
     let scratch = rebase_scratch_dir()?;
     let editor = noop_editor(&scratch)?;
-    let result = run_git_env(
-        &root,
-        &["rebase", flag],
-        &[("GIT_EDITOR", editor.as_str())],
-    );
+    let result = run_git_env(&root, &["rebase", flag], &[("GIT_EDITOR", editor.as_str())]);
     let _ = fs::remove_dir_all(&scratch);
     match result {
         Ok(output) if output.status.success() => snapshot(repo),
@@ -264,7 +263,10 @@ pub(super) fn rebase_todo(commits: &[RebaseCommit], steps: &[RebaseStep]) -> App
     let mut messages = Vec::new();
     for step in steps {
         let action = step.action.trim().to_ascii_lowercase();
-        if !matches!(action.as_str(), "pick" | "reword" | "squash" | "fixup" | "drop") {
+        if !matches!(
+            action.as_str(),
+            "pick" | "reword" | "squash" | "fixup" | "drop"
+        ) {
             return Err(AppError::msg(format!("Unknown rebase action: {action}")));
         }
         if matches!(action.as_str(), "squash" | "fixup")
@@ -298,7 +300,9 @@ pub(super) fn rebase_todo(commits: &[RebaseCommit], steps: &[RebaseStep]) -> App
         ));
     }
     if lines.iter().all(|line| line.starts_with("drop ")) {
-        return Err(AppError::msg("Dropping every commit leaves nothing to rebase"));
+        return Err(AppError::msg(
+            "Dropping every commit leaves nothing to rebase",
+        ));
     }
     Ok(RebaseTodo { lines, messages })
 }
@@ -415,10 +419,7 @@ pub(super) fn write_copy_editor(scratch: &Path, name: &str, source: &Path) -> Ap
     } else {
         let script = scratch.join(name);
         let from = source.to_string_lossy().replace('\'', "'\\''");
-        fs::write(
-            &script,
-            format!("#!/bin/sh\ncp '{from}' \"$1\"\nexit 0\n"),
-        )?;
+        fs::write(&script, format!("#!/bin/sh\ncp '{from}' \"$1\"\nexit 0\n"))?;
         make_executable(&script)?;
         Ok(script.to_string_lossy().into_owned())
     }
@@ -585,12 +586,7 @@ pub(super) fn looks_like_mbox(bytes: &[u8]) -> bool {
 
 pub(super) fn ensure_clean_for_replay(repo: &Repository) -> AppResult<()> {
     let status = status_snapshot(repo)?;
-    if !status.staged.is_empty()
-        || status
-            .unstaged
-            .iter()
-            .any(|file| file.kind != "untracked")
-    {
+    if !status.staged.is_empty() || status.unstaged.iter().any(|file| file.kind != "untracked") {
         return Err(AppError::msg("Commit or stash your changes first"));
     }
     Ok(())

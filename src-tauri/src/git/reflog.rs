@@ -67,7 +67,11 @@ pub fn undo_last_commit(repo: &mut Repository) -> AppResult<UndoneCommit> {
             .ok_or_else(|| AppError::msg("Invalid branch reference"))?
             .to_string();
         let parent = commit.parent_id(0).ok().map(|id| id.to_string());
-        (commit.message().unwrap_or("").trim().to_string(), refname, parent)
+        (
+            commit.message().unwrap_or("").trim().to_string(),
+            refname,
+            parent,
+        )
     };
     let root = workdir_owned(repo)?;
     match parent {

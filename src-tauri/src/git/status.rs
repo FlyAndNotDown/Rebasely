@@ -23,10 +23,9 @@ pub fn repo_info(repo: &Repository) -> AppResult<RepoInfo> {
                 head_id = Some(oid.to_string());
             }
             if head.is_branch() {
-                if let Ok(branch) = repo.find_branch(
-                    head.shorthand().unwrap_or(""),
-                    BranchType::Local,
-                ) {
+                if let Ok(branch) =
+                    repo.find_branch(head.shorthand().unwrap_or(""), BranchType::Local)
+                {
                     if let Ok(up) = branch.upstream() {
                         upstream = up.name()?.map(|name| name.to_string());
                         if let (Some(local_oid), Some(up_oid)) =
@@ -43,11 +42,8 @@ pub fn repo_info(repo: &Repository) -> AppResult<RepoInfo> {
         }
         Err(err) if err.code() == ErrorCode::UnbornBranch => {
             current_branch = repo.find_reference("HEAD").ok().and_then(|head| {
-                head.symbolic_target().map(|target| {
-                    target
-                        .trim_start_matches("refs/heads/")
-                        .to_string()
-                })
+                head.symbolic_target()
+                    .map(|target| target.trim_start_matches("refs/heads/").to_string())
             });
         }
         Err(err) => return Err(err.into()),
@@ -278,7 +274,11 @@ pub(super) fn status_from_libgit2(repo: &Repository) -> AppResult<StatusSnapshot
     Ok(StatusSnapshot { staged, unstaged })
 }
 
-pub(super) fn cached_ahead_behind(repo: &Repository, local: Oid, upstream: Oid) -> Option<(usize, usize)> {
+pub(super) fn cached_ahead_behind(
+    repo: &Repository,
+    local: Oid,
+    upstream: Oid,
+) -> Option<(usize, usize)> {
     struct Entry {
         local: Oid,
         upstream: Oid,

@@ -130,7 +130,8 @@ pub(super) fn read_text_prefix(path: &Path) -> AppResult<(Vec<u8>, bool)> {
 
 pub(super) fn parse_blame_porcelain(bytes: &[u8]) -> Vec<BlameHunk> {
     let text = String::from_utf8_lossy(bytes);
-    let mut known: std::collections::HashMap<String, (String, i64)> = std::collections::HashMap::new();
+    let mut known: std::collections::HashMap<String, (String, i64)> =
+        std::collections::HashMap::new();
     let mut hunks: Vec<BlameHunk> = Vec::new();
     let mut oid = String::new();
     let mut author = String::new();

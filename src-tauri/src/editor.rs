@@ -73,14 +73,20 @@ const EDITORS: &[Editor] = &[
         id: "sublime",
         name: "Sublime Text",
         commands: &["subl"],
-        windows_paths: &[r"%ProgramFiles%\Sublime Text\subl.exe", r"%ProgramFiles%\Sublime Text 3\subl.exe"],
+        windows_paths: &[
+            r"%ProgramFiles%\Sublime Text\subl.exe",
+            r"%ProgramFiles%\Sublime Text 3\subl.exe",
+        ],
         lines: LineStyle::Suffix,
     },
     Editor {
         id: "notepad++",
         name: "Notepad++",
         commands: &["notepad++"],
-        windows_paths: &[r"%ProgramFiles%\Notepad++\notepad++.exe", r"%ProgramFiles(x86)%\Notepad++\notepad++.exe"],
+        windows_paths: &[
+            r"%ProgramFiles%\Notepad++\notepad++.exe",
+            r"%ProgramFiles(x86)%\Notepad++\notepad++.exe",
+        ],
         lines: LineStyle::NotepadPlusPlus,
     },
     Editor {
@@ -186,15 +192,18 @@ pub fn open_in_editor(path: &str, line: Option<u32>, editor_id: &str) -> AppResu
         return Err(AppError::msg(format!("{path} does not exist")));
     }
     let chosen = match editor_id.trim() {
-        "" | "auto" => EDITORS.iter().find_map(|editor| locate(editor).map(|exe| (editor, exe))),
+        "" | "auto" => EDITORS
+            .iter()
+            .find_map(|editor| locate(editor).map(|exe| (editor, exe))),
         "system" => None,
         id => {
             let editor = EDITORS
                 .iter()
                 .find(|editor| editor.id == id)
                 .ok_or_else(|| AppError::msg(format!("Unknown editor: {id}")))?;
-            let exe = locate(editor)
-                .ok_or_else(|| AppError::msg(format!("{} was not found on this machine", editor.name)))?;
+            let exe = locate(editor).ok_or_else(|| {
+                AppError::msg(format!("{} was not found on this machine", editor.name))
+            })?;
             Some((editor, exe))
         }
     };

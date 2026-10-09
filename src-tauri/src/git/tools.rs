@@ -58,7 +58,10 @@ pub fn write_tool_config(config: &ToolConfig) -> AppResult<ToolConfig> {
         fs::write(&path, "")?;
     }
     let mut cfg = git2::Config::open(&path)?;
-    for (key, value) in [("diff.tool", &config.diff_tool), ("merge.tool", &config.merge_tool)] {
+    for (key, value) in [
+        ("diff.tool", &config.diff_tool),
+        ("merge.tool", &config.merge_tool),
+    ] {
         let value = value.trim();
         if value.is_empty() {
             let _ = cfg.remove(key);
@@ -67,10 +70,14 @@ pub fn write_tool_config(config: &ToolConfig) -> AppResult<ToolConfig> {
         }
     }
     for (name, diff_cmd, merge_cmd) in EDITOR_TOOLS {
-        if config.diff_tool.trim() == *name && cfg.get_string(&format!("difftool.{name}.cmd")).is_err() {
+        if config.diff_tool.trim() == *name
+            && cfg.get_string(&format!("difftool.{name}.cmd")).is_err()
+        {
             cfg.set_str(&format!("difftool.{name}.cmd"), diff_cmd)?;
         }
-        if config.merge_tool.trim() == *name && cfg.get_string(&format!("mergetool.{name}.cmd")).is_err() {
+        if config.merge_tool.trim() == *name
+            && cfg.get_string(&format!("mergetool.{name}.cmd")).is_err()
+        {
             cfg.set_str(&format!("mergetool.{name}.cmd"), merge_cmd)?;
             cfg.set_bool(&format!("mergetool.{name}.trustExitCode"), true)?;
         }
@@ -89,23 +96,42 @@ pub(super) fn difftool_args(repo: &Repository, source: &FileSource) -> AppResult
             }
             paths.push(safe_repo_path(path)?);
         }
-        FileSource::Commit { oid, path, old_path } => {
+        FileSource::Commit {
+            oid,
+            path,
+            old_path,
+        } => {
             let commit = peel_commit(repo, oid)?;
             let parent = commit
                 .parent_id(0)
                 .map(|id| id.to_string())
                 .unwrap_or_else(|_| EMPTY_TREE.to_string());
             args.extend(["-M".to_string(), parent, commit.id().to_string()]);
-            paths.extend(old_path.iter().map(|old| safe_repo_path(old)).collect::<AppResult<Vec<_>>>()?);
+            paths.extend(
+                old_path
+                    .iter()
+                    .map(|old| safe_repo_path(old))
+                    .collect::<AppResult<Vec<_>>>()?,
+            );
             paths.push(safe_repo_path(path)?);
         }
-        FileSource::Compare { base, head, path, old_path } => {
+        FileSource::Compare {
+            base,
+            head,
+            path,
+            old_path,
+        } => {
             args.extend([
                 "-M".to_string(),
                 peel_commit(repo, base)?.id().to_string(),
                 peel_commit(repo, head)?.id().to_string(),
             ]);
-            paths.extend(old_path.iter().map(|old| safe_repo_path(old)).collect::<AppResult<Vec<_>>>()?);
+            paths.extend(
+                old_path
+                    .iter()
+                    .map(|old| safe_repo_path(old))
+                    .collect::<AppResult<Vec<_>>>()?,
+            );
             paths.push(safe_repo_path(path)?);
         }
         FileSource::Stash { oid, path } => {
@@ -142,7 +168,9 @@ pub fn launch_difftool(
     thread::spawn(move || {
         let argv: Vec<&str> = args.iter().map(String::as_str).collect();
         match run_git(&root, &argv) {
-            Ok(output) if !output.status.success() => on_error(git_output_error(output).to_string()),
+            Ok(output) if !output.status.success() => {
+                on_error(git_output_error(output).to_string())
+            }
             Err(err) => on_error(err.to_string()),
             Ok(_) => {}
         }

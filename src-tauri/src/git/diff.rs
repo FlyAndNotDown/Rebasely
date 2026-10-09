@@ -137,7 +137,11 @@ pub(super) fn diff_options_for(path: &str, include_untracked: bool) -> DiffOptio
 
 /// Options for a diff that is only displayed. Hiding whitespace makes it unfit
 /// for building patches, so line staging always uses `diff_options_for`.
-pub(super) fn view_options_for(path: &str, include_untracked: bool, ignore_whitespace: bool) -> DiffOptions {
+pub(super) fn view_options_for(
+    path: &str,
+    include_untracked: bool,
+    ignore_whitespace: bool,
+) -> DiffOptions {
     let mut opts = diff_options_for(path, include_untracked);
     if ignore_whitespace {
         opts.ignore_whitespace(true);
@@ -323,9 +327,10 @@ pub(super) fn parse_name_status_z(bytes: &[u8]) -> AppResult<Vec<CommitFile>> {
         };
         let (path, old_path) = if matches!(kind, "renamed" | "copied") {
             match parts.next() {
-                Some(path) if !path.is_empty() => {
-                    (String::from_utf8_lossy(path).replace('\\', "/"), Some(first))
-                }
+                Some(path) if !path.is_empty() => (
+                    String::from_utf8_lossy(path).replace('\\', "/"),
+                    Some(first),
+                ),
                 _ => (first, None),
             }
         } else {
@@ -397,17 +402,14 @@ pub fn compare_files(repo: &Repository, base: &str, head: &str) -> AppResult<Vec
     compare_files_from_git2(repo, &base_commit, &head_commit)
 }
 
-pub(super) fn compare_files_from_git(root: &Path, base: &str, head: &str) -> AppResult<Vec<CommitFile>> {
+pub(super) fn compare_files_from_git(
+    root: &Path,
+    base: &str,
+    head: &str,
+) -> AppResult<Vec<CommitFile>> {
     let stdout = run_git_stdout(
         root,
-        &[
-            "diff",
-            "--name-status",
-            "-z",
-            "--find-renames",
-            base,
-            head,
-        ],
+        &["diff", "--name-status", "-z", "--find-renames", base, head],
     )?;
     parse_name_status_z(&stdout)
 }

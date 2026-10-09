@@ -16,9 +16,13 @@ pub struct SubmoduleInfo {
 pub(super) fn parse_submodule_status(text: &str) -> Vec<(String, String, String)> {
     let mut items = Vec::new();
     for line in text.lines() {
-        let Some(flag) = line.chars().next() else { continue };
+        let Some(flag) = line.chars().next() else {
+            continue;
+        };
         let rest = &line[flag.len_utf8()..];
-        let Some((commit, after)) = rest.split_once(' ') else { continue };
+        let Some((commit, after)) = rest.split_once(' ') else {
+            continue;
+        };
         let path = match after.rfind(" (") {
             Some(index) if after.ends_with(')') => &after[..index],
             _ => after,
@@ -29,7 +33,11 @@ pub(super) fn parse_submodule_status(text: &str) -> Vec<(String, String, String)
             'U' => "conflicted",
             _ => "clean",
         };
-        items.push((state.to_string(), commit.to_string(), path.replace('\\', "/")));
+        items.push((
+            state.to_string(),
+            commit.to_string(),
+            path.replace('\\', "/"),
+        ));
     }
     items
 }
@@ -71,7 +79,11 @@ pub fn update_submodules(
     on_progress: impl FnMut(&str) + Send,
 ) -> AppResult<WorkspaceSnapshot> {
     let mut args = vec!["submodule", "update", "--init", "--recursive", "--progress"];
-    let specs: Vec<String> = paths.iter().map(|path| to_git_path(path)).filter(|path| !path.is_empty()).collect();
+    let specs: Vec<String> = paths
+        .iter()
+        .map(|path| to_git_path(path))
+        .filter(|path| !path.is_empty())
+        .collect();
     if !specs.is_empty() {
         args.push("--");
         args.extend(specs.iter().map(String::as_str));
@@ -98,7 +110,11 @@ pub struct WorktreeInfo {
 
 pub(super) fn parse_worktree_list(text: &str) -> Vec<WorktreeInfo> {
     let mut items = Vec::new();
-    for (index, record) in text.split("\n\n").filter(|record| !record.trim().is_empty()).enumerate() {
+    for (index, record) in text
+        .split("\n\n")
+        .filter(|record| !record.trim().is_empty())
+        .enumerate()
+    {
         let mut item = WorktreeInfo {
             path: String::new(),
             head: None,
@@ -168,7 +184,10 @@ pub fn add_worktree(
         args.extend(["-b", name]);
     }
     args.push(path);
-    match (new_branch, branch.map(str::trim).filter(|name| !name.is_empty())) {
+    match (
+        new_branch,
+        branch.map(str::trim).filter(|name| !name.is_empty()),
+    ) {
         (None, Some(branch)) => args.push(branch),
         (Some(_), _) => {
             if let Some(start) = start.map(str::trim).filter(|start| !start.is_empty()) {

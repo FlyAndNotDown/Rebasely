@@ -44,7 +44,10 @@ fn close_idle_log_streams() {
     let map = slots().lock().unwrap_or_else(|err| err.into_inner());
     for slot in map.values() {
         if let Ok(mut stream) = slot.try_lock() {
-            if stream.as_ref().is_some_and(|item| item.used.elapsed() > STREAM_IDLE) {
+            if stream
+                .as_ref()
+                .is_some_and(|item| item.used.elapsed() > STREAM_IDLE)
+            {
                 *stream = None;
             }
         }
@@ -70,7 +73,12 @@ pub fn retain_log_streams(open: &[String]) {
 /// Date-ordered `git log` walks the whole graph before printing its first line,
 /// and `--skip` repeats that walk for every page. Instead the process for a
 /// repository stays open between pages, so only the first page pays for it.
-pub(super) fn log_page(root: &Path, args: &[String], skip: usize, limit: usize) -> AppResult<Vec<u8>> {
+pub(super) fn log_page(
+    root: &Path,
+    args: &[String],
+    skip: usize,
+    limit: usize,
+) -> AppResult<Vec<u8>> {
     let slot = slot_for(root);
     let mut guard = slot.lock().unwrap_or_else(|err| err.into_inner());
     let reusable = skip > 0

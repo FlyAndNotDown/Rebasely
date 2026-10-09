@@ -63,7 +63,9 @@ pub fn with_cancel<T>(activity_id: Option<&str>, f: impl FnOnce() -> T) -> T {
 }
 
 pub fn cancel_activity(id: &str) -> bool {
-    let tokens = cancel_tokens().lock().unwrap_or_else(|err| err.into_inner());
+    let tokens = cancel_tokens()
+        .lock()
+        .unwrap_or_else(|err| err.into_inner());
     match tokens.get(id) {
         Some(token) => {
             token.store(true, Ordering::Relaxed);
@@ -101,7 +103,9 @@ fn kill_tree(child: &mut std::process::Child) {
 /// A killed git cannot release its lock files, and every later command would
 /// then fail on them. Only locks created after `since` are removed.
 fn remove_stale_locks(root: &Path, since: SystemTime) {
-    let Ok(repo) = Repository::open(root) else { return };
+    let Ok(repo) = Repository::open(root) else {
+        return;
+    };
     let git_dir = repo.path().to_path_buf();
     let common = repo.commondir().to_path_buf();
     let mut candidates = vec![
@@ -114,7 +118,9 @@ fn remove_stale_locks(root: &Path, since: SystemTime) {
     ];
     let mut dirs = vec![common.join("refs")];
     while let Some(dir) = dirs.pop() {
-        let Ok(entries) = fs::read_dir(&dir) else { continue };
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
@@ -200,7 +206,11 @@ pub(super) fn run_git_input(root: &Path, args: &[&str], input: &[u8]) -> AppResu
 
 /// Runs a git command that takes pathspecs, passing them NUL-separated on
 /// stdin and matching them literally.
-pub(super) fn run_git_pathspecs(root: &Path, args: &[&str], paths: &[String]) -> AppResult<Vec<u8>> {
+pub(super) fn run_git_pathspecs(
+    root: &Path,
+    args: &[&str],
+    paths: &[String],
+) -> AppResult<Vec<u8>> {
     let mut argv = vec!["--literal-pathspecs"];
     argv.extend_from_slice(args);
     argv.extend_from_slice(&["--pathspec-from-file=-", "--pathspec-file-nul"]);
@@ -283,7 +293,11 @@ pub(super) fn run_git_progress(
     let mut logs = Vec::new();
     let mut killed = false;
     loop {
-        if !killed && cancel.as_ref().is_some_and(|token| token.load(Ordering::Relaxed)) {
+        if !killed
+            && cancel
+                .as_ref()
+                .is_some_and(|token| token.load(Ordering::Relaxed))
+        {
             kill_tree(&mut child);
             killed = true;
         }
@@ -301,9 +315,7 @@ pub(super) fn run_git_progress(
         on_progress(&line);
     }
 
-    let status = child
-        .wait()
-        .map_err(|err| AppError::msg(err.to_string()))?;
+    let status = child.wait().map_err(|err| AppError::msg(err.to_string()))?;
     if let Some(handle) = stderr_thread {
         let _ = handle.join();
     }
@@ -341,7 +353,10 @@ pub(super) fn run_git_progress(
     }))
 }
 
-pub(super) fn read_progress_line(reader: &mut impl BufRead, buf: &mut Vec<u8>) -> std::io::Result<usize> {
+pub(super) fn read_progress_line(
+    reader: &mut impl BufRead,
+    buf: &mut Vec<u8>,
+) -> std::io::Result<usize> {
     buf.clear();
     loop {
         let consumed = {

@@ -9,8 +9,8 @@ use std::thread;
 use std::time::Duration;
 
 use git2::{
-    BranchType, DiffFormat, DiffOptions, ErrorCode, ObjectType, Oid, Repository,
-    Sort, Status, StatusOptions,
+    BranchType, DiffFormat, DiffOptions, ErrorCode, ObjectType, Oid, Repository, Sort, Status,
+    StatusOptions,
 };
 use serde::Serialize;
 
@@ -340,9 +340,8 @@ fn ensure_inside_workdir(repo: &Repository, relative: &str) -> AppResult<PathBuf
 
 pub fn discover(path: &str) -> AppResult<Repository> {
     let path = strip_verbatim_prefix(path);
-    let repo = Repository::discover(&path).map_err(|_| {
-        AppError::msg(format!("No Git repository found at {path}"))
-    })?;
+    let repo = Repository::discover(&path)
+        .map_err(|_| AppError::msg(format!("No Git repository found at {path}")))?;
     if repo.is_bare() {
         return Err(AppError::msg("Bare repositories are not supported yet"));
     }

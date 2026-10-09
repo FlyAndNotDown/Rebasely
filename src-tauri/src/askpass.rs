@@ -54,9 +54,15 @@ pub fn start(app: &AppHandle) {
     if SERVER.get().is_some() {
         return;
     }
-    let Ok(exe) = std::env::current_exe() else { return };
-    let Ok(listener) = TcpListener::bind(("127.0.0.1", 0)) else { return };
-    let Ok(addr) = listener.local_addr() else { return };
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    let Ok(listener) = TcpListener::bind(("127.0.0.1", 0)) else {
+        return;
+    };
+    let Ok(addr) = listener.local_addr() else {
+        return;
+    };
     let server = Server {
         port: addr.port(),
         token: random_token(),
@@ -103,14 +109,20 @@ fn handle(mut stream: TcpStream, emit: &Emit, token: &str) {
     static NEXT: AtomicU64 = AtomicU64::new(1);
     let id = NEXT.fetch_add(1, Ordering::Relaxed);
     let (sender, receiver) = mpsc::channel();
-    pending().lock().unwrap_or_else(|err| err.into_inner()).insert(id, sender);
+    pending()
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+        .insert(id, sender);
     emit(PromptEvent {
         id,
         prompt,
         activity_id,
     });
     let answer = receiver.recv().ok().flatten();
-    pending().lock().unwrap_or_else(|err| err.into_inner()).remove(&id);
+    pending()
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+        .remove(&id);
     let reply = match answer {
         Some(text) => format!("1{text}"),
         None => "0".to_string(),
@@ -201,21 +213,33 @@ mod tests {
             listener,
             "token".to_string(),
             Arc::new(move |event: PromptEvent| {
-                record.lock().unwrap().push((event.prompt.clone(), event.activity_id.clone()));
-                let reply = event.prompt.starts_with("Password").then(|| "hunter2".to_string());
+                record
+                    .lock()
+                    .unwrap()
+                    .push((event.prompt.clone(), event.activity_id.clone()));
+                let reply = event
+                    .prompt
+                    .starts_with("Password")
+                    .then(|| "hunter2".to_string());
                 thread::spawn(move || answer(event.id, reply).unwrap());
             }),
         );
 
         let password = ask(&port, "token", "fetch-1", "Password for 'https://host': ");
         assert_eq!(password.as_deref(), Some("hunter2"));
-        assert_eq!(ask(&port, "token", "", "Username for 'https://host': "), None);
+        assert_eq!(
+            ask(&port, "token", "", "Username for 'https://host': "),
+            None
+        );
         assert_eq!(ask(&port, "wrong", "fetch-1", "Password: "), None);
         let seen = seen.lock().unwrap();
         assert_eq!(
             *seen,
             vec![
-                ("Password for 'https://host':".to_string(), Some("fetch-1".to_string())),
+                (
+                    "Password for 'https://host':".to_string(),
+                    Some("fetch-1".to_string())
+                ),
                 ("Username for 'https://host':".to_string(), None),
             ]
         );

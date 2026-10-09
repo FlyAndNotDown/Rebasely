@@ -62,7 +62,10 @@ fn stash_diff_includes_tracked_and_untracked_files() {
     assert_eq!(kind("extra.txt"), Some("untracked"), "{:?}", details.files);
 
     let tracked = stash_file_diff(&repo, &id, "tracked.txt", false).unwrap();
-    assert!(tracked.lines.iter().any(|line| line.content.contains("changed")));
+    assert!(tracked
+        .lines
+        .iter()
+        .any(|line| line.content.contains("changed")));
     let extra = stash_file_diff(&repo, &id, "extra.txt", false).unwrap();
     assert!(
         extra
@@ -112,8 +115,12 @@ fn head_summary(repo: &Repository) -> String {
 fn rebase_onto_replays_commits() {
     let (root, mut repo) = temp_repo();
     commit_file(&mut repo, &root, "base.txt", "base\n", "base");
-    repo.branch("feature", &repo.head().unwrap().peel_to_commit().unwrap(), false)
-        .unwrap();
+    repo.branch(
+        "feature",
+        &repo.head().unwrap().peel_to_commit().unwrap(),
+        false,
+    )
+    .unwrap();
     commit_file(&mut repo, &root, "main.txt", "main\n", "main-tip");
     repo.set_head("refs/heads/feature").unwrap();
     repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
@@ -182,8 +189,12 @@ fn interactive_rebase_can_reword_and_drop() {
 fn rebase_conflict_can_abort() {
     let (root, mut repo) = temp_repo();
     commit_file(&mut repo, &root, "file.txt", "base\n", "base");
-    repo.branch("other", &repo.head().unwrap().peel_to_commit().unwrap(), false)
-        .unwrap();
+    repo.branch(
+        "other",
+        &repo.head().unwrap().peel_to_commit().unwrap(),
+        false,
+    )
+    .unwrap();
     commit_file(&mut repo, &root, "file.txt", "left\n", "left");
     repo.set_head("refs/heads/other").unwrap();
     repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
@@ -210,8 +221,12 @@ fn rebase_conflict_can_abort() {
 fn rebase_conflict_can_continue() {
     let (root, mut repo) = temp_repo();
     commit_file(&mut repo, &root, "file.txt", "base\n", "base");
-    repo.branch("other", &repo.head().unwrap().peel_to_commit().unwrap(), false)
-        .unwrap();
+    repo.branch(
+        "other",
+        &repo.head().unwrap().peel_to_commit().unwrap(),
+        false,
+    )
+    .unwrap();
     commit_file(&mut repo, &root, "file.txt", "left\n", "left");
     repo.set_head("refs/heads/other").unwrap();
     repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
@@ -239,8 +254,12 @@ fn reset_can_move_to_a_commit_on_another_branch() {
     let (root, mut repo) = temp_repo();
     commit_file(&mut repo, &root, "file.txt", "base\n", "base");
     let current = repo.head().unwrap().name().unwrap().to_string();
-    repo.branch("other", &repo.head().unwrap().peel_to_commit().unwrap(), false)
-        .unwrap();
+    repo.branch(
+        "other",
+        &repo.head().unwrap().peel_to_commit().unwrap(),
+        false,
+    )
+    .unwrap();
     commit_file(&mut repo, &root, "file.txt", "left\n", "left");
     let other_tip = {
         repo.set_head("refs/heads/other").unwrap();
@@ -263,15 +282,22 @@ fn reset_can_move_to_a_commit_on_another_branch() {
 fn merge_conflict_can_take_ours_and_continue() {
     let (root, mut repo) = temp_repo();
     commit_file(&mut repo, &root, "file.txt", "base\n", "base");
-    repo.branch("other", &repo.head().unwrap().peel_to_commit().unwrap(), false)
-        .unwrap();
+    repo.branch(
+        "other",
+        &repo.head().unwrap().peel_to_commit().unwrap(),
+        false,
+    )
+    .unwrap();
     commit_file(&mut repo, &root, "file.txt", "left\n", "left");
     let incoming = repo.head().unwrap().target().unwrap().to_string();
     repo.set_head("refs/heads/other").unwrap();
     repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
         .unwrap();
     commit_file(&mut repo, &root, "file.txt", "right\n", "right");
-    assert!(merge_ref(&mut repo, &incoming).unwrap_err().to_string().contains("conflicts"));
+    assert!(merge_ref(&mut repo, &incoming)
+        .unwrap_err()
+        .to_string()
+        .contains("conflicts"));
     assert_eq!(git_operation(&repo).unwrap().kind, "merge");
     let prepared = git_operation(&repo).unwrap().message.unwrap();
     assert!(prepared.starts_with("Merge commit"), "{prepared}");
@@ -281,7 +307,9 @@ fn merge_conflict_can_take_ours_and_continue() {
     assert!(git_operation(&repo).is_none());
     assert_eq!(head_summary(&repo), prepared.lines().next().unwrap());
     assert_eq!(
-        fs::read_to_string(root.join("file.txt")).unwrap().replace("\r\n", "\n"),
+        fs::read_to_string(root.join("file.txt"))
+            .unwrap()
+            .replace("\r\n", "\n"),
         "right\n"
     );
     let _ = fs::remove_dir_all(&root);
@@ -314,8 +342,12 @@ fn merge_commit_lists_files_against_first_parent() {
     let (root, mut repo) = temp_repo();
     commit_file(&mut repo, &root, "base.txt", "base\n", "base");
     let main_ref = repo.head().unwrap().name().unwrap().to_string();
-    repo.branch("side", &repo.head().unwrap().peel_to_commit().unwrap(), false)
-        .unwrap();
+    repo.branch(
+        "side",
+        &repo.head().unwrap().peel_to_commit().unwrap(),
+        false,
+    )
+    .unwrap();
     commit_file(&mut repo, &root, "main.txt", "main\n", "main");
     repo.set_head("refs/heads/side").unwrap();
     repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
@@ -330,7 +362,11 @@ fn merge_commit_lists_files_against_first_parent() {
     let head = repo.head().unwrap().peel_to_commit().unwrap();
     assert_eq!(head.parent_count(), 2);
     let details = commit_details(&repo, &head.id().to_string()).unwrap();
-    let paths: Vec<_> = details.files.iter().map(|file| file.path.as_str()).collect();
+    let paths: Vec<_> = details
+        .files
+        .iter()
+        .map(|file| file.path.as_str())
+        .collect();
     assert_eq!(paths, vec!["side.txt"]);
     let _ = fs::remove_dir_all(&root);
 }
@@ -357,7 +393,11 @@ fn discard_restores_tracked_and_removes_new_files() {
     )
     .unwrap();
 
-    let read = |name: &str| fs::read_to_string(root.join(name)).unwrap().replace("\r\n", "\n");
+    let read = |name: &str| {
+        fs::read_to_string(root.join(name))
+            .unwrap()
+            .replace("\r\n", "\n")
+    };
     assert_eq!(read("tracked.txt"), "base\n");
     assert_eq!(read("odd[1].txt"), "base\n");
     assert!(!root.join("staged-new.txt").exists());
@@ -386,7 +426,10 @@ fn pathspec_chunks_split_long_lists() {
     let paths: Vec<String> = (0..3000).map(|n| format!("dir/file-{n:05}.txt")).collect();
     let chunks = pathspec_chunks(&paths);
     assert!(chunks.len() > 1);
-    assert_eq!(chunks.iter().map(|chunk| chunk.len()).sum::<usize>(), paths.len());
+    assert_eq!(
+        chunks.iter().map(|chunk| chunk.len()).sum::<usize>(),
+        paths.len()
+    );
     assert!(pathspec_chunks(&[]).is_empty());
 }
 
@@ -412,19 +455,40 @@ fn stash_actions_follow_the_id_after_indexes_shift() {
 #[test]
 fn file_history_follows_a_rename() {
     let (root, mut repo) = temp_repo();
-    commit_file(&mut repo, &root, "old.txt", "one\ntwo\nthree\nfour\n", "add old");
-    commit_file(&mut repo, &root, "old.txt", "one\ntwo\nthree\nfour\nfive\n", "edit old");
+    commit_file(
+        &mut repo,
+        &root,
+        "old.txt",
+        "one\ntwo\nthree\nfour\n",
+        "add old",
+    );
+    commit_file(
+        &mut repo,
+        &root,
+        "old.txt",
+        "one\ntwo\nthree\nfour\nfive\n",
+        "edit old",
+    );
     run_git_stdout(&root, &["mv", "old.txt", "new name.txt"]).unwrap();
     run_git_stdout(&root, &["commit", "-q", "-m", "rename"]).unwrap();
 
     let commits = file_commits(&repo, "new name.txt", 10, 0).unwrap();
     let seen: Vec<_> = commits
         .iter()
-        .map(|commit| (commit.summary.as_str(), commit.path.as_deref().unwrap_or("")))
+        .map(|commit| {
+            (
+                commit.summary.as_str(),
+                commit.path.as_deref().unwrap_or(""),
+            )
+        })
         .collect();
     assert_eq!(
         seen,
-        vec![("rename", "new name.txt"), ("edit old", "old.txt"), ("add old", "old.txt")]
+        vec![
+            ("rename", "new name.txt"),
+            ("edit old", "old.txt"),
+            ("add old", "old.txt")
+        ]
     );
     let paged = file_commits(&repo, "new name.txt", 1, 1).unwrap();
     assert_eq!(paged[0].path.as_deref(), Some("old.txt"));
@@ -450,7 +514,13 @@ fn porcelain_status_splits_staged_unstaged_renames_and_conflicts() {
     let staged: Vec<_> = status
         .staged
         .iter()
-        .map(|file| (file.path.as_str(), file.old_path.as_deref(), file.kind.as_str()))
+        .map(|file| {
+            (
+                file.path.as_str(),
+                file.old_path.as_deref(),
+                file.kind.as_str(),
+            )
+        })
         .collect();
     assert_eq!(
         staged,
@@ -481,7 +551,13 @@ fn porcelain_status_splits_staged_unstaged_renames_and_conflicts() {
 #[test]
 fn staged_rename_is_listed_under_its_new_name() {
     let (root, mut repo) = temp_repo();
-    commit_file(&mut repo, &root, "old.txt", "one\ntwo\nthree\nfour\n", "base");
+    commit_file(
+        &mut repo,
+        &root,
+        "old.txt",
+        "one\ntwo\nthree\nfour\n",
+        "base",
+    );
     run_git_stdout(&root, &["mv", "old.txt", "new.txt"]).unwrap();
     let status = status_from_git(&root).unwrap();
     assert_eq!(status.staged.len(), 1, "{:?}", status.staged);
@@ -526,7 +602,14 @@ fn name_status_parser_reads_renames_old_path_first() {
     let files = parse_name_status_z(b"M\0a.txt\0R100\0old.txt\0new.txt\0A\0img.png\0").unwrap();
     let seen: Vec<_> = files
         .iter()
-        .map(|file| (file.path.as_str(), file.old_path.as_deref(), file.kind.as_str(), file.binary))
+        .map(|file| {
+            (
+                file.path.as_str(),
+                file.old_path.as_deref(),
+                file.kind.as_str(),
+                file.binary,
+            )
+        })
         .collect();
     assert_eq!(
         seen,
@@ -541,7 +624,10 @@ fn name_status_parser_reads_renames_old_path_first() {
 #[test]
 fn keeping_both_sides_drops_markers_and_the_diff3_base() {
     let plain = "a\n<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> side\nz\n";
-    assert_eq!(take_both_sides(plain).as_deref(), Some("a\nours\ntheirs\nz\n"));
+    assert_eq!(
+        take_both_sides(plain).as_deref(),
+        Some("a\nours\ntheirs\nz\n")
+    );
     let diff3 = "<<<<<<< HEAD\nours\n||||||| base\nbase\n=======\ntheirs\n>>>>>>> side\n";
     assert_eq!(take_both_sides(diff3).as_deref(), Some("ours\ntheirs\n"));
     assert_eq!(take_both_sides("no markers\n"), None);
@@ -551,7 +637,13 @@ fn keeping_both_sides_drops_markers_and_the_diff3_base() {
 fn history_pages_are_contiguous_whether_or_not_the_stream_is_reused() {
     let (root, mut repo) = temp_repo();
     for n in 0..10 {
-        commit_file(&mut repo, &root, "file.txt", &format!("{n}\n"), &format!("c{n}"));
+        commit_file(
+            &mut repo,
+            &root,
+            "file.txt",
+            &format!("{n}\n"),
+            &format!("c{n}"),
+        );
     }
     let page = |skip| {
         commits(&repo, 3, skip, None, &[])
@@ -564,7 +656,10 @@ fn history_pages_are_contiguous_whether_or_not_the_stream_is_reused() {
     seen.extend(page(3));
     seen.extend(page(6));
     seen.extend(page(9));
-    assert_eq!(seen, (0..10).rev().map(|n| format!("c{n}")).collect::<Vec<_>>());
+    assert_eq!(
+        seen,
+        (0..10).rev().map(|n| format!("c{n}")).collect::<Vec<_>>()
+    );
     // Out of order: the open stream is at 12, so this restarts and reads through.
     assert_eq!(page(3), vec!["c6", "c5", "c4"]);
     assert!(page(10).is_empty());
@@ -576,12 +671,18 @@ fn history_pages_are_contiguous_whether_or_not_the_stream_is_reused() {
 #[test]
 #[ignore]
 fn bench_history_pages() {
-    let Ok(path) = std::env::var("REBASELY_BENCH_REPO") else { return };
+    let Ok(path) = std::env::var("REBASELY_BENCH_REPO") else {
+        return;
+    };
     let mut repo = open_at(Path::new(&path)).unwrap();
     for skip in [0, 80, 160, 240] {
         let started = std::time::Instant::now();
         let items = commits(&repo, 80, skip, None, &[]).unwrap();
-        println!("skip={skip}: {} commits in {:?}", items.len(), started.elapsed());
+        println!(
+            "skip={skip}: {} commits in {:?}",
+            items.len(),
+            started.elapsed()
+        );
     }
     let started = std::time::Instant::now();
     snapshot(&mut repo).unwrap();
@@ -600,7 +701,10 @@ fn follow_log_parser_tracks_names_across_records() {
                \u{1e}bbbbbbb\0bbbbbbb\0merge\0A\0a@x\x000\0ccccccc ddddddd\0\
                \u{1e}ccccccc\0ccccccc\0edit\0A\0a@x\x000\0\0\nM\0old.txt\0";
     let commits = parse_follow_log(raw.as_bytes(), "new.txt");
-    let paths: Vec<_> = commits.iter().map(|commit| commit.path.clone().unwrap()).collect();
+    let paths: Vec<_> = commits
+        .iter()
+        .map(|commit| commit.path.clone().unwrap())
+        .collect();
     assert_eq!(paths, vec!["new.txt", "old.txt", "old.txt"]);
     assert_eq!(commits[1].parents.len(), 2);
 }
@@ -610,9 +714,14 @@ fn follow_log_parser_tracks_names_across_records() {
 fn use_test_filter(repo: &Repository, root: &Path) {
     let mut config = repo.config().unwrap();
     config
-        .set_str("filter.probe.clean", "sed -e s/plain/CLEAN/ -e s/smudged/CLEAN/")
+        .set_str(
+            "filter.probe.clean",
+            "sed -e s/plain/CLEAN/ -e s/smudged/CLEAN/",
+        )
         .unwrap();
-    config.set_str("filter.probe.smudge", "sed s/CLEAN/smudged/").unwrap();
+    config
+        .set_str("filter.probe.smudge", "sed s/CLEAN/smudged/")
+        .unwrap();
     fs::write(root.join(".gitattributes"), "*.dat filter=probe\n").unwrap();
 }
 
@@ -622,7 +731,9 @@ fn blob_text(repo: &Repository, spec: &str) -> String {
 }
 
 fn workdir_text(root: &Path, name: &str) -> String {
-    fs::read_to_string(root.join(name)).unwrap().replace("\r\n", "\n")
+    fs::read_to_string(root.join(name))
+        .unwrap()
+        .replace("\r\n", "\n")
 }
 
 #[test]
@@ -673,7 +784,10 @@ fn stash_round_trip_runs_both_filters() {
 
     stash_save(&mut repo, "wip", false, &[]).unwrap();
     let id = list_stashes(&mut repo).unwrap()[0].id.clone();
-    assert_eq!(blob_text(&repo, &format!("{id}:asset.dat")), "CLEAN\nCLEAN\n");
+    assert_eq!(
+        blob_text(&repo, &format!("{id}:asset.dat")),
+        "CLEAN\nCLEAN\n"
+    );
     stash_pop(&mut repo, &id).unwrap();
     assert_eq!(workdir_text(&root, "asset.dat"), "smudged\nsmudged\n");
     assert!(list_stashes(&mut repo).unwrap().is_empty());
@@ -714,8 +828,12 @@ fn commit_runs_the_pre_commit_hook() {
 fn committing_during_a_merge_records_both_parents() {
     let (root, mut repo) = temp_repo();
     commit_file(&mut repo, &root, "file.txt", "base\n", "base");
-    repo.branch("other", &repo.head().unwrap().peel_to_commit().unwrap(), false)
-        .unwrap();
+    repo.branch(
+        "other",
+        &repo.head().unwrap().peel_to_commit().unwrap(),
+        false,
+    )
+    .unwrap();
     commit_file(&mut repo, &root, "file.txt", "left\n", "left");
     let incoming = repo.head().unwrap().target().unwrap().to_string();
     checkout_branch(&repo, "other").unwrap();
@@ -740,7 +858,14 @@ fn continuing_a_cherry_pick_with_an_edited_message_keeps_the_author() {
     stage_paths(&repo, &["file.txt".into()]).unwrap();
     run_git_input(
         &root,
-        &["-c", "user.name=Side Author", "-c", "user.email=side@example.com", "commit", "--file=-"],
+        &[
+            "-c",
+            "user.name=Side Author",
+            "-c",
+            "user.email=side@example.com",
+            "commit",
+            "--file=-",
+        ],
         b"side change",
     )
     .unwrap();
@@ -756,7 +881,10 @@ fn continuing_a_cherry_pick_with_an_edited_message_keeps_the_author() {
     commit_file(&mut repo, &root, "file.txt", "main\n", "main change");
 
     assert!(cherry_pick_commit(&mut repo, &picked).is_err());
-    assert_eq!(git_operation(&repo).unwrap().message.as_deref(), Some("side change"));
+    assert_eq!(
+        git_operation(&repo).unwrap().message.as_deref(),
+        Some("side change")
+    );
     resolve_conflict(&mut repo, "file.txt", "theirs").unwrap();
     operation_continue(&mut repo, Some("side change, reworded")).unwrap();
 
@@ -785,7 +913,10 @@ fn continuing_a_rebase_with_an_edited_message_uses_it() {
     checkout_branch(&repo, "feature").unwrap();
 
     assert!(rebase_onto(&mut repo, &main).is_err());
-    assert_eq!(git_operation(&repo).unwrap().message.as_deref(), Some("feature change"));
+    assert_eq!(
+        git_operation(&repo).unwrap().message.as_deref(),
+        Some("feature change")
+    );
     resolve_conflict(&mut repo, "file.txt", "theirs").unwrap();
     operation_continue(&mut repo, Some("feature change, rebased")).unwrap();
 
@@ -833,14 +964,23 @@ fn pull_and_push_follow_an_upstream_with_a_different_name() {
 
     let local_root = PathBuf::from(format!("{}-local", origin_root.display()));
     let _ = fs::remove_dir_all(&local_root);
-    clone_repository(&origin_root.to_string_lossy(), &local_root.to_string_lossy(), |_| {}).unwrap();
+    clone_repository(
+        &origin_root.to_string_lossy(),
+        &local_root.to_string_lossy(),
+        |_| {},
+    )
+    .unwrap();
     let mut local = open_at(&local_root).unwrap();
     {
         let mut config = local.config().unwrap();
         config.set_str("user.name", "Rebasely Test").unwrap();
         config.set_str("user.email", "test@example.com").unwrap();
     }
-    run_git_stdout(&local_root, &["switch", "-c", "feature", "--track", "origin/feat-x"]).unwrap();
+    run_git_stdout(
+        &local_root,
+        &["switch", "-c", "feature", "--track", "origin/feat-x"],
+    )
+    .unwrap();
 
     origin.set_head("refs/heads/feat-x").unwrap();
     origin
@@ -878,7 +1018,10 @@ fn ignoring_appends_new_patterns_once_and_hides_the_files() {
     fs::write(root.join("debug.log"), "x\n").unwrap();
     fs::write(root.join("keep.txt"), "x\n").unwrap();
     ignore_patterns(&repo, &["*.log".into(), "target/".into(), "*.log".into()]).unwrap();
-    assert_eq!(fs::read_to_string(root.join(".gitignore")).unwrap(), "target/\r\n*.log\r\n");
+    assert_eq!(
+        fs::read_to_string(root.join(".gitignore")).unwrap(),
+        "target/\r\n*.log\r\n"
+    );
     let status = status_snapshot(&repo).unwrap();
     let untracked: Vec<_> = status
         .unstaged
@@ -895,15 +1038,28 @@ fn numbered_lines(count: usize) -> String {
 }
 
 /// Picks the changed lines in the displayed diff whose text matches `pick`.
-fn pick_lines(repo: &Repository, path: &str, staged: bool, pick: impl Fn(&str) -> bool) -> Vec<LineRef> {
+fn pick_lines(
+    repo: &Repository,
+    path: &str,
+    staged: bool,
+    pick: impl Fn(&str) -> bool,
+) -> Vec<LineRef> {
     workdir_diff(repo, path, staged, false)
         .unwrap()
         .lines
         .iter()
         .filter(|line| matches!(line.kind.as_str(), "add" | "delete") && pick(&line.content))
         .map(|line| LineRef {
-            old: if line.kind == "delete" { line.old_lineno } else { None },
-            new: if line.kind == "add" { line.new_lineno } else { None },
+            old: if line.kind == "delete" {
+                line.old_lineno
+            } else {
+                None
+            },
+            new: if line.kind == "add" {
+                line.new_lineno
+            } else {
+                None
+            },
         })
         .collect()
 }
@@ -917,7 +1073,9 @@ fn staging_selected_lines_leaves_the_rest_unstaged() {
         .replace("line 15\n", "line fifteen\n");
     fs::write(root.join("file.txt"), &edited).unwrap();
 
-    let lines = pick_lines(&repo, "file.txt", false, |text| text == "line 2" || text == "line two");
+    let lines = pick_lines(&repo, "file.txt", false, |text| {
+        text == "line 2" || text == "line two"
+    });
     assert_eq!(lines.len(), 2);
     apply_lines(&mut repo, "file.txt", false, "stage", &lines).unwrap();
 
@@ -937,7 +1095,9 @@ fn unstaging_and_discarding_selected_lines_touch_only_those_lines() {
     fs::write(root.join("file.txt"), &edited).unwrap();
     stage_paths(&repo, &["file.txt".into()]).unwrap();
 
-    let fifteen = pick_lines(&repo, "file.txt", true, |text| text.contains("15") || text.contains("fifteen"));
+    let fifteen = pick_lines(&repo, "file.txt", true, |text| {
+        text.contains("15") || text.contains("fifteen")
+    });
     apply_lines(&mut repo, "file.txt", true, "unstage", &fifteen).unwrap();
     assert_eq!(
         blob_text(&repo, ":file.txt"),
@@ -982,8 +1142,15 @@ fn a_last_line_without_a_newline_can_be_staged() {
 #[test]
 fn line_actions_work_on_crlf_working_trees() {
     let (root, mut repo) = temp_repo();
-    repo.config().unwrap().set_bool("core.autocrlf", true).unwrap();
-    fs::write(root.join("file.txt"), numbered_lines(12).replace('\n', "\r\n")).unwrap();
+    repo.config()
+        .unwrap()
+        .set_bool("core.autocrlf", true)
+        .unwrap();
+    fs::write(
+        root.join("file.txt"),
+        numbered_lines(12).replace('\n', "\r\n"),
+    )
+    .unwrap();
     stage_paths(&repo, &["file.txt".into()]).unwrap();
     commit(&repo, "base", false).unwrap();
     let edited = numbered_lines(12)
@@ -992,26 +1159,45 @@ fn line_actions_work_on_crlf_working_trees() {
         .replace('\n', "\r\n");
     fs::write(root.join("file.txt"), &edited).unwrap();
 
-    let first = pick_lines(&repo, "file.txt", false, |text| text.ends_with(" 1") || text == "line one");
+    let first = pick_lines(&repo, "file.txt", false, |text| {
+        text.ends_with(" 1") || text == "line one"
+    });
     apply_lines(&mut repo, "file.txt", false, "stage", &first).unwrap();
-    assert_eq!(blob_text(&repo, ":file.txt"), numbered_lines(12).replace("line 1\n", "line one\n"));
+    assert_eq!(
+        blob_text(&repo, ":file.txt"),
+        numbered_lines(12).replace("line 1\n", "line one\n")
+    );
 
     let rest = pick_lines(&repo, "file.txt", false, |_| true);
     apply_lines(&mut repo, "file.txt", false, "discard", &rest).unwrap();
     let on_disk = fs::read_to_string(root.join("file.txt")).unwrap();
-    assert_eq!(on_disk, numbered_lines(12).replace("line 1\n", "line one\n").replace('\n', "\r\n"));
+    assert_eq!(
+        on_disk,
+        numbered_lines(12)
+            .replace("line 1\n", "line one\n")
+            .replace('\n', "\r\n")
+    );
     let _ = fs::remove_dir_all(&root);
 }
 
 #[test]
 fn hiding_whitespace_drops_indentation_only_changes() {
     let (root, mut repo) = temp_repo();
-    commit_file(&mut repo, &root, "file.txt", "fn main() {\nbody();\n}\n", "base");
+    commit_file(
+        &mut repo,
+        &root,
+        "file.txt",
+        "fn main() {\nbody();\n}\n",
+        "base",
+    );
     fs::write(root.join("file.txt"), "fn main() {\n    body();\n}\n").unwrap();
     let shown = workdir_diff(&repo, "file.txt", false, false).unwrap();
     assert!(shown.lines.iter().any(|line| line.kind == "add"));
     let hidden = workdir_diff(&repo, "file.txt", false, true).unwrap();
-    assert!(!hidden.lines.iter().any(|line| line.kind == "add" || line.kind == "delete"));
+    assert!(!hidden
+        .lines
+        .iter()
+        .any(|line| line.kind == "add" || line.kind == "delete"));
     let _ = fs::remove_dir_all(&root);
 }
 
@@ -1020,7 +1206,10 @@ fn stale_line_selections_are_rejected() {
     let (root, mut repo) = temp_repo();
     commit_file(&mut repo, &root, "file.txt", "one\ntwo\n", "base");
     fs::write(root.join("file.txt"), "one\nTWO\n").unwrap();
-    let stale = vec![LineRef { old: Some(40), new: None }];
+    let stale = vec![LineRef {
+        old: Some(40),
+        new: None,
+    }];
     let err = apply_lines(&mut repo, "file.txt", false, "stage", &stale).unwrap_err();
     assert!(err.to_string().contains("no longer changes"), "{err}");
     assert!(apply_lines(&mut repo, "file.txt", true, "stage", &stale).is_err());
@@ -1037,27 +1226,43 @@ fn image_pairs_read_each_side_and_flag_lfs_pointers() {
     commit(&repo, "add icon", false).unwrap();
     fs::write(root.join("icon.png"), png_v2).unwrap();
 
-    let source = FileSource::Workdir { path: "icon.png".into(), staged: false };
+    let source = FileSource::Workdir {
+        path: "icon.png".into(),
+        staged: false,
+    };
     let pair = image_pair(&repo, &source).unwrap();
     let before = pair.before.unwrap();
     let after = pair.after.unwrap();
-    assert!(before.data_url.unwrap().starts_with("data:image/png;base64,"));
+    assert!(before
+        .data_url
+        .unwrap()
+        .starts_with("data:image/png;base64,"));
     assert_eq!(after.size, png_v2.len() as u64);
     assert!(!after.lfs);
 
     stage_paths(&repo, &["icon.png".into()]).unwrap();
     commit(&repo, "update icon", false).unwrap();
     let head = repo.head().unwrap().target().unwrap().to_string();
-    let source = FileSource::Commit { oid: head, path: "icon.png".into(), old_path: None };
+    let source = FileSource::Commit {
+        oid: head,
+        path: "icon.png".into(),
+        old_path: None,
+    };
     let pair = image_pair(&repo, &source).unwrap();
     assert_eq!(pair.before.unwrap().size, png_v1.len() as u64);
     assert_eq!(pair.after.unwrap().size, png_v2.len() as u64);
 
-    let pointer = image_side("big.png", b"version https://git-lfs.github.com/spec/v1\noid sha256:abc\nsize 9\n");
+    let pointer = image_side(
+        "big.png",
+        b"version https://git-lfs.github.com/spec/v1\noid sha256:abc\nsize 9\n",
+    );
     assert!(pointer.lfs && pointer.data_url.is_none());
 
     fs::write(root.join("new.png"), png_v1).unwrap();
-    let source = FileSource::Workdir { path: "new.png".into(), staged: false };
+    let source = FileSource::Workdir {
+        path: "new.png".into(),
+        staged: false,
+    };
     let pair = image_pair(&repo, &source).unwrap();
     assert!(pair.before.is_none() && pair.after.is_some());
     let _ = fs::remove_dir_all(&root);
@@ -1071,16 +1276,55 @@ fn difftool_arguments_mirror_each_diff_view() {
     commit_file(&mut repo, &root, "a.txt", "b\n", "second");
     let head = repo.head().unwrap().target().unwrap().to_string();
 
-    let staged = difftool_args(&repo, &FileSource::Workdir { path: "a.txt".into(), staged: true }).unwrap();
-    assert_eq!(staged, vec!["difftool", "--no-prompt", "--cached", "--", "a.txt"]);
+    let staged = difftool_args(
+        &repo,
+        &FileSource::Workdir {
+            path: "a.txt".into(),
+            staged: true,
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        staged,
+        vec!["difftool", "--no-prompt", "--cached", "--", "a.txt"]
+    );
 
-    let commit = FileSource::Commit { oid: head.clone(), path: "b.txt".into(), old_path: Some("a.txt".into()) };
+    let commit = FileSource::Commit {
+        oid: head.clone(),
+        path: "b.txt".into(),
+        old_path: Some("a.txt".into()),
+    };
     let args = difftool_args(&repo, &commit).unwrap();
-    assert_eq!(args, vec!["difftool", "--no-prompt", "-M", &root_commit, &head, "--", "a.txt", "b.txt"]);
+    assert_eq!(
+        args,
+        vec![
+            "difftool",
+            "--no-prompt",
+            "-M",
+            &root_commit,
+            &head,
+            "--",
+            "a.txt",
+            "b.txt"
+        ]
+    );
 
-    let first = FileSource::Commit { oid: root_commit.clone(), path: "a.txt".into(), old_path: None };
-    assert!(difftool_args(&repo, &first).unwrap().contains(&"4b825dc642cb6eb9a060e54bf8d69288fbee4904".to_string()));
-    assert!(difftool_args(&repo, &FileSource::Workdir { path: "../x".into(), staged: false }).is_err());
+    let first = FileSource::Commit {
+        oid: root_commit.clone(),
+        path: "a.txt".into(),
+        old_path: None,
+    };
+    assert!(difftool_args(&repo, &first)
+        .unwrap()
+        .contains(&"4b825dc642cb6eb9a060e54bf8d69288fbee4904".to_string()));
+    assert!(difftool_args(
+        &repo,
+        &FileSource::Workdir {
+            path: "../x".into(),
+            staged: false
+        }
+    )
+    .is_err());
     let _ = fs::remove_dir_all(&root);
 }
 
@@ -1093,15 +1337,29 @@ fn fetch_can_prune_and_remote_tags_can_be_deleted() {
 
     let local_root = PathBuf::from(format!("{}-local", origin_root.display()));
     let _ = fs::remove_dir_all(&local_root);
-    clone_repository(&origin_root.to_string_lossy(), &local_root.to_string_lossy(), |_| {}).unwrap();
+    clone_repository(
+        &origin_root.to_string_lossy(),
+        &local_root.to_string_lossy(),
+        |_| {},
+    )
+    .unwrap();
     let mut local = open_at(&local_root).unwrap();
     assert!(local.find_branch("origin/gone", BranchType::Remote).is_ok());
 
-    origin.find_branch("gone", BranchType::Local).unwrap().delete().unwrap();
-    with_background(true, || fetch_remote(&mut local, Some("origin"), false, false, |_| {})).unwrap();
+    origin
+        .find_branch("gone", BranchType::Local)
+        .unwrap()
+        .delete()
+        .unwrap();
+    with_background(true, || {
+        fetch_remote(&mut local, Some("origin"), false, false, |_| {})
+    })
+    .unwrap();
     assert!(local.find_branch("origin/gone", BranchType::Remote).is_ok());
     fetch_remote(&mut local, Some("origin"), false, true, |_| {}).unwrap();
-    assert!(local.find_branch("origin/gone", BranchType::Remote).is_err());
+    assert!(local
+        .find_branch("origin/gone", BranchType::Remote)
+        .is_err());
 
     delete_remote_tag(&mut local, "origin", "v1", |_| {}).unwrap();
     assert!(origin.find_reference("refs/tags/v1").is_err());
@@ -1129,7 +1387,11 @@ fn undoing_commits_keeps_their_changes_staged_and_shows_in_the_reflog() {
 
     let reflog = head_reflog(&repo, 10).unwrap();
     assert_eq!(reflog[0].selector, "HEAD@{0}");
-    assert!(reflog[0].message.starts_with("reset:"), "{:?}", reflog[0].message);
+    assert!(
+        reflog[0].message.starts_with("reset:"),
+        "{:?}",
+        reflog[0].message
+    );
     assert!(reflog.iter().any(|entry| entry.summary == "second"));
 
     let undone = undo_last_commit(&mut repo).unwrap();
@@ -1141,7 +1403,9 @@ fn undoing_commits_keeps_their_changes_staged_and_shows_in_the_reflog() {
 
 #[test]
 fn search_queries_split_filters_from_free_text() {
-    let parsed = parse_search_query(r#"author:alice path:src/app.rs content:"fn main" fix  since:2.weeks other"#);
+    let parsed = parse_search_query(
+        r#"author:alice path:src/app.rs content:"fn main" fix  since:2.weeks other"#,
+    );
     assert_eq!(parsed.text, "fix other");
     assert_eq!(parsed.authors, vec!["alice"]);
     assert_eq!(parsed.paths, vec!["src/app.rs"]);
@@ -1159,7 +1423,14 @@ fn history_search_filters_by_author_path_and_content() {
         stage_paths(&repo, &[file.to_string()]).unwrap();
         run_git_input(
             &root,
-            &["-c", &format!("user.name={author}"), "-c", "user.email=x@example.com", "commit", "--file=-"],
+            &[
+                "-c",
+                &format!("user.name={author}"),
+                "-c",
+                "user.email=x@example.com",
+                "commit",
+                "--file=-",
+            ],
             message.as_bytes(),
         )
         .unwrap();
@@ -1175,7 +1446,10 @@ fn history_search_filters_by_author_path_and_content() {
             .map(|commit| commit.summary)
             .collect::<Vec<_>>()
     };
-    assert_eq!(summaries("author:alice"), vec!["alice edits b", "alice adds a"]);
+    assert_eq!(
+        summaries("author:alice"),
+        vec!["alice edits b", "alice adds a"]
+    );
     assert_eq!(summaries("path:b.txt"), vec!["alice edits b", "bob adds b"]);
     assert_eq!(summaries("content:needle"), vec!["bob adds b"]);
     assert_eq!(summaries("author:alice edits"), vec!["alice edits b"]);
@@ -1191,9 +1465,21 @@ fn submodule_status_lines_are_parsed() {
     assert_eq!(
         parsed,
         vec![
-            ("clean".into(), "1111111111111111111111111111111111111111".into(), "libs/core".into()),
-            ("uninitialized".into(), "2222222222222222222222222222222222222222".into(), "libs/new folder".into()),
-            ("modified".into(), "3333333333333333333333333333333333333333".into(), "vendor/x".into()),
+            (
+                "clean".into(),
+                "1111111111111111111111111111111111111111".into(),
+                "libs/core".into()
+            ),
+            (
+                "uninitialized".into(),
+                "2222222222222222222222222222222222222222".into(),
+                "libs/new folder".into()
+            ),
+            (
+                "modified".into(),
+                "3333333333333333333333333333333333333333".into(),
+                "vendor/x".into()
+            ),
         ]
     );
 }
@@ -1206,7 +1492,14 @@ fn submodules_are_listed_and_updated() {
     commit_file(&mut repo, &root, "a.txt", "a\n", "base");
     run_git_stdout(
         &root,
-        &["-c", "protocol.file.allow=always", "submodule", "add", &sub_root.to_string_lossy(), "libs/sub"],
+        &[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            &sub_root.to_string_lossy(),
+            "libs/sub",
+        ],
     )
     .unwrap();
     run_git_stdout(&root, &["commit", "-q", "-m", "add submodule"]).unwrap();
@@ -1266,6 +1559,9 @@ fn tags_go_through_git_and_reject_bad_names() {
     assert!(create_tag(&repo, "bad..name", None, None).is_err());
     let annotated = repo.revparse_single("v1.0").unwrap();
     assert_eq!(annotated.kind(), Some(ObjectType::Tag));
-    assert_eq!(annotated.as_tag().unwrap().message(), Some("first release\n"));
+    assert_eq!(
+        annotated.as_tag().unwrap().message(),
+        Some("first release\n")
+    );
     let _ = fs::remove_dir_all(&root);
 }

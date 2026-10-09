@@ -152,7 +152,10 @@ pub fn stash_file_diff(
     Ok(tracked)
 }
 
-pub(super) fn untracked_stash_files(repo: &Repository, commit: &git2::Commit<'_>) -> AppResult<Vec<CommitFile>> {
+pub(super) fn untracked_stash_files(
+    repo: &Repository,
+    commit: &git2::Commit<'_>,
+) -> AppResult<Vec<CommitFile>> {
     let tree = commit.tree()?;
     let mut opts = DiffOptions::new();
     opts.skip_binary_check(true);
