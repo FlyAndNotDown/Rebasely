@@ -46,6 +46,15 @@ pub struct AppPrefs {
     pub diff_split: bool,
     #[serde(default)]
     pub diff_ignore_whitespace: bool,
+    /// Minutes between background fetches; 0 turns them off.
+    #[serde(default = "default_auto_fetch_minutes")]
+    pub auto_fetch_minutes: u32,
+    #[serde(default)]
+    pub fetch_prune: bool,
+}
+
+fn default_auto_fetch_minutes() -> u32 {
+    15
 }
 
 fn default_terminal_id() -> String {
@@ -76,6 +85,8 @@ impl Default for AppPrefs {
             changes_tree: false,
             diff_split: false,
             diff_ignore_whitespace: false,
+            auto_fetch_minutes: default_auto_fetch_minutes(),
+            fetch_prune: false,
         }
     }
 }

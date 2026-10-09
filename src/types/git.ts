@@ -248,6 +248,10 @@ export interface AppPrefs {
   diffSplit: boolean;
   /** Hide whitespace-only changes in diffs; line staging is off while set. */
   diffIgnoreWhitespace: boolean;
+  /** Minutes between background fetches of the open repository; 0 turns them off. */
+  autoFetchMinutes: number;
+  /** Remove remote-tracking branches that are gone from the remote when fetching. */
+  fetchPrune: boolean;
 }
 
 export interface RemoteInfo {

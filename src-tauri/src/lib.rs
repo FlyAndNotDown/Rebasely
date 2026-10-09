@@ -305,16 +305,21 @@ async fn fetch_remote(
     activity_id: Option<String>,
     remote: Option<String>,
     all: Option<bool>,
+    prune: Option<bool>,
+    background: Option<bool>,
     app: AppHandle,
 ) -> AppResult<WorkspaceSnapshot> {
     with_repo_async(repo_path, move |repo| {
-        git::with_cancel(activity_id.as_deref(), || {
-            git::fetch_remote(
-                repo,
-                remote.as_deref(),
-                all.unwrap_or(false),
-                progress_sink(&app, activity_id.as_deref()),
-            )
+        git::with_background(background.unwrap_or(false), || {
+            git::with_cancel(activity_id.as_deref(), || {
+                git::fetch_remote(
+                    repo,
+                    remote.as_deref(),
+                    all.unwrap_or(false),
+                    prune.unwrap_or(false),
+                    progress_sink(&app, activity_id.as_deref()),
+                )
+            })
         })
     })
     .await
@@ -424,6 +429,22 @@ async fn push_tag(
             git::push_tag(repo, &remote, &name, progress_sink(&app, activity_id.as_deref()))
         })?;
         git::snapshot(repo)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn delete_remote_tag(
+    repo_path: String,
+    remote: String,
+    name: String,
+    activity_id: Option<String>,
+    app: AppHandle,
+) -> AppResult<WorkspaceSnapshot> {
+    with_repo_async(repo_path, move |repo| {
+        git::with_cancel(activity_id.as_deref(), || {
+            git::delete_remote_tag(repo, &remote, &name, progress_sink(&app, activity_id.as_deref()))
+        })
     })
     .await
 }
@@ -888,6 +909,7 @@ pub fn run() {
             create_tag,
             delete_tag,
             push_tag,
+            delete_remote_tag,
             delete_branch,
             revert_commit,
             cherry_pick_commit,

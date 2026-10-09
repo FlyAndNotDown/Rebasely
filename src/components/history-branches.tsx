@@ -54,6 +54,7 @@ export function HistoryBranches() {
     deleteBranch,
     fetchRemote,
     deleteTag,
+    deleteRemoteTag,
     pushTag,
     openComparison,
   } = useGitPick([
@@ -69,9 +70,11 @@ export function HistoryBranches() {
     "deleteBranch",
     "fetchRemote",
     "deleteTag",
+    "deleteRemoteTag",
     "pushTag",
     "openComparison",
   ]);
+  const [tagRemotes, setTagRemotes] = useState<string[]>([]);
   const [query, setQuery] = useState("");
   const [needle, setNeedle] = useState("");
   const [addOpen, setAddOpen] = useState(false);
@@ -471,18 +474,51 @@ export function HistoryBranches() {
         </DialogContent>
       </Dialog>
       <CreateTagDialog open={creatingTag} onOpenChange={setCreatingTag} />
-      <Dialog open={Boolean(deletingTag)} onOpenChange={(open) => !open && setDeletingTag(null)}>
+      <Dialog
+        open={Boolean(deletingTag)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDeletingTag(null);
+            setTagRemotes([]);
+          }
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Delete tag?</DialogTitle>
             <DialogDescription>
-              This deletes the local tag{" "}
-              <span className="font-mono text-foreground">{deletingTag}</span>. The remote tag is
-              left in place.
+              This deletes the local tag <span className="font-mono text-foreground">{deletingTag}</span>
+              {tagRemotes.length ? ` and the tag on ${tagRemotes.join(", ")}.` : ". Remote tags are left in place."}
             </DialogDescription>
           </DialogHeader>
+          {snapshot?.remotes.length ? (
+            <div className="grid gap-2">
+              {snapshot.remotes.map((remote) => (
+                <label key={remote.name} className="flex items-center gap-2 text-sm">
+                  <Checkbox
+                    checked={tagRemotes.includes(remote.name)}
+                    onCheckedChange={(checked) =>
+                      setTagRemotes((current) =>
+                        checked === true
+                          ? [...current, remote.name]
+                          : current.filter((name) => name !== remote.name),
+                      )
+                    }
+                  />
+                  Also delete from <span className="font-mono">{remote.name}</span>
+                </label>
+              ))}
+            </div>
+          ) : null}
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setDeletingTag(null)}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setDeletingTag(null);
+                setTagRemotes([]);
+              }}
+            >
               Cancel
             </Button>
             <Button
@@ -490,9 +526,14 @@ export function HistoryBranches() {
               variant="destructive"
               onClick={() => {
                 const name = deletingTag;
+                const remotes = tagRemotes;
                 if (!name) return;
                 setDeletingTag(null);
-                void deleteTag(name);
+                setTagRemotes([]);
+                void (async () => {
+                  if (!(await deleteTag(name))) return;
+                  for (const remote of remotes) await deleteRemoteTag(remote, name);
+                })();
               }}
             >
               Delete

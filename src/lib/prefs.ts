@@ -22,7 +22,11 @@ export const defaultPrefs: AppPrefs = {
   changesTree: false,
   diffSplit: false,
   diffIgnoreWhitespace: false,
+  autoFetchMinutes: 15,
+  fetchPrune: false,
 };
+
+export const AUTO_FETCH_CHOICES = [0, 5, 15, 30, 60] as const;
 
 export function normalizeSidebarOrder(order?: string[] | null): string[] {
   const allowed = new Set<string>(SIDEBAR_VIEWS);
@@ -102,5 +106,10 @@ export function normalizePrefs(prefs: Partial<AppPrefs> | null | undefined): App
     changesTree: prefs?.changesTree === true,
     diffSplit: prefs?.diffSplit === true,
     diffIgnoreWhitespace: prefs?.diffIgnoreWhitespace === true,
+    autoFetchMinutes:
+      typeof prefs?.autoFetchMinutes === "number" && prefs.autoFetchMinutes >= 0
+        ? Math.round(prefs.autoFetchMinutes)
+        : defaultPrefs.autoFetchMinutes,
+    fetchPrune: prefs?.fetchPrune === true,
   };
 }

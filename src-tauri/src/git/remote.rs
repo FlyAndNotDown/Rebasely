@@ -4,18 +4,39 @@ pub fn fetch_remote(
     repo: &mut Repository,
     remote: Option<&str>,
     all: bool,
+    prune: bool,
     on_progress: impl FnMut(&str) + Send,
 ) -> AppResult<WorkspaceSnapshot> {
-    if all {
-        run_git_ok_progress(workdir(repo)?, &["fetch", "--all", "--progress"], on_progress)?;
-    } else {
-        match remote.map(str::trim).filter(|name| !name.is_empty()) {
-            Some(name) => {
-                run_git_ok_progress(workdir(repo)?, &["fetch", "--progress", name], on_progress)?
-            }
-            None => run_git_ok_progress(workdir(repo)?, &["fetch", "--progress"], on_progress)?,
-        }
+    let mut args = vec!["fetch", "--progress"];
+    if prune {
+        args.push("--prune");
     }
+    if all {
+        args.push("--all");
+    } else if let Some(name) = remote.map(str::trim).filter(|name| !name.is_empty()) {
+        args.push(name);
+    }
+    run_git_ok_progress(workdir(repo)?, &args, on_progress)?;
+    snapshot(repo)
+}
+
+pub fn delete_remote_tag(
+    repo: &mut Repository,
+    remote: &str,
+    name: &str,
+    on_progress: impl FnMut(&str) + Send,
+) -> AppResult<WorkspaceSnapshot> {
+    let remote = remote.trim();
+    let name = name.trim();
+    if remote.is_empty() || name.is_empty() {
+        return Err(AppError::msg("A remote and tag name are required"));
+    }
+    let spec = format!("refs/tags/{name}");
+    run_git_ok_progress(
+        workdir(repo)?,
+        &["push", "--progress", remote, "--delete", &spec],
+        on_progress,
+    )?;
     snapshot(repo)
 }
 

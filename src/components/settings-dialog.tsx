@@ -17,11 +17,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Label } from "@/components/ui/label";
 import { errorMessage, gitApi } from "@/lib/git";
-import { normalizePrefs } from "@/lib/prefs";
+import { AUTO_FETCH_CHOICES, normalizePrefs } from "@/lib/prefs";
 import { cn } from "@/lib/utils";
 import { useGitPick } from "@/state/git-context";
 import type { TerminalOption, ToolConfig } from "@/types/git";
@@ -77,6 +78,8 @@ function SettingsForm({ onOpenChange }: { onOpenChange: (open: boolean) => void 
   const [editorId, setEditorId] = useState("auto");
   const [editors, setEditors] = useState<TerminalOption[]>([]);
   const [tools, setTools] = useState<ToolConfig>({ diffTool: "", mergeTool: "" });
+  const [autoFetch, setAutoFetch] = useState(String(prefs.autoFetchMinutes));
+  const [prune, setPrune] = useState(prefs.fetchPrune);
   const [themeChoice, setThemeChoice] = useState<ThemeChoice>(() =>
     theme === "light" || theme === "dark" || theme === "system" ? theme : "dark",
   );
@@ -99,6 +102,8 @@ function SettingsForm({ onOpenChange }: { onOpenChange: (open: boolean) => void 
         setEditorId(prefs.editorId);
         setEditors(editorOptions);
         setTools(toolConfig);
+        setAutoFetch(String(prefs.autoFetchMinutes));
+        setPrune(prefs.fetchPrune);
       })
       .catch((error) => toast.error(errorMessage(error)));
   }, []);
@@ -109,7 +114,13 @@ function SettingsForm({ onOpenChange }: { onOpenChange: (open: boolean) => void 
       await Promise.all([
         gitApi.setGitIdentity({ name: name.trim(), email: email.trim() }),
         gitApi.setToolConfig({ diffTool: tools.diffTool.trim(), mergeTool: tools.mergeTool.trim() }),
-        updatePrefs({ ...prefs, terminalId, editorId }),
+        updatePrefs({
+          ...prefs,
+          terminalId,
+          editorId,
+          autoFetchMinutes: Number(autoFetch),
+          fetchPrune: prune,
+        }),
       ]);
       setTheme(themeChoice);
       toast.success("Saved settings");
@@ -199,7 +210,9 @@ function SettingsForm({ onOpenChange }: { onOpenChange: (open: boolean) => void 
             <>
               <DialogHeader>
                 <DialogTitle>General</DialogTitle>
-                <DialogDescription>Theme, and the editor and terminal used to open a repository.</DialogDescription>
+                <DialogDescription>
+                  Appearance, background fetching, and the apps used to open a repository.
+                </DialogDescription>
               </DialogHeader>
               <div className="mt-6 grid gap-8">
                 <FieldGroup title="Appearance">
@@ -210,6 +223,31 @@ function SettingsForm({ onOpenChange }: { onOpenChange: (open: boolean) => void 
                     options={themeOptions}
                     onChange={setThemeChoice}
                   />
+                </FieldGroup>
+                <FieldGroup title="Fetching">
+                  <SelectField
+                    id="auto-fetch"
+                    label="Fetch in the background"
+                    value={autoFetch}
+                    options={AUTO_FETCH_CHOICES.map((minutes) => ({
+                      id: String(minutes),
+                      label: minutes === 0 ? "Never" : `Every ${minutes} minutes`,
+                    }))}
+                    onChange={setAutoFetch}
+                  />
+                  <label className="flex items-start gap-2 text-sm">
+                    <Checkbox
+                      className="mt-0.5"
+                      checked={prune}
+                      onCheckedChange={(checked) => setPrune(checked === true)}
+                    />
+                    <span>
+                      Prune when fetching
+                      <span className="block text-xs text-muted-foreground">
+                        Removes remote branches that were deleted on the remote.
+                      </span>
+                    </span>
+                  </label>
                 </FieldGroup>
                 <FieldGroup title="Editor">
                   <AppPicker

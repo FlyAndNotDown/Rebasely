@@ -1085,6 +1085,33 @@ fn difftool_arguments_mirror_each_diff_view() {
 }
 
 #[test]
+fn fetch_can_prune_and_remote_tags_can_be_deleted() {
+    let (origin_root, mut origin) = temp_repo();
+    commit_file(&mut origin, &origin_root, "a.txt", "a\n", "base");
+    create_branch(&origin, "gone", false, None).unwrap();
+    create_tag(&origin, "v1", None, None).unwrap();
+
+    let local_root = PathBuf::from(format!("{}-local", origin_root.display()));
+    let _ = fs::remove_dir_all(&local_root);
+    clone_repository(&origin_root.to_string_lossy(), &local_root.to_string_lossy(), |_| {}).unwrap();
+    let mut local = open_at(&local_root).unwrap();
+    assert!(local.find_branch("origin/gone", BranchType::Remote).is_ok());
+
+    origin.find_branch("gone", BranchType::Local).unwrap().delete().unwrap();
+    with_background(true, || fetch_remote(&mut local, Some("origin"), false, false, |_| {})).unwrap();
+    assert!(local.find_branch("origin/gone", BranchType::Remote).is_ok());
+    fetch_remote(&mut local, Some("origin"), false, true, |_| {}).unwrap();
+    assert!(local.find_branch("origin/gone", BranchType::Remote).is_err());
+
+    delete_remote_tag(&mut local, "origin", "v1", |_| {}).unwrap();
+    assert!(origin.find_reference("refs/tags/v1").is_err());
+    assert!(local.find_reference("refs/tags/v1").is_ok());
+
+    let _ = fs::remove_dir_all(&local_root);
+    let _ = fs::remove_dir_all(&origin_root);
+}
+
+#[test]
 fn tags_go_through_git_and_reject_bad_names() {
     let (root, mut repo) = temp_repo();
     commit_file(&mut repo, &root, "a.txt", "a\n", "a");

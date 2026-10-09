@@ -15,7 +15,7 @@ import { listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { toast } from "sonner";
 import { emptyBinaryDiff, errorMessage, expandHistoryRevs, gitApi, isCancelled } from "@/lib/git";
-import { sameRepoPath } from "@/lib/format";
+import { normalizeRepoPath, sameRepoPath } from "@/lib/format";
 import { defaultPrefs, normalizePrefs, sameLayout } from "@/lib/prefs";
 import {
   COMMIT_PAGE,
@@ -160,6 +160,7 @@ interface GitContextValue {
   createTag: (name: string, message?: string, target?: string) => Promise<boolean>;
   deleteTag: (name: string) => Promise<boolean>;
   pushTag: (remote: string, name: string) => Promise<boolean>;
+  deleteRemoteTag: (remote: string, name: string) => Promise<boolean>;
   deleteBranch: (name: string, force?: boolean) => Promise<boolean | "unmerged">;
   revertCommit: (oid: string) => Promise<boolean>;
   cherryPickCommit: (oid: string) => Promise<boolean>;
@@ -1553,6 +1554,15 @@ export function GitProvider({ children }: { children: ReactNode }) {
     [ensureBranches, invalidateHistory],
   );
 
+  // When each repository last fetched, keyed by normalized path, so background
+  // fetches wait a full interval after any fetch.
+  const lastFetchRef = useRef<Record<string, number>>({});
+  const fetchingRef = useRef(new Set<string>());
+  const markFetched = useCallback(() => {
+    const path = activeRepoPath();
+    if (path) lastFetchRef.current[normalizeRepoPath(path)] = Date.now();
+  }, [activeRepoPath]);
+
   const fetchRemote = useCallback(
     async (remote?: string) => {
       const named = remote?.trim();
@@ -1560,24 +1570,89 @@ export function GitProvider({ children }: { children: ReactNode }) {
         named || defaultFetchRemote(sessionsRef.current[activeTabIdRef.current]?.snapshot);
       const ok = await runMutation(
         target ? `Fetching ${target}` : "Fetching",
-        (repoPath, activityId) => gitApi.fetchRemote(repoPath, activityId, named || undefined),
+        (repoPath, activityId) =>
+          gitApi.fetchRemote(repoPath, activityId, named || undefined, false, {
+            prune: prefsRef.current.fetchPrune,
+          }),
         target ? `Fetched ${target}` : "Fetched",
         { cancellable: true },
       );
+      if (ok) markFetched();
       await refreshAfterFetch(ok);
     },
-    [refreshAfterFetch, runMutation],
+    [markFetched, refreshAfterFetch, runMutation],
   );
 
   const fetchAllRemotes = useCallback(async () => {
     const ok = await runMutation(
       "Fetching all remotes",
-      (repoPath, activityId) => gitApi.fetchRemote(repoPath, activityId, undefined, true),
+      (repoPath, activityId) =>
+        gitApi.fetchRemote(repoPath, activityId, undefined, true, { prune: prefsRef.current.fetchPrune }),
       "Fetched all remotes",
       { cancellable: true },
     );
+    if (ok) markFetched();
     await refreshAfterFetch(ok);
-  }, [refreshAfterFetch, runMutation]);
+  }, [markFetched, refreshAfterFetch, runMutation]);
+
+  /** Fetches every remote without prompts or toasts; failures stay quiet. */
+  const backgroundFetch = useCallback(
+    async (tabId: string, repoPath: string) => {
+      const key = normalizeRepoPath(repoPath);
+      if (fetchingRef.current.has(key)) return;
+      fetchingRef.current.add(key);
+      lastFetchRef.current[key] = Date.now();
+      try {
+        const fetched = await runActivity(
+          "Fetching in the background",
+          sessionsRef.current[tabId]?.snapshot?.repo.name,
+          (activityId) =>
+            gitApi.fetchRemote(repoPath, activityId, undefined, true, {
+              prune: prefsRef.current.fetchPrune,
+              background: true,
+            }),
+          true,
+        );
+        const current = sessionsRef.current[tabId];
+        if (!current) return;
+        const snapshot = keepRemoteBranches(current.snapshot, fetched);
+        const changed = !sameSnapshot(current.snapshot, snapshot);
+        if (changed) patchSession(tabId, { snapshot });
+        if (activeTabIdRef.current !== tabId) return;
+        await ensureBranches(true);
+        if (changed || historyGraphChanged(current.snapshot, snapshot)) {
+          invalidateHistory(tabId, sessionsRef.current[tabId]?.view === "history");
+        }
+      } catch {
+        // Offline, signed out, or cancelled: the next manual fetch will say why.
+      } finally {
+        fetchingRef.current.delete(key);
+      }
+    },
+    [ensureBranches, invalidateHistory, patchSession, runActivity],
+  );
+
+  useEffect(() => {
+    const minutes = prefs.autoFetchMinutes;
+    if (!minutes) return;
+    const interval = minutes * 60_000;
+    const timer = window.setInterval(() => {
+      const tab = tabsRef.current.find((item) => item.id === activeTabIdRef.current);
+      if (tab?.kind !== "repo") return;
+      const snapshot = sessionsRef.current[tab.id]?.snapshot;
+      if (!snapshot || snapshot.remotes.length === 0) return;
+      const key = normalizeRepoPath(tab.path);
+      const last = lastFetchRef.current[key];
+      const now = Date.now();
+      // A repository seen for the first time fetches about half a minute later.
+      if (last === undefined) {
+        lastFetchRef.current[key] = now - interval + 30_000;
+        return;
+      }
+      if (now - last >= interval) void backgroundFetch(tab.id, tab.path);
+    }, 15_000);
+    return () => window.clearInterval(timer);
+  }, [backgroundFetch, prefs.autoFetchMinutes]);
 
   const pullRemote = useCallback(async (remote?: string, rebase = false) => {
     const snapshot = sessionsRef.current[activeTabIdRef.current]?.snapshot;
@@ -1592,10 +1667,11 @@ export function GitProvider({ children }: { children: ReactNode }) {
       rebase ? `Rebased onto ${target}` : `Pulled from ${target}`,
       { cancellable: true },
     );
+    if (ok) markFetched();
     await ensureBranches(true);
     if (ok) invalidateHistory(activeTabIdRef.current, sessionsRef.current[activeTabIdRef.current]?.view === "history");
     else await refreshAfterReplayRef.current();
-  }, [ensureBranches, invalidateHistory, runMutation]);
+  }, [ensureBranches, invalidateHistory, markFetched, runMutation]);
 
   const pushRemote = useCallback(
     async (options?: { remote?: string; force?: boolean; setUpstream?: boolean }) => {
@@ -1698,6 +1774,18 @@ export function GitProvider({ children }: { children: ReactNode }) {
       return true;
     },
     [runMutation, setHistoryRevs],
+  );
+
+  const deleteRemoteTag = useCallback(
+    async (remote: string, name: string) => {
+      return runMutation(
+        `Deleting tag ${name} from ${remote}`,
+        (repoPath, activityId) => gitApi.deleteRemoteTag(repoPath, remote, name, activityId),
+        `Deleted tag ${name} from ${remote}`,
+        { cancellable: true },
+      );
+    },
+    [runMutation],
   );
 
   const pushTag = useCallback(
@@ -2360,6 +2448,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       createTag,
       deleteTag,
       pushTag,
+      deleteRemoteTag,
       deleteBranch,
       revertCommit,
       cherryPickCommit,
@@ -2437,6 +2526,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       createTag,
       deleteTag,
       pushTag,
+      deleteRemoteTag,
       deleteBranch,
       revertCommit,
       cherryPickCommit,

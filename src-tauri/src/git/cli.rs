@@ -11,6 +11,25 @@ fn cancel_tokens() -> &'static Mutex<HashMap<String, Arc<AtomicBool>>> {
 
 thread_local! {
     static CURRENT_CANCEL: RefCell<Option<(String, Arc<AtomicBool>)>> = const { RefCell::new(None) };
+    static BACKGROUND: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Runs `f` with prompts turned off: no askpass dialog, no ssh passphrase
+/// prompt, and no credential-manager window, so work nobody asked for fails
+/// quietly instead of interrupting.
+pub fn with_background<T>(background: bool, f: impl FnOnce() -> T) -> T {
+    if !background {
+        return f();
+    }
+    struct Reset;
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            BACKGROUND.with(|flag| flag.set(false));
+        }
+    }
+    BACKGROUND.with(|flag| flag.set(true));
+    let _reset = Reset;
+    f()
 }
 
 struct CancelScope {
@@ -221,8 +240,13 @@ pub(super) fn run_git_progress(
         command.creation_flags(CREATE_NO_WINDOW);
     }
     let scope = current_cancel();
-    for (key, value) in crate::askpass::git_env(scope.as_ref().map(|(id, _)| id.as_str())) {
-        command.env(key, value);
+    if BACKGROUND.with(|flag| flag.get()) {
+        command.env("SSH_ASKPASS_REQUIRE", "never");
+        command.env("GCM_INTERACTIVE", "never");
+    } else {
+        for (key, value) in crate::askpass::git_env(scope.as_ref().map(|(id, _)| id.as_str())) {
+            command.env(key, value);
+        }
     }
     let cancel = scope.map(|(_, token)| token);
     let started = SystemTime::now();
