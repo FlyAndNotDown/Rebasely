@@ -58,6 +58,13 @@ export type StashSelection = {
   path?: string;
 };
 
+/** A request for the Files view to open a file; `nonce` makes repeats count. */
+export type FileFocus = {
+  path: string;
+  mode: "browse" | "history";
+  nonce: number;
+};
+
 export interface RepoSession {
   path: string;
   snapshot: WorkspaceSnapshot | null;
@@ -77,6 +84,7 @@ export interface RepoSession {
   stashSelection: StashSelection | null;
   stashDetails: StashDetails | null;
   stashDiff: FileDiff | null;
+  fileFocus: FileFocus | null;
 }
 
 export function repoTabId(path: string): string {
@@ -107,6 +115,7 @@ export function emptySession(
     stashSelection: null,
     stashDetails: null,
     stashDiff: null,
+    fileFocus: null,
   };
 }
 

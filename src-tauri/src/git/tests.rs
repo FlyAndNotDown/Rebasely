@@ -872,6 +872,25 @@ fn pull_and_push_follow_an_upstream_with_a_different_name() {
 }
 
 #[test]
+fn ignoring_appends_new_patterns_once_and_hides_the_files() {
+    let (root, mut repo) = temp_repo();
+    commit_file(&mut repo, &root, ".gitignore", "target/\r\n", "ignore");
+    fs::write(root.join("debug.log"), "x\n").unwrap();
+    fs::write(root.join("keep.txt"), "x\n").unwrap();
+    ignore_patterns(&repo, &["*.log".into(), "target/".into(), "*.log".into()]).unwrap();
+    assert_eq!(fs::read_to_string(root.join(".gitignore")).unwrap(), "target/\r\n*.log\r\n");
+    let status = status_snapshot(&repo).unwrap();
+    let untracked: Vec<_> = status
+        .unstaged
+        .iter()
+        .filter(|file| file.kind == "untracked")
+        .map(|file| file.path.as_str())
+        .collect();
+    assert_eq!(untracked, vec!["keep.txt"]);
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
 fn tags_go_through_git_and_reject_bad_names() {
     let (root, mut repo) = temp_repo();
     commit_file(&mut repo, &root, "a.txt", "a\n", "a");

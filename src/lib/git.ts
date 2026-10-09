@@ -229,6 +229,9 @@ export const gitApi = {
   setLocalGitIdentity: (repoPath: string, identity: GitIdentity) =>
     invoke<GitIdentity>("set_local_git_identity", { repoPath, identity }),
   openInFileManager: (path: string) => invoke<void>("open_in_file_manager", { path }),
+  revealInFileManager: (path: string) => invoke<void>("reveal_in_file_manager", { path }),
+  ignorePatterns: (repoPath: string, patterns: string[]) =>
+    invoke<WorkspaceSnapshot>("ignore_patterns", { repoPath, patterns }),
   openInTerminal: (path: string) => invoke<void>("open_in_terminal", { path }),
   listTerminals: () => invoke<TerminalOption[]>("list_terminals"),
   getPrefs: () => invoke<AppPrefs>("get_prefs"),

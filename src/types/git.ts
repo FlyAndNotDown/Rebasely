@@ -207,6 +207,8 @@ export interface AppPrefs {
   sidebarOrder: string[];
   panelLayouts: PanelLayouts;
   pullRebase: boolean;
+  /** Group changed files by folder instead of listing them flat. */
+  changesTree: boolean;
 }
 
 export interface RemoteInfo {

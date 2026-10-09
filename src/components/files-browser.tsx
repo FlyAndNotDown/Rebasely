@@ -20,15 +20,31 @@ import type { BlameHunk, CommitSummary, DirEntry, FileDiff } from "@/types/git";
 
 const PAGE = 80;
 
+function ancestorDirs(path: string): string[] {
+  const parts = path.split("/").slice(0, -1);
+  return parts.map((_, index) => parts.slice(0, index + 1).join("/"));
+}
+
 export function FilesBrowser() {
   const shell = usePanelGroupLayout("files");
   const repoPath = useGitSelect((state) => state.snapshot?.repo.path ?? "");
+  const fileFocus = useGitSelect((state) => state.fileFocus);
   const [entries, setEntries] = useState<Record<string, DirEntry[]>>({});
-  const [open, setOpen] = useState<Set<string>>(new Set());
-  const [path, setPath] = useState<string | null>(null);
-  const [mode, setMode] = useState<"browse" | "history">("browse");
+  const [open, setOpen] = useState<Set<string>>(
+    () => new Set(fileFocus ? ancestorDirs(fileFocus.path) : []),
+  );
+  const [path, setPath] = useState<string | null>(fileFocus?.path ?? null);
+  const [mode, setMode] = useState<"browse" | "history">(fileFocus?.mode ?? "browse");
   // A commit picked from blame, to select when the history opens.
   const [pin, setPin] = useState<string | null>(null);
+  const [shownFocus, setShownFocus] = useState(fileFocus?.nonce ?? 0);
+  if (fileFocus && fileFocus.nonce !== shownFocus) {
+    setShownFocus(fileFocus.nonce);
+    setPath(fileFocus.path);
+    setMode(fileFocus.mode);
+    setPin(null);
+    setOpen((current) => new Set([...current, ...ancestorDirs(fileFocus.path)]));
+  }
   const entriesRef = useRef(entries);
   useLayoutEffect(() => {
     entriesRef.current = entries;
@@ -69,6 +85,13 @@ export function FilesBrowser() {
       cancelled = true;
     };
   }, [repoPath]);
+
+  // Folders opened on another view's behalf are listed here.
+  useEffect(() => {
+    for (const dir of open) {
+      if (dir && !entriesRef.current[dir]) void loadDir(dir, true);
+    }
+  }, [loadDir, open]);
 
   useRepoChanged(repoPath, (changed) => {
     for (const dir of dirsToReload(repoPath, changed, Object.keys(entriesRef.current))) {

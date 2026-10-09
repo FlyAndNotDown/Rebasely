@@ -18,6 +18,7 @@ export const defaultPrefs: AppPrefs = {
   sidebarOrder: [...SIDEBAR_VIEWS],
   panelLayouts: { ...DEFAULT_PANEL_LAYOUTS },
   pullRebase: false,
+  changesTree: false,
 };
 
 export function normalizeSidebarOrder(order?: string[] | null): string[] {
@@ -94,5 +95,6 @@ export function normalizePrefs(prefs: Partial<AppPrefs> | null | undefined): App
     sidebarOrder: normalizeSidebarOrder(prefs?.sidebarOrder),
     panelLayouts: normalizePanelLayouts(prefs?.panelLayouts),
     pullRebase: prefs?.pullRebase === true,
+    changesTree: prefs?.changesTree === true,
   };
 }

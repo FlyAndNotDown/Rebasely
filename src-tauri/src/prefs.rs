@@ -38,6 +38,8 @@ pub struct AppPrefs {
     pub panel_layouts: PanelLayouts,
     #[serde(default)]
     pub pull_rebase: bool,
+    #[serde(default)]
+    pub changes_tree: bool,
 }
 
 fn default_terminal_id() -> String {
@@ -60,6 +62,7 @@ impl Default for AppPrefs {
             sidebar_order: default_sidebar_order(),
             panel_layouts: PanelLayouts::default(),
             pull_rebase: false,
+            changes_tree: false,
         }
     }
 }

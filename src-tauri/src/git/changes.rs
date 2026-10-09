@@ -150,6 +150,30 @@ pub(super) fn pathspec_chunks(paths: &[String]) -> Vec<&[String]> {
     chunks
 }
 
+/// Appends patterns to the top-level .gitignore, skipping ones it already lists
+/// and keeping the file's line endings.
+pub fn ignore_patterns(repo: &Repository, patterns: &[String]) -> AppResult<()> {
+    let path = workdir(repo)?.join(".gitignore");
+    let existing = fs::read_to_string(&path).unwrap_or_default();
+    let newline = if existing.contains("\r\n") { "\r\n" } else { "\n" };
+    let mut listed: HashSet<String> = existing.lines().map(|line| line.trim().to_string()).collect();
+    let mut text = existing.clone();
+    for pattern in patterns.iter().map(|pattern| pattern.trim()) {
+        if pattern.is_empty() || !listed.insert(pattern.to_string()) {
+            continue;
+        }
+        if !text.is_empty() && !text.ends_with('\n') {
+            text.push_str(newline);
+        }
+        text.push_str(pattern);
+        text.push_str(newline);
+    }
+    if text != existing {
+        fs::write(&path, text)?;
+    }
+    Ok(())
+}
+
 /// Commits through `git commit` so hooks, signing, and an in-progress merge or
 /// cherry-pick (its extra parent and original author) are all honoured.
 pub fn commit(repo: &Repository, message: &str, amend: bool) -> AppResult<CommitSummary> {

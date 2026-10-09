@@ -31,6 +31,7 @@ import {
   tabFromSnapshot,
   type AppTab,
   type ChangeSelection,
+  type FileFocus,
   type HistorySelection,
   type PublishPrompt,
   type RepoSession,
@@ -101,9 +102,14 @@ interface GitContextValue {
   stashDetails: StashDetails | null;
   stashDiff: FileDiff | null;
   stashes: StashInfo[];
+  fileFocus: FileFocus | null;
   prefs: AppPrefs;
   loading: boolean;
   setView: (view: View) => void;
+  showFile: (path: string, mode: FileFocus["mode"]) => void;
+  openRepoFile: (path: string) => Promise<void>;
+  revealRepoFile: (path: string) => Promise<void>;
+  ignorePaths: (patterns: string[]) => Promise<boolean>;
   beginActivity: (label: string, detail?: string) => string;
   endActivity: (id: string) => void;
   setActiveTab: (id: string) => void;
@@ -164,7 +170,7 @@ interface GitContextValue {
   applyPatch: () => Promise<void>;
   addRemote: (name: string, url: string) => Promise<boolean>;
   deleteRemote: (name: string) => Promise<boolean>;
-  stashSave: (message: string, includeUntracked: boolean) => Promise<boolean>;
+  stashSave: (message: string, includeUntracked: boolean, paths?: string[]) => Promise<boolean>;
   stashApply: (id: string) => Promise<void>;
   stashPop: (id: string) => Promise<void>;
   stashDrop: (id: string) => Promise<void>;
@@ -1960,14 +1966,71 @@ export function GitProvider({ children }: { children: ReactNode }) {
   );
 
   const stashSave = useCallback(
-    async (message: string, includeUntracked: boolean) => {
+    async (message: string, includeUntracked: boolean, paths?: string[]) => {
       return runMutation(
         "Saving stash",
-        (repoPath) => gitApi.stashSave(repoPath, message, includeUntracked),
+        (repoPath) => gitApi.stashSave(repoPath, message, includeUntracked, paths),
         "Saved stash",
       );
     },
     [runMutation],
+  );
+
+  const ignorePaths = useCallback(
+    async (patterns: string[]) => {
+      return runMutation(
+        "Updating .gitignore",
+        (repoPath) => gitApi.ignorePatterns(repoPath, patterns),
+        patterns.length === 1 ? `Ignored ${patterns[0]}` : `Ignored ${patterns.length} patterns`,
+      );
+    },
+    [runMutation],
+  );
+
+  const fileFocusNonce = useRef(0);
+  const showFile = useCallback(
+    (path: string, mode: FileFocus["mode"]) => {
+      fileFocusNonce.current += 1;
+      patchSession(activeTabIdRef.current, {
+        view: "files",
+        fileFocus: { path, mode, nonce: fileFocusNonce.current },
+      });
+    },
+    [patchSession],
+  );
+
+  const repoFilePath = useCallback(
+    (path: string) => {
+      const root = activeRepoPath();
+      return root ? `${root.replace(/[\\/]+$/, "")}/${path}` : null;
+    },
+    [activeRepoPath],
+  );
+
+  const openRepoFile = useCallback(
+    async (path: string) => {
+      const full = repoFilePath(path);
+      if (!full) return;
+      try {
+        await gitApi.openInFileManager(full);
+      } catch (error) {
+        toast.error(errorMessage(error));
+      }
+    },
+    [repoFilePath],
+  );
+
+  const revealRepoFile = useCallback(
+    async (path: string) => {
+      const full = repoFilePath(path);
+      if (!full) return;
+      try {
+        await gitApi.revealInFileManager(full);
+      } catch (error) {
+        toast.error(errorMessage(error));
+      }
+    },
+    [repoFilePath],
   );
 
   const stashApply = useCallback(
@@ -2053,6 +2116,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       stashDetails: session?.stashDetails ?? null,
       stashDiff: session?.stashDiff ?? null,
       stashes: session?.snapshot?.stashes ?? NO_STASHES,
+      fileFocus: session?.fileFocus ?? null,
       prefs,
       loading,
       publishPrompt,
@@ -2065,6 +2129,10 @@ export function GitProvider({ children }: { children: ReactNode }) {
   const actions = useMemo<GitActions>(
     () => ({
       setView,
+      showFile,
+      openRepoFile,
+      revealRepoFile,
+      ignorePaths,
       beginActivity,
       endActivity,
       setActiveTab,
@@ -2133,6 +2201,10 @@ export function GitProvider({ children }: { children: ReactNode }) {
     }),
     [
       setView,
+      showFile,
+      openRepoFile,
+      revealRepoFile,
+      ignorePaths,
       beginActivity,
       endActivity,
       setActiveTab,

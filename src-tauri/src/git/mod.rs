@@ -399,3 +399,32 @@ pub fn open_in_file_manager(path: &str) -> AppResult<()> {
         .map_err(|err| AppError::msg(format!("Could not open folder: {err}")))?;
     Ok(())
 }
+
+/// Opens the file manager with `path` selected.
+pub fn reveal_in_file_manager(path: &str) -> AppResult<()> {
+    let path = strip_verbatim_prefix(path);
+    #[cfg(windows)]
+    let mut command = {
+        use std::os::windows::process::CommandExt;
+        let mut command = Command::new("explorer");
+        // Explorer parses its own arguments and needs the quotes after the comma.
+        command.raw_arg(format!("/select,\"{}\"", path.replace('/', "\\")));
+        command
+    };
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut command = Command::new("open");
+        command.arg("-R").arg(&path);
+        command
+    };
+    #[cfg(all(not(windows), not(target_os = "macos")))]
+    let mut command = {
+        let mut command = Command::new("xdg-open");
+        command.arg(Path::new(&path).parent().unwrap_or(Path::new(&path)));
+        command
+    };
+    command
+        .spawn()
+        .map_err(|err| AppError::msg(format!("Could not open folder: {err}")))?;
+    Ok(())
+}

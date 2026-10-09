@@ -639,6 +639,20 @@ async fn open_in_file_manager(path: String) -> AppResult<()> {
 }
 
 #[tauri::command]
+async fn reveal_in_file_manager(path: String) -> AppResult<()> {
+    blocking(move || git::reveal_in_file_manager(&path)).await
+}
+
+#[tauri::command]
+async fn ignore_patterns(repo_path: String, patterns: Vec<String>) -> AppResult<WorkspaceSnapshot> {
+    with_repo_async(repo_path, move |repo| {
+        git::ignore_patterns(repo, &patterns)?;
+        git::snapshot(repo)
+    })
+    .await
+}
+
+#[tauri::command]
 async fn list_terminals() -> AppResult<Vec<TerminalOption>> {
     blocking(|| Ok(terminal::list_terminals())).await
 }
@@ -808,6 +822,8 @@ pub fn run() {
             get_local_git_identity,
             set_local_git_identity,
             open_in_file_manager,
+            reveal_in_file_manager,
+            ignore_patterns,
             list_terminals,
             get_prefs,
             set_prefs,
