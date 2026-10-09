@@ -150,9 +150,13 @@ function StackedPane({
   return (
     <div
       className={cn(
-        "absolute inset-0 min-h-0 min-w-0",
-        active ? "z-10 flex" : "pointer-events-none invisible flex",
+        "absolute inset-0 min-h-0 min-w-0 bg-background",
+        // Hide with opacity, not visibility. Buttons use transition-all, so an
+        // inherited visibility:hidden stays visible until that transition ends
+        // and the controls show through the other view.
+        active ? "z-10 flex" : "pointer-events-none flex opacity-0",
       )}
+      inert={!active}
       aria-hidden={!active}
     >
       {children}
