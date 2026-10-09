@@ -25,15 +25,57 @@ fn config_value(repo: Option<&Repository>, key: &str) -> Option<String> {
 }
 
 /// The tools git would use, GUI variants first, as this repository sees them.
+/// A custom executable saved as `rebasely-diff` / `rebasely-merge` comes back as the path.
 pub fn read_tool_config(repo: Option<&Repository>) -> ToolConfig {
     ToolConfig {
-        diff_tool: config_value(repo, "diff.guitool")
-            .or_else(|| config_value(repo, "diff.tool"))
-            .unwrap_or_default(),
-        merge_tool: config_value(repo, "merge.guitool")
-            .or_else(|| config_value(repo, "merge.tool"))
-            .unwrap_or_default(),
+        diff_tool: shown_tool(
+            repo,
+            "diff",
+            config_value(repo, "diff.guitool")
+                .or_else(|| config_value(repo, "diff.tool"))
+                .unwrap_or_default(),
+        ),
+        merge_tool: shown_tool(
+            repo,
+            "merge",
+            config_value(repo, "merge.guitool")
+                .or_else(|| config_value(repo, "merge.tool"))
+                .unwrap_or_default(),
+        ),
     }
+}
+
+const CUSTOM_DIFF: &str = "rebasely-diff";
+const CUSTOM_MERGE: &str = "rebasely-merge";
+
+fn shown_tool(repo: Option<&Repository>, kind: &str, name: String) -> String {
+    let custom = if kind == "diff" {
+        CUSTOM_DIFF
+    } else {
+        CUSTOM_MERGE
+    };
+    if name != custom {
+        return name;
+    }
+    config_value(repo, &format!("{kind}tool.{custom}.cmd"))
+        .as_deref()
+        .and_then(path_from_cmd)
+        .unwrap_or(name)
+}
+
+fn path_from_cmd(cmd: &str) -> Option<String> {
+    let rest = cmd.trim().strip_prefix('"')?;
+    let end = rest.find('"')?;
+    let path = &rest[..end];
+    if path.is_empty() {
+        None
+    } else {
+        Some(path.to_string())
+    }
+}
+
+fn looks_like_path(value: &str) -> bool {
+    value.contains('\\') || value.contains('/') || Path::new(value).is_file()
 }
 
 /// Editors git has no built-in driver for, as `(name, difftool cmd, mergetool cmd)`.
@@ -58,17 +100,8 @@ pub fn write_tool_config(config: &ToolConfig) -> AppResult<ToolConfig> {
         fs::write(&path, "")?;
     }
     let mut cfg = git2::Config::open(&path)?;
-    for (key, value) in [
-        ("diff.tool", &config.diff_tool),
-        ("merge.tool", &config.merge_tool),
-    ] {
-        let value = value.trim();
-        if value.is_empty() {
-            let _ = cfg.remove(key);
-        } else {
-            cfg.set_str(key, value)?;
-        }
-    }
+    assign_tool(&mut cfg, "diff", &config.diff_tool)?;
+    assign_tool(&mut cfg, "merge", &config.merge_tool)?;
     for (name, diff_cmd, merge_cmd) in EDITOR_TOOLS {
         if config.diff_tool.trim() == *name
             && cfg.get_string(&format!("difftool.{name}.cmd")).is_err()
@@ -83,6 +116,173 @@ pub fn write_tool_config(config: &ToolConfig) -> AppResult<ToolConfig> {
         }
     }
     Ok(read_tool_config(None))
+}
+
+/// Writes one tool. A filesystem path becomes a private tool name plus the command
+/// git needs to launch that executable; a bare name is stored as git expects it.
+fn assign_tool(cfg: &mut git2::Config, kind: &str, value: &str) -> AppResult<()> {
+    let value = value.trim().trim_matches('"');
+    let key = format!("{kind}.tool");
+    if value.is_empty() {
+        let _ = cfg.remove(&key);
+        return Ok(());
+    }
+    if !looks_like_path(value) {
+        cfg.set_str(&key, value)?;
+        return Ok(());
+    }
+    let name = if kind == "diff" {
+        CUSTOM_DIFF
+    } else {
+        CUSTOM_MERGE
+    };
+    let args = if kind == "diff" {
+        r#""$LOCAL" "$REMOTE""#
+    } else {
+        r#""$BASE" "$LOCAL" "$REMOTE" "$MERGED""#
+    };
+    cfg.set_str(&key, name)?;
+    cfg.set_str(
+        &format!("{kind}tool.{name}.cmd"),
+        &format!("\"{value}\" {args}"),
+    )?;
+    if kind == "merge" {
+        cfg.set_bool(&format!("mergetool.{name}.trustExitCode"), true)?;
+    }
+    Ok(())
+}
+
+struct GuiTool {
+    /// Git's built-in difftool/mergetool name, or `vscode` which we configure ourselves.
+    id: &'static str,
+    name: &'static str,
+    commands: &'static [&'static str],
+    windows_paths: &'static [&'static str],
+}
+
+const GUI_TOOLS: &[GuiTool] = &[
+    GuiTool {
+        id: "vscode",
+        name: "Visual Studio Code",
+        commands: &["code"],
+        windows_paths: &[
+            r"%LOCALAPPDATA%\Programs\Microsoft VS Code\Code.exe",
+            r"%ProgramFiles%\Microsoft VS Code\Code.exe",
+        ],
+    },
+    GuiTool {
+        id: "bc",
+        name: "Beyond Compare",
+        commands: &["BCompare", "bcomp"],
+        windows_paths: &[
+            r"%ProgramFiles%\Beyond Compare 5\BCompare.exe",
+            r"%ProgramFiles%\Beyond Compare 4\BCompare.exe",
+            r"%ProgramFiles%\Beyond Compare 3\BComp.exe",
+        ],
+    },
+    GuiTool {
+        id: "kdiff3",
+        name: "KDiff3",
+        commands: &["kdiff3"],
+        windows_paths: &[
+            r"%ProgramFiles%\KDiff3\kdiff3.exe",
+            r"%LOCALAPPDATA%\Programs\KDiff3\kdiff3.exe",
+        ],
+    },
+    GuiTool {
+        id: "meld",
+        name: "Meld",
+        commands: &["meld"],
+        windows_paths: &[
+            r"%ProgramFiles%\Meld\Meld.exe",
+            r"%LOCALAPPDATA%\Programs\Meld\Meld.exe",
+        ],
+    },
+    GuiTool {
+        id: "p4merge",
+        name: "P4Merge",
+        commands: &["p4merge"],
+        windows_paths: &[r"%ProgramFiles%\Perforce\p4merge.exe"],
+    },
+    GuiTool {
+        id: "winmerge",
+        name: "WinMerge",
+        commands: &["WinMergeU"],
+        windows_paths: &[r"%ProgramFiles%\WinMerge\WinMergeU.exe"],
+    },
+    GuiTool {
+        id: "tortoisemerge",
+        name: "Tortoise Merge",
+        commands: &["TortoiseGitMerge"],
+        windows_paths: &[
+            r"%ProgramFiles%\TortoiseGit\bin\TortoiseGitMerge.exe",
+            r"%ProgramFiles%\TortoiseSVN\bin\TortoiseMerge.exe",
+        ],
+    },
+    GuiTool {
+        id: "smerge",
+        name: "Sublime Merge",
+        commands: &["smerge"],
+        windows_paths: &[r"%ProgramFiles%\Sublime Merge\smerge.exe"],
+    },
+    GuiTool {
+        id: "araxis",
+        name: "Araxis Merge",
+        commands: &[],
+        windows_paths: &[r"%ProgramFiles%\Araxis\Araxis Merge\Compare.exe"],
+    },
+];
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GuiToolOption {
+    pub id: String,
+    pub name: String,
+    pub installed: bool,
+}
+
+fn gui_tool_installed(tool: &GuiTool) -> bool {
+    if cfg!(windows)
+        && tool
+            .windows_paths
+            .iter()
+            .filter_map(|template| crate::editor::expand_env(template))
+            .any(|path| path.is_file())
+    {
+        return true;
+    }
+    tool.commands
+        .iter()
+        .any(|command| crate::editor::which(command).is_some())
+}
+
+pub fn list_gui_tools() -> Vec<GuiToolOption> {
+    GUI_TOOLS
+        .iter()
+        .map(|tool| GuiToolOption {
+            id: tool.id.to_string(),
+            name: tool.name.to_string(),
+            installed: gui_tool_installed(tool),
+        })
+        .collect()
+}
+
+/// True when `value` is empty, a known installed tool, a command on PATH, or an existing file.
+pub fn gui_tool_found(value: &str) -> bool {
+    let value = value.trim().trim_matches('"');
+    if value.is_empty() {
+        return true;
+    }
+    if let Some(tool) = GUI_TOOLS.iter().find(|tool| tool.id == value) {
+        return gui_tool_installed(tool);
+    }
+    if Path::new(value).is_file() {
+        return true;
+    }
+    if !looks_like_path(value) {
+        return crate::editor::which(value).is_some();
+    }
+    false
 }
 
 /// The `git difftool` arguments that show `source` the way the diff view does.
@@ -194,4 +394,39 @@ pub fn run_mergetool(repo: &mut Repository, path: &str) -> AppResult<WorkspaceSn
     args.extend(["--", rel.as_str()]);
     run_git_stdout(workdir(repo)?, &args)?;
     snapshot(repo)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{assign_tool, path_from_cmd, CUSTOM_DIFF};
+
+    #[test]
+    fn reads_the_executable_out_of_a_tool_command() {
+        assert_eq!(
+            path_from_cmd(r#""C:\Tools\BCompare.exe" "$LOCAL" "$REMOTE""#).as_deref(),
+            Some(r"C:\Tools\BCompare.exe")
+        );
+    }
+
+    #[test]
+    fn stores_a_custom_executable_as_its_own_tool() {
+        let path =
+            std::env::temp_dir().join(format!("rebasely-tool-{}.gitconfig", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        std::fs::write(&path, "").unwrap();
+        let exe = std::env::current_exe().unwrap();
+        let exe = exe.to_string_lossy().to_string();
+        {
+            let mut cfg = git2::Config::open(&path).unwrap();
+            assign_tool(&mut cfg, "diff", &exe).unwrap();
+            assign_tool(&mut cfg, "merge", "kdiff3").unwrap();
+            assert_eq!(cfg.get_string("diff.tool").unwrap(), CUSTOM_DIFF);
+            assert!(cfg
+                .get_string("difftool.rebasely-diff.cmd")
+                .unwrap()
+                .contains(&exe));
+            assert_eq!(cfg.get_string("merge.tool").unwrap(), "kdiff3");
+        }
+        let _ = std::fs::remove_file(&path);
+    }
 }

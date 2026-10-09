@@ -272,7 +272,7 @@ export interface ToolConfig {
 
 export interface AppPrefs {
   terminalId: string;
-  /** "auto", "system", or an id from `list_editors`. */
+  /** "system", or an id from `list_editors`. */
   editorId: string;
   sidebarOrder: string[];
   panelLayouts: PanelLayouts;

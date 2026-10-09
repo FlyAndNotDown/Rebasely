@@ -896,6 +896,16 @@ async fn set_tool_config(config: git::ToolConfig) -> AppResult<git::ToolConfig> 
     blocking(move || git::write_tool_config(&config)).await
 }
 
+#[tauri::command]
+async fn list_gui_tools() -> AppResult<Vec<git::GuiToolOption>> {
+    blocking(|| Ok(git::list_gui_tools())).await
+}
+
+#[tauri::command]
+async fn gui_tool_found(value: String) -> AppResult<bool> {
+    blocking(move || Ok(git::gui_tool_found(&value))).await
+}
+
 #[derive(Clone, Serialize)]
 struct ToolError {
     message: String,
@@ -1104,6 +1114,8 @@ pub fn run() {
             open_in_editor,
             get_tool_config,
             set_tool_config,
+            list_gui_tools,
+            gui_tool_found,
             open_difftool,
             run_mergetool,
             get_prefs,

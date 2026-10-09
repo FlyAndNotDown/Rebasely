@@ -15,14 +15,14 @@ export const DEFAULT_PANEL_LAYOUTS: PanelLayouts = {
 
 export const defaultPrefs: AppPrefs = {
   terminalId: "auto",
-  editorId: "auto",
+  editorId: "system",
   sidebarOrder: [...SIDEBAR_VIEWS],
   panelLayouts: { ...DEFAULT_PANEL_LAYOUTS },
   pullRebase: false,
   changesTree: false,
   diffSplit: false,
   diffIgnoreWhitespace: false,
-  autoFetchMinutes: 15,
+  autoFetchMinutes: 60,
   fetchPrune: false,
 };
 
@@ -99,7 +99,7 @@ export function normalizePanelLayouts(value?: Partial<PanelLayouts> | null): Pan
 export function normalizePrefs(prefs: Partial<AppPrefs> | null | undefined): AppPrefs {
   return {
     terminalId: prefs?.terminalId || "auto",
-    editorId: prefs?.editorId || "auto",
+    editorId: !prefs?.editorId || prefs.editorId === "auto" ? "system" : prefs.editorId,
     sidebarOrder: normalizeSidebarOrder(prefs?.sidebarOrder),
     panelLayouts: normalizePanelLayouts(prefs?.panelLayouts),
     pullRebase: prefs?.pullRebase === true,

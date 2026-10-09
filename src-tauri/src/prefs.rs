@@ -54,7 +54,7 @@ pub struct AppPrefs {
 }
 
 fn default_auto_fetch_minutes() -> u32 {
-    15
+    60
 }
 
 fn default_terminal_id() -> String {
@@ -62,7 +62,7 @@ fn default_terminal_id() -> String {
 }
 
 fn default_editor_id() -> String {
-    "auto".to_string()
+    "system".to_string()
 }
 
 fn default_sidebar_order() -> Vec<String> {

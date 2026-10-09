@@ -35,6 +35,8 @@ struct Editor {
     /// the editor is not on PATH.
     windows_paths: &'static [&'static str],
     lines: LineStyle,
+    /// Shown in Settings. IDEs stay openable when a saved preference already names them.
+    listed: bool,
 }
 
 const EDITORS: &[Editor] = &[
@@ -47,6 +49,7 @@ const EDITORS: &[Editor] = &[
             r"%ProgramFiles%\Microsoft VS Code\Code.exe",
         ],
         lines: LineStyle::Goto,
+        listed: true,
     },
     Editor {
         id: "cursor",
@@ -54,6 +57,7 @@ const EDITORS: &[Editor] = &[
         commands: &["cursor"],
         windows_paths: &[r"%LOCALAPPDATA%\Programs\cursor\Cursor.exe"],
         lines: LineStyle::Goto,
+        listed: false,
     },
     Editor {
         id: "vscode-insiders",
@@ -61,6 +65,7 @@ const EDITORS: &[Editor] = &[
         commands: &["code-insiders"],
         windows_paths: &[r"%LOCALAPPDATA%\Programs\Microsoft VS Code Insiders\Code - Insiders.exe"],
         lines: LineStyle::Goto,
+        listed: false,
     },
     Editor {
         id: "zed",
@@ -68,6 +73,7 @@ const EDITORS: &[Editor] = &[
         commands: &["zed"],
         windows_paths: &[r"%LOCALAPPDATA%\Programs\Zed\zed.exe"],
         lines: LineStyle::Suffix,
+        listed: true,
     },
     Editor {
         id: "sublime",
@@ -78,6 +84,7 @@ const EDITORS: &[Editor] = &[
             r"%ProgramFiles%\Sublime Text 3\subl.exe",
         ],
         lines: LineStyle::Suffix,
+        listed: true,
     },
     Editor {
         id: "notepad++",
@@ -88,6 +95,7 @@ const EDITORS: &[Editor] = &[
             r"%ProgramFiles(x86)%\Notepad++\notepad++.exe",
         ],
         lines: LineStyle::NotepadPlusPlus,
+        listed: true,
     },
     Editor {
         id: "rider",
@@ -95,10 +103,11 @@ const EDITORS: &[Editor] = &[
         commands: &["rider", "rider64"],
         windows_paths: &[],
         lines: LineStyle::JetBrains,
+        listed: false,
     },
 ];
 
-fn expand_env(template: &str) -> Option<PathBuf> {
+pub(crate) fn expand_env(template: &str) -> Option<PathBuf> {
     let mut out = String::new();
     let mut rest = template;
     while let Some(start) = rest.find('%') {
@@ -112,7 +121,7 @@ fn expand_env(template: &str) -> Option<PathBuf> {
     Some(PathBuf::from(out))
 }
 
-fn which(name: &str) -> Option<PathBuf> {
+pub(crate) fn which(name: &str) -> Option<PathBuf> {
     let paths = std::env::var_os("PATH")?;
     let mut names = vec![name.to_string()];
     if cfg!(windows) {
@@ -154,6 +163,9 @@ pub fn list_editors() -> Vec<EditorOption> {
         available: true,
     }];
     for editor in EDITORS {
+        if !editor.listed {
+            continue;
+        }
         items.push(EditorOption {
             id: editor.id.to_string(),
             name: editor.name.to_string(),
@@ -184,7 +196,7 @@ fn open_with_system(path: &str) -> AppResult<()> {
 }
 
 /// Opens a file (at `line` when given) or a folder in the chosen editor.
-/// "auto" picks the first editor found, then falls back to the system default.
+/// "system" (and the old "auto" preference) uses the system default app.
 pub fn open_in_editor(path: &str, line: Option<u32>, editor_id: &str) -> AppResult<()> {
     let path = strip_verbatim_prefix(path);
     let target = Path::new(&path);
@@ -192,10 +204,7 @@ pub fn open_in_editor(path: &str, line: Option<u32>, editor_id: &str) -> AppResu
         return Err(AppError::msg(format!("{path} does not exist")));
     }
     let chosen = match editor_id.trim() {
-        "" | "auto" => EDITORS
-            .iter()
-            .find_map(|editor| locate(editor).map(|exe| (editor, exe))),
-        "system" => None,
+        "" | "auto" | "system" => None,
         id => {
             let editor = EDITORS
                 .iter()

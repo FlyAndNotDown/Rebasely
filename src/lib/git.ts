@@ -289,6 +289,8 @@ export const gitApi = {
     invoke<void>("open_in_editor", { path, line: line ?? null }),
   getToolConfig: (repoPath?: string) => invoke<ToolConfig>("get_tool_config", { repoPath: repoPath ?? null }),
   setToolConfig: (config: ToolConfig) => invoke<ToolConfig>("set_tool_config", { config }),
+  listGuiTools: () => invoke<{ id: string; name: string; installed: boolean }[]>("list_gui_tools"),
+  guiToolFound: (value: string) => invoke<boolean>("gui_tool_found", { value }),
   openDifftool: (repoPath: string, source: FileSource) => invoke<void>("open_difftool", { repoPath, source }),
   runMergetool: (repoPath: string, path: string) =>
     invoke<WorkspaceSnapshot>("run_mergetool", { repoPath, path }),
