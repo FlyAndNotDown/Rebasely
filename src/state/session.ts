@@ -58,6 +58,12 @@ export type StashSelection = {
   path?: string;
 };
 
+/** Text to put in the commit box, e.g. after undoing a commit. */
+export type CommitDraft = {
+  text: string;
+  nonce: number;
+};
+
 /** A request for the Files view to open a file; `nonce` makes repeats count. */
 export type FileFocus = {
   path: string;
@@ -85,6 +91,7 @@ export interface RepoSession {
   stashDetails: StashDetails | null;
   stashDiff: FileDiff | null;
   fileFocus: FileFocus | null;
+  commitDraft: CommitDraft | null;
 }
 
 export function repoTabId(path: string): string {
@@ -116,6 +123,7 @@ export function emptySession(
     stashDetails: null,
     stashDiff: null,
     fileFocus: null,
+    commitDraft: null,
   };
 }
 

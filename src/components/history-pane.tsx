@@ -126,6 +126,7 @@ export function HistoryPane() {
     resetCommit,
     createPatch,
     openComparison,
+    setOpenPanel,
   } = useGitPick([
     "commits",
     "commitsHasMore",
@@ -141,6 +142,7 @@ export function HistoryPane() {
     "resetCommit",
     "createPatch",
     "openComparison",
+    "setOpenPanel",
   ]);
   const [query, setQuery] = useState("");
   const [applied, setApplied] = useState("");
@@ -356,8 +358,8 @@ export function HistoryPane() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="shrink-0 border-b px-2 py-1.5">
-        <div className="relative">
+      <div className="flex shrink-0 items-center gap-1 border-b px-2 py-1.5">
+        <div className="relative min-w-0 flex-1">
           <SearchIcon className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={query}
@@ -377,6 +379,9 @@ export function HistoryPane() {
             className="h-7 pl-7"
           />
         </div>
+        <Button type="button" variant="ghost" size="xs" onClick={() => setOpenPanel("reflog")}>
+          Reflog
+        </Button>
       </div>
       <ScrollArea className="min-h-0 flex-1" viewportRef={rows.viewportRef} onScroll={onScroll}>
         {visible.length === 0 ? (

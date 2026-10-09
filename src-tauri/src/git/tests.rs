@@ -1112,6 +1112,34 @@ fn fetch_can_prune_and_remote_tags_can_be_deleted() {
 }
 
 #[test]
+fn undoing_commits_keeps_their_changes_staged_and_shows_in_the_reflog() {
+    let (root, mut repo) = temp_repo();
+    fs::write(root.join("a.txt"), "a\n").unwrap();
+    stage_paths(&repo, &["a.txt".into()]).unwrap();
+    commit(&repo, "first", false).unwrap();
+    fs::write(root.join("a.txt"), "b\n").unwrap();
+    stage_paths(&repo, &["a.txt".into()]).unwrap();
+    commit(&repo, "second\n\nwith a body", false).unwrap();
+
+    let undone = undo_last_commit(&mut repo).unwrap();
+    assert_eq!(undone.message, "second\n\nwith a body");
+    assert_eq!(head_summary(&repo), "first");
+    assert_eq!(undone.snapshot.status.staged.len(), 1);
+    assert_eq!(blob_text(&repo, ":a.txt"), "b\n");
+
+    let reflog = head_reflog(&repo, 10).unwrap();
+    assert_eq!(reflog[0].selector, "HEAD@{0}");
+    assert!(reflog[0].message.starts_with("reset:"), "{:?}", reflog[0].message);
+    assert!(reflog.iter().any(|entry| entry.summary == "second"));
+
+    let undone = undo_last_commit(&mut repo).unwrap();
+    assert_eq!(undone.message, "first");
+    assert!(repo.head().is_err());
+    assert_eq!(undone.snapshot.status.staged.len(), 1);
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
 fn tags_go_through_git_and_reject_bad_names() {
     let (root, mut repo) = temp_repo();
     commit_file(&mut repo, &root, "a.txt", "a\n", "a");

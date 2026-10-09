@@ -21,7 +21,9 @@ import type {
   LineAction,
   LineRef,
   RecentRepo,
+  ReflogEntry,
   RemoteProbe,
+  UndoneCommit,
   TerminalOption,
   ToolConfig,
   WorkspaceSnapshot,
@@ -119,6 +121,10 @@ export const gitApi = {
     invoke<WorkspaceSnapshot>("commit_changes", { repoPath, message, amend }),
   checkoutBranch: (repoPath: string, name: string) =>
     invoke<WorkspaceSnapshot>("checkout_branch", { repoPath, name }),
+  checkoutDetached: (repoPath: string, oid: string) =>
+    invoke<WorkspaceSnapshot>("checkout_detached", { repoPath, oid }),
+  headReflog: (repoPath: string, limit = 200) => invoke<ReflogEntry[]>("head_reflog", { repoPath, limit }),
+  undoLastCommit: (repoPath: string) => invoke<UndoneCommit>("undo_last_commit", { repoPath }),
   fetchRemote: (
     repoPath: string,
     activityId?: string,

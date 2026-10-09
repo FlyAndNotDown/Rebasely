@@ -291,6 +291,25 @@ async fn commit_changes(
 }
 
 #[tauri::command]
+async fn head_reflog(repo_path: String, limit: Option<usize>) -> AppResult<Vec<git::ReflogEntry>> {
+    with_repo_async(repo_path, move |repo| git::head_reflog(repo, limit.unwrap_or(200))).await
+}
+
+#[tauri::command]
+async fn undo_last_commit(repo_path: String) -> AppResult<git::UndoneCommit> {
+    with_repo_async(repo_path, git::undo_last_commit).await
+}
+
+#[tauri::command]
+async fn checkout_detached(repo_path: String, oid: String) -> AppResult<WorkspaceSnapshot> {
+    with_repo_async(repo_path, move |repo| {
+        git::checkout_detached(repo, &oid)?;
+        git::snapshot(repo)
+    })
+    .await
+}
+
+#[tauri::command]
 async fn checkout_branch(repo_path: String, name: String) -> AppResult<WorkspaceSnapshot> {
     with_repo_async(repo_path, move |repo| {
         git::checkout_branch(repo, &name)?;
@@ -902,6 +921,9 @@ pub fn run() {
             apply_lines,
             commit_changes,
             checkout_branch,
+            checkout_detached,
+            head_reflog,
+            undo_last_commit,
             fetch_remote,
             pull_remote,
             push_remote,

@@ -1,12 +1,18 @@
 import { AppHeader } from "@/components/app-header";
 import { AppSidebar } from "@/components/app-sidebar";
 import { AskpassDialog } from "@/components/askpass-dialog";
+import { ReflogDialog } from "@/components/lazy-dialogs";
 import { WelcomeScreen } from "@/components/welcome-screen";
 import { Workspace } from "@/components/workspace";
 import { WELCOME_TAB_ID, useGitPick } from "@/state/git-context";
 
 export default function App() {
-  const { activeTabId, loading } = useGitPick(["activeTabId", "loading"]);
+  const { activeTabId, loading, openPanel, setOpenPanel } = useGitPick([
+    "activeTabId",
+    "loading",
+    "openPanel",
+    "setOpenPanel",
+  ]);
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
@@ -22,6 +28,10 @@ export default function App() {
         </div>
       </div>
       <AskpassDialog />
+      <ReflogDialog
+        open={openPanel === "reflog" && activeTabId !== WELCOME_TAB_ID}
+        onOpenChange={(open) => setOpenPanel(open ? "reflog" : null)}
+      />
     </div>
   );
 }

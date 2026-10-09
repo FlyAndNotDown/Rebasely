@@ -31,6 +31,7 @@ import {
   tabFromSnapshot,
   type AppTab,
   type ChangeSelection,
+  type CommitDraft,
   type FileFocus,
   type HistorySelection,
   type PublishPrompt,
@@ -73,6 +74,7 @@ import type {
 } from "@/types/git";
 
 export { COMMIT_PAGE, WELCOME_TAB_ID, defaultFetchRemote, primaryRemote };
+export type Panel = "reflog" | "palette";
 export type { AppTab, PublishPrompt, RepoTab, ResetMode, StashSelection, View };
 
 function afterPaint() {
@@ -106,8 +108,12 @@ interface GitContextValue {
   stashDiff: FileDiff | null;
   stashes: StashInfo[];
   fileFocus: FileFocus | null;
+  commitDraft: CommitDraft | null;
+  /** An app-wide overlay that any view or the command palette can open. */
+  openPanel: Panel | null;
   prefs: AppPrefs;
   loading: boolean;
+  setOpenPanel: (panel: Panel | null) => void;
   setView: (view: View) => void;
   showFile: (path: string, mode: FileFocus["mode"]) => void;
   openRepoFile: (path: string) => Promise<void>;
@@ -148,6 +154,8 @@ interface GitContextValue {
   discard: (paths: string[]) => Promise<void>;
   applyLines: (path: string, staged: boolean, action: LineAction, lines: LineRef[]) => Promise<boolean>;
   commit: (message: string, amend?: boolean) => Promise<boolean>;
+  undoLastCommit: () => Promise<boolean>;
+  checkoutDetached: (oid: string) => Promise<boolean>;
   checkoutBranch: (name: string) => Promise<void>;
   fetchRemote: (remote?: string) => Promise<void>;
   fetchAllRemotes: () => Promise<void>;
@@ -245,6 +253,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [publishPrompt, setPublishPrompt] = useState<PublishPrompt | null>(null);
+  const [openPanel, setOpenPanel] = useState<Panel | null>(null);
   const [prefs, setPrefs] = useState<AppPrefs>(defaultPrefs);
   const restoredRef = useRef(false);
   const refreshAfterReplayRef = useRef<() => Promise<void>>(async () => {});
@@ -1507,12 +1516,49 @@ export function GitProvider({ children }: { children: ReactNode }) {
     [runMutation],
   );
 
+  const commitDraftNonce = useRef(0);
+  const undoLastCommit = useCallback(async () => {
+    let message = "";
+    const ok = await runMutation(
+      "Undoing the last commit",
+      (repoPath) =>
+        gitApi.undoLastCommit(repoPath).then((undone) => {
+          message = undone.message;
+          return undone.snapshot;
+        }),
+      "Undid the last commit; its changes are staged",
+    );
+    if (ok) {
+      commitDraftNonce.current += 1;
+      patchSession(activeTabIdRef.current, {
+        view: "changes",
+        commitDraft: { text: message, nonce: commitDraftNonce.current },
+      });
+    }
+    return ok;
+  }, [patchSession, runMutation]);
+
   const commit = useCallback(
     async (message: string, amend = false) => {
+      const ok = await runMutation(amend ? "Amending commit" : "Creating commit", (repoPath) =>
+        gitApi.commit(repoPath, message, amend),
+      );
+      if (ok) {
+        patchSession(activeTabIdRef.current, { changeSelection: null, changeDiff: null });
+        if (amend) toast.success("Amended commit");
+        else toast.success("Created commit", { action: { label: "Undo", onClick: () => void undoLastCommit() } });
+      }
+      return ok;
+    },
+    [patchSession, runMutation, undoLastCommit],
+  );
+
+  const checkoutDetached = useCallback(
+    async (oid: string) => {
       const ok = await runMutation(
-        amend ? "Amending commit" : "Creating commit",
-        (repoPath) => gitApi.commit(repoPath, message, amend),
-        amend ? "Amended commit" : "Created commit",
+        `Checking out ${oid.slice(0, 7)}`,
+        (repoPath) => gitApi.checkoutDetached(repoPath, oid),
+        `Checked out ${oid.slice(0, 7)} without a branch`,
       );
       if (ok) {
         patchSession(activeTabIdRef.current, { changeSelection: null, changeDiff: null });
@@ -2387,11 +2433,13 @@ export function GitProvider({ children }: { children: ReactNode }) {
       stashDiff: session?.stashDiff ?? null,
       stashes: session?.snapshot?.stashes ?? NO_STASHES,
       fileFocus: session?.fileFocus ?? null,
+      commitDraft: session?.commitDraft ?? null,
+      openPanel,
       prefs,
       loading,
       publishPrompt,
     }),
-    [activeTab, activeTabId, loading, prefs, publishPrompt, recents, session, tabs],
+    [activeTab, activeTabId, loading, openPanel, prefs, publishPrompt, recents, session, tabs],
   );
 
   // Every action reads refs rather than render state, so this object keeps its
@@ -2399,6 +2447,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
   const actions = useMemo<GitActions>(
     () => ({
       setView,
+      setOpenPanel,
       showFile,
       openRepoFile,
       revealRepoFile,
@@ -2437,6 +2486,8 @@ export function GitProvider({ children }: { children: ReactNode }) {
       discard,
       applyLines,
       commit,
+      undoLastCommit,
+      checkoutDetached,
       checkoutBranch,
       fetchRemote,
       fetchAllRemotes,
@@ -2477,6 +2528,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
     }),
     [
       setView,
+      setOpenPanel,
       showFile,
       openRepoFile,
       revealRepoFile,
@@ -2515,6 +2567,8 @@ export function GitProvider({ children }: { children: ReactNode }) {
       discard,
       applyLines,
       commit,
+      undoLastCommit,
+      checkoutDetached,
       checkoutBranch,
       fetchRemote,
       fetchAllRemotes,

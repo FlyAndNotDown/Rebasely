@@ -230,6 +230,23 @@ export interface BlameHunk {
   time: number;
 }
 
+export interface ReflogEntry {
+  /** `HEAD@{n}` */
+  selector: string;
+  id: string;
+  shortId: string;
+  /** What moved HEAD, e.g. `commit: Fix the build`. */
+  message: string;
+  timestamp: number;
+  /** The subject of the commit HEAD moved to. */
+  summary: string;
+}
+
+export interface UndoneCommit {
+  snapshot: WorkspaceSnapshot;
+  message: string;
+}
+
 export interface ToolConfig {
   diffTool: string;
   mergeTool: string;

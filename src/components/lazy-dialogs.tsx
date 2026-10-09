@@ -42,6 +42,11 @@ export const AddRemoteDialog = lazyDialog(
   (props) => props.open,
 );
 
+export const ReflogDialog = lazyDialog(
+  () => import("@/components/reflog-dialog").then((module) => module.ReflogDialog),
+  (props) => props.open,
+);
+
 export const InteractiveRebaseDialog = lazyDialog(
   () => import("@/components/interactive-rebase-dialog").then((module) => module.InteractiveRebaseDialog),
   (props) => props.onto !== null,
