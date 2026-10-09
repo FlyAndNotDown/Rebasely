@@ -1,7 +1,6 @@
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 
-const historyWidths = ["w-2/3", "w-1/2", "w-3/4", "w-2/5", "w-3/5", "w-1/2"];
 const diffWidths = [
   "w-4/5",
   "w-2/3",
@@ -20,18 +19,23 @@ const diffWidths = [
 export function HistorySkeleton({
   rows = 12,
   label = "Loading history",
+  fill = false,
 }: {
   rows?: number;
   label?: string;
+  /** Cover the whole list, instead of a short block at the top. */
+  fill?: boolean;
 }) {
   return (
-    <div role="status" aria-label={label} className="py-1">
-      {Array.from({ length: rows }, (_, index) => (
-        <div key={index} className="flex h-8 items-center gap-2 px-2">
+    <div
+      role="status"
+      aria-label={label}
+      className={fill ? "absolute inset-0 overflow-hidden pe-4" : "w-full py-1"}
+    >
+      {Array.from({ length: fill ? 80 : rows }, (_, index) => (
+        <div key={index} className="flex h-8 w-full items-center gap-2 px-2">
           <Skeleton className="h-3 w-4 shrink-0 rounded-full" />
-          <span className="min-w-0 flex-1">
-            <Skeleton className={cn("h-3", historyWidths[index % historyWidths.length])} />
-          </span>
+          <Skeleton className="h-3 min-w-0 flex-1" />
           <span className="flex w-28 shrink-0 items-center gap-1.5">
             <Skeleton className="size-4 rounded-full" />
             <Skeleton className="h-3 w-14" />

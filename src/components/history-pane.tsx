@@ -16,6 +16,7 @@ import {
   GitBranchIcon,
   ListOrderedIcon,
   TagIcon,
+  FileClockIcon,
   HashIcon,
   MailIcon,
   MessageSquareTextIcon,
@@ -384,14 +385,21 @@ export function HistoryPane() {
             className="h-7 pl-7"
           />
         </div>
-        <Button type="button" variant="ghost" size="xs" onClick={() => setOpenPanel("reflog")}>
-          Reflog
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          aria-label="Reflog"
+          title="Reflog"
+          onClick={() => setOpenPanel("reflog")}
+        >
+          <FileClockIcon />
         </Button>
       </div>
       <ScrollArea className="min-h-0 flex-1" viewportRef={rows.viewportRef} onScroll={onScroll}>
         {visible.length === 0 ? (
           loading ? (
-            <HistorySkeleton label={searchingMode ? "Searching" : "Loading history"} />
+            <HistorySkeleton fill label={searchingMode ? "Searching" : "Loading history"} />
           ) : (
             <div className="flex h-full items-center justify-center p-4 text-sm text-muted-foreground">
               {searchingMode ? "No matching commits" : "No commits yet"}
