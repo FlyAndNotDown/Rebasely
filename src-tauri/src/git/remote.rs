@@ -19,6 +19,20 @@ pub fn fetch_remote(
     snapshot(repo)
 }
 
+/// The full ref `branch` tracks on `remote`, when its upstream is on that remote.
+/// It can differ from the local name, e.g. `feature` tracking `origin/feat-x`.
+pub(super) fn tracked_ref_on(repo: &Repository, branch: &str, remote: &str) -> Option<String> {
+    let config = repo.config().ok()?.snapshot().ok()?;
+    let tracked_remote = config.get_string(&format!("branch.{branch}.remote")).ok()?;
+    if tracked_remote != remote {
+        return None;
+    }
+    config
+        .get_string(&format!("branch.{branch}.merge"))
+        .ok()
+        .filter(|merge| !merge.is_empty())
+}
+
 pub fn pull_remote(
     repo: &mut Repository,
     remote: Option<&str>,
@@ -35,8 +49,9 @@ pub fn pull_remote(
             .current_branch
             .filter(|name| !name.is_empty())
             .ok_or_else(|| AppError::msg("Cannot pull while HEAD is detached"))?;
+        let source = tracked_ref_on(repo, &branch, remote).unwrap_or(branch);
         args.push(remote.to_string());
-        args.push(branch);
+        args.push(source);
     }
     let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
     if let Err(err) = run_git_ok_progress(workdir(repo)?, &arg_refs, on_progress) {
@@ -64,8 +79,12 @@ pub fn push_remote(
         args.push("--set-upstream".to_string());
     }
     if let Some(remote) = remote.map(str::trim).filter(|name| !name.is_empty()) {
+        let refspec = match tracked_ref_on(repo, &branch, remote) {
+            Some(target) if !set_upstream => format!("{branch}:{target}"),
+            _ => branch,
+        };
         args.push(remote.to_string());
-        args.push(branch);
+        args.push(refspec);
     }
     let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
     run_git_ok_progress(workdir(repo)?, &arg_refs, on_progress)?;

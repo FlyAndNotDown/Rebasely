@@ -826,6 +826,52 @@ fn cancelling_a_clone_stops_git_and_removes_the_folder() {
 }
 
 #[test]
+fn pull_and_push_follow_an_upstream_with_a_different_name() {
+    let (origin_root, mut origin) = temp_repo();
+    commit_file(&mut origin, &origin_root, "a.txt", "a\n", "base");
+    create_branch(&origin, "feat-x", false, None).unwrap();
+
+    let local_root = PathBuf::from(format!("{}-local", origin_root.display()));
+    let _ = fs::remove_dir_all(&local_root);
+    clone_repository(&origin_root.to_string_lossy(), &local_root.to_string_lossy(), |_| {}).unwrap();
+    let mut local = open_at(&local_root).unwrap();
+    {
+        let mut config = local.config().unwrap();
+        config.set_str("user.name", "Rebasely Test").unwrap();
+        config.set_str("user.email", "test@example.com").unwrap();
+    }
+    run_git_stdout(&local_root, &["switch", "-c", "feature", "--track", "origin/feat-x"]).unwrap();
+
+    origin.set_head("refs/heads/feat-x").unwrap();
+    origin
+        .checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+        .unwrap();
+    commit_file(&mut origin, &origin_root, "b.txt", "b\n", "upstream change");
+    let upstream_tip = origin.head().unwrap().target().unwrap();
+    let main = origin
+        .branches(Some(BranchType::Local))
+        .unwrap()
+        .flatten()
+        .map(|(branch, _)| branch.name().unwrap().unwrap().to_string())
+        .find(|name| name != "feat-x")
+        .unwrap();
+    checkout_branch(&origin, &main).unwrap();
+
+    pull_remote(&mut local, Some("origin"), false, |_| {}).unwrap();
+    assert_eq!(local.head().unwrap().target().unwrap(), upstream_tip);
+
+    commit_file(&mut local, &local_root, "c.txt", "c\n", "local change");
+    let local_tip = local.head().unwrap().target().unwrap();
+    push_remote(&mut local, Some("origin"), false, false, |_| {}).unwrap();
+    let pushed = origin.find_branch("feat-x", BranchType::Local).unwrap();
+    assert_eq!(pushed.get().target().unwrap(), local_tip);
+    assert!(origin.find_branch("feature", BranchType::Local).is_err());
+
+    let _ = fs::remove_dir_all(&local_root);
+    let _ = fs::remove_dir_all(&origin_root);
+}
+
+#[test]
 fn tags_go_through_git_and_reject_bad_names() {
     let (root, mut repo) = temp_repo();
     commit_file(&mut repo, &root, "a.txt", "a\n", "a");
