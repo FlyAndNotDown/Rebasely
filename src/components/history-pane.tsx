@@ -375,7 +375,12 @@ export function HistoryPane() {
                 setApplied("");
               }
             }}
-            placeholder="Search commits"
+            placeholder="Search commits · author: path: content: since:"
+            title={
+              "Words match the subject, author, hash, or a branch or tag. Narrow with filters:\n" +
+              "author:name  path:src/file.cs  content:\"text added or removed\"\n" +
+              "regex:pattern  since:2.weeks  until:2026-01-01"
+            }
             className="h-7 pl-7"
           />
         </div>

@@ -84,7 +84,70 @@ pub(super) fn git_log_args(revs: &[String], prefix: &[&str]) -> Vec<String> {
     args
 }
 
-pub(super) fn git_search_log_args(revs: &[String]) -> Vec<String> {
+/// A history search split into filters git applies and free text matched here.
+#[derive(Debug, Default, PartialEq)]
+pub(super) struct SearchQuery {
+    pub text: String,
+    pub authors: Vec<String>,
+    pub paths: Vec<String>,
+    /// `-S`: commits that add or remove this text.
+    pub content: Option<String>,
+    /// `-G`: commits whose diff has a line matching this regex.
+    pub regex: Option<String>,
+    pub since: Option<String>,
+    pub until: Option<String>,
+}
+
+/// Splits on whitespace, keeping double-quoted runs together without the quotes.
+fn search_tokens(query: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut quoted = false;
+    for char in query.chars() {
+        match char {
+            '"' => quoted = !quoted,
+            char if char.is_whitespace() && !quoted => {
+                if !current.is_empty() {
+                    tokens.push(std::mem::take(&mut current));
+                }
+            }
+            char => current.push(char),
+        }
+    }
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+    tokens
+}
+
+pub(super) fn parse_search_query(query: &str) -> SearchQuery {
+    let mut parsed = SearchQuery::default();
+    let mut text = Vec::new();
+    for token in search_tokens(query) {
+        let Some((key, value)) = token.split_once(':') else {
+            text.push(token);
+            continue;
+        };
+        let value = value.trim().to_string();
+        if value.is_empty() {
+            text.push(token);
+            continue;
+        }
+        match key.to_ascii_lowercase().as_str() {
+            "author" => parsed.authors.push(value),
+            "path" | "file" => parsed.paths.push(value.replace('\\', "/")),
+            "content" => parsed.content = Some(value),
+            "regex" => parsed.regex = Some(value),
+            "since" | "after" => parsed.since = Some(value),
+            "until" | "before" => parsed.until = Some(value),
+            _ => text.push(token),
+        }
+    }
+    parsed.text = text.join(" ");
+    parsed
+}
+
+pub(super) fn git_search_log_args(revs: &[String], query: &SearchQuery) -> Vec<String> {
     let mut args = vec![
         "-c".to_string(),
         "log.showSignature=false".to_string(),
@@ -97,8 +160,28 @@ pub(super) fn git_search_log_args(revs: &[String]) -> Vec<String> {
         args.push("--branches".to_string());
         args.push("--remotes".to_string());
     }
+    if !query.authors.is_empty() {
+        args.extend(["--regexp-ignore-case".to_string(), "--fixed-strings".to_string()]);
+        args.extend(query.authors.iter().map(|author| format!("--author={author}")));
+    }
+    if let Some(content) = &query.content {
+        args.push(format!("-S{content}"));
+    }
+    if let Some(regex) = &query.regex {
+        args.push(format!("-G{regex}"));
+    }
+    if let Some(since) = &query.since {
+        args.push(format!("--since={since}"));
+    }
+    if let Some(until) = &query.until {
+        args.push(format!("--until={until}"));
+    }
     args.push("--pretty=format:%H%x00%h%x00%s%x00%an%x00%ae%x00%at%x00%P".to_string());
     args.extend(revs.iter().cloned());
+    if !query.paths.is_empty() {
+        args.push("--".to_string());
+        args.extend(query.paths.iter().cloned());
+    }
     args
 }
 
@@ -109,13 +192,14 @@ pub(super) fn search_commits(
     query: &str,
     revs: &[String],
 ) -> AppResult<Vec<CommitSummary>> {
-    let needle = query.to_lowercase();
+    let parsed = parse_search_query(query);
+    let needle = parsed.text.to_lowercase();
     let labels = collect_ref_labels(repo);
     let mut items = Vec::new();
     let mut skipped = 0usize;
 
     if let Ok(root) = workdir(repo) {
-        let args = git_search_log_args(revs);
+        let args = git_search_log_args(revs, &parsed);
         let argv: Vec<&str> = args.iter().map(String::as_str).collect();
         let mut child = spawn_git_stdout(root, &argv)?;
         if let Some(stdout) = child.stdout.take() {

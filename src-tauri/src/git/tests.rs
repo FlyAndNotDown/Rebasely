@@ -1140,6 +1140,49 @@ fn undoing_commits_keeps_their_changes_staged_and_shows_in_the_reflog() {
 }
 
 #[test]
+fn search_queries_split_filters_from_free_text() {
+    let parsed = parse_search_query(r#"author:alice path:src/app.rs content:"fn main" fix  since:2.weeks other"#);
+    assert_eq!(parsed.text, "fix other");
+    assert_eq!(parsed.authors, vec!["alice"]);
+    assert_eq!(parsed.paths, vec!["src/app.rs"]);
+    assert_eq!(parsed.content.as_deref(), Some("fn main"));
+    assert_eq!(parsed.since.as_deref(), Some("2.weeks"));
+    assert_eq!(parse_search_query("http://x").text, "http://x");
+    assert_eq!(parse_search_query("author:").text, "author:");
+}
+
+#[test]
+fn history_search_filters_by_author_path_and_content() {
+    let (root, repo) = temp_repo();
+    let commit_as = |author: &str, file: &str, body: &str, message: &str| {
+        fs::write(root.join(file), body).unwrap();
+        stage_paths(&repo, &[file.to_string()]).unwrap();
+        run_git_input(
+            &root,
+            &["-c", &format!("user.name={author}"), "-c", "user.email=x@example.com", "commit", "--file=-"],
+            message.as_bytes(),
+        )
+        .unwrap();
+    };
+    commit_as("Alice", "a.txt", "plain\n", "alice adds a");
+    commit_as("Bob", "b.txt", "has the needle\n", "bob adds b");
+    commit_as("Alice", "b.txt", "has the needle\nmore\n", "alice edits b");
+
+    let summaries = |query: &str| {
+        commits(&repo, 20, 0, Some(query), &[])
+            .unwrap()
+            .into_iter()
+            .map(|commit| commit.summary)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(summaries("author:alice"), vec!["alice edits b", "alice adds a"]);
+    assert_eq!(summaries("path:b.txt"), vec!["alice edits b", "bob adds b"]);
+    assert_eq!(summaries("content:needle"), vec!["bob adds b"]);
+    assert_eq!(summaries("author:alice edits"), vec!["alice edits b"]);
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
 fn tags_go_through_git_and_reject_bad_names() {
     let (root, mut repo) = temp_repo();
     commit_file(&mut repo, &root, "a.txt", "a\n", "a");
