@@ -12,7 +12,8 @@
     "lint": "eslint .",
     "test": "vitest run",
     "check": "npm run typecheck && npm run lint && npm test",
-    "check:all": "npm run check && cargo test --manifest-path src-tauri/Cargo.toml"
+    "check:rust": "cargo fmt --manifest-path src-tauri/Cargo.toml -- --check && cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings && cargo test --manifest-path src-tauri/Cargo.toml",
+    "check:all": "npm run check && npm run check:rust"
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.3.0",

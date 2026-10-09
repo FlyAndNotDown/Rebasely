@@ -80,7 +80,7 @@ pub(super) fn list_tags(repo: &Repository) -> AppResult<Vec<TagInfo>> {
         }
         true
     })?;
-    tags.sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
+    tags.sort_by_cached_key(|tag| tag.name.to_lowercase());
     Ok(tags)
 }
 
