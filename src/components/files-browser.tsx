@@ -3,6 +3,7 @@ import { ChevronRightIcon, FileIcon, FolderIcon, FolderOpenIcon } from "lucide-r
 import { toast } from "sonner";
 import { AuthorAvatar } from "@/components/author-avatar";
 import { DiffLines } from "@/components/diff-viewer";
+import { ImageDiff, isImagePath } from "@/components/image-diff";
 import { DiffSkeleton } from "@/components/skeletons";
 import { Button } from "@/components/ui/button";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
@@ -371,7 +372,7 @@ function FileHistoryPane({ repoPath, path, pin }: { repoPath: string; path: stri
       </ResizablePanel>
       <ResizableHandle withHandle />
       <ResizablePanel id="file-diff" defaultSize="58%" minSize="20%">
-        <FileCommitDiff diff={diff} loading={Boolean(selectedId) && !diff} />
+        <FileCommitDiff diff={diff} commitId={selectedId} loading={Boolean(selectedId) && !diff} />
       </ResizablePanel>
     </ResizablePanelGroup>
   );
@@ -630,12 +631,27 @@ function FileHistory({
   );
 }
 
-function FileCommitDiff({ diff, loading }: { diff: FileDiff | null; loading: boolean }) {
+function FileCommitDiff({
+  diff,
+  commitId,
+  loading,
+}: {
+  diff: FileDiff | null;
+  commitId: string | null;
+  loading: boolean;
+}) {
   if (!diff && loading) return <DiffSkeleton />;
   if (!diff) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
         Select a commit
+      </div>
+    );
+  }
+  if (diff.binary && commitId && isImagePath(diff.path)) {
+    return (
+      <div className="flex h-full min-h-0 flex-col">
+        <ImageDiff source={{ kind: "commit", oid: commitId, path: diff.path, oldPath: diff.oldPath }} />
       </div>
     );
   }

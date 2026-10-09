@@ -1028,6 +1028,42 @@ fn stale_line_selections_are_rejected() {
 }
 
 #[test]
+fn image_pairs_read_each_side_and_flag_lfs_pointers() {
+    let (root, repo) = temp_repo();
+    let png_v1: &[u8] = b"\x89PNG\r\n\x1a\nfirst";
+    let png_v2: &[u8] = b"\x89PNG\r\n\x1a\nsecond";
+    fs::write(root.join("icon.png"), png_v1).unwrap();
+    stage_paths(&repo, &["icon.png".into()]).unwrap();
+    commit(&repo, "add icon", false).unwrap();
+    fs::write(root.join("icon.png"), png_v2).unwrap();
+
+    let source = ImageSource::Workdir { path: "icon.png".into(), staged: false };
+    let pair = image_pair(&repo, &source).unwrap();
+    let before = pair.before.unwrap();
+    let after = pair.after.unwrap();
+    assert!(before.data_url.unwrap().starts_with("data:image/png;base64,"));
+    assert_eq!(after.size, png_v2.len() as u64);
+    assert!(!after.lfs);
+
+    stage_paths(&repo, &["icon.png".into()]).unwrap();
+    commit(&repo, "update icon", false).unwrap();
+    let head = repo.head().unwrap().target().unwrap().to_string();
+    let source = ImageSource::Commit { oid: head, path: "icon.png".into(), old_path: None };
+    let pair = image_pair(&repo, &source).unwrap();
+    assert_eq!(pair.before.unwrap().size, png_v1.len() as u64);
+    assert_eq!(pair.after.unwrap().size, png_v2.len() as u64);
+
+    let pointer = image_side("big.png", b"version https://git-lfs.github.com/spec/v1\noid sha256:abc\nsize 9\n");
+    assert!(pointer.lfs && pointer.data_url.is_none());
+
+    fs::write(root.join("new.png"), png_v1).unwrap();
+    let source = ImageSource::Workdir { path: "new.png".into(), staged: false };
+    let pair = image_pair(&repo, &source).unwrap();
+    assert!(pair.before.is_none() && pair.after.is_some());
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
 fn tags_go_through_git_and_reject_bad_names() {
     let (root, mut repo) = temp_repo();
     commit_file(&mut repo, &root, "a.txt", "a\n", "a");

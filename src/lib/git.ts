@@ -16,6 +16,8 @@ import type {
   FileDiff,
   StashDetails,
   GitIdentity,
+  ImagePair,
+  ImageSource,
   LineAction,
   LineRef,
   RecentRepo,
@@ -98,6 +100,8 @@ export const gitApi = {
     invoke<CommitDetails>("get_commit_details", { repoPath, oid }),
   getCommitDiff: (repoPath: string, oid: string, path: string, ignoreWhitespace = false) =>
     invoke<FileDiff>("get_commit_diff", { repoPath, oid, path, ignoreWhitespace }),
+  getImagePair: (repoPath: string, source: ImageSource) =>
+    invoke<ImagePair>("get_image_pair", { repoPath, source }),
   compareRevisions: (repoPath: string, base: string, head: string) =>
     invoke<CommitFile[]>("compare_revisions", { repoPath, base, head }),
   compareFileDiff: (repoPath: string, base: string, head: string, path: string, ignoreWhitespace = false) =>

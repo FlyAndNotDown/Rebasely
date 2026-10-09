@@ -1,6 +1,7 @@
 import { memo, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { Columns2Icon, PilcrowIcon } from "lucide-react";
 import { ConflictEditor } from "@/components/conflict-editor";
+import { ImageDiff, isImagePath } from "@/components/image-diff";
 import { DiffSkeleton } from "@/components/skeletons";
 import { Button } from "@/components/ui/button";
 import {
@@ -25,7 +26,7 @@ import {
 import { useWindowedRows } from "@/lib/use-windowed-rows";
 import { cn } from "@/lib/utils";
 import { useGitPick, useGitSelect } from "@/state/git-context";
-import type { DiffLine, FileDiff, LineAction, LineRef } from "@/types/git";
+import type { DiffLine, FileDiff, ImageSource, LineAction, LineRef } from "@/types/git";
 
 type Highlighter = (lines: { kind: string; text: string }[], language: string) => TokenRange[][] | null;
 let loadedHighlighter: Highlighter | null = null;
@@ -139,6 +140,24 @@ export function DiffViewer({ source }: { source: DiffSource }) {
     };
   }, [applyLines, changeKind, changePath, changeStaged, ignoreWhitespace]);
   const textual = Boolean(diff && !diff.binary && !conflicted);
+  let imageSource: ImageSource | null = null;
+  if (diff?.binary && selection && isImagePath(diff.path)) {
+    if (selection.type === "change") {
+      imageSource = { kind: "workdir", path: selection.path, staged: selection.staged };
+    } else if (comparing && comparison.path) {
+      imageSource = {
+        kind: "compare",
+        base: comparison.base.rev,
+        head: comparison.head.rev,
+        path: comparison.path,
+        oldPath: diff.oldPath,
+      };
+    } else if (selection.type === "stash" && selection.path) {
+      imageSource = { kind: "stash", oid: selection.id, path: selection.path };
+    } else if (selection.type === "commit" && selection.path) {
+      imageSource = { kind: "commit", oid: selection.id, path: selection.path, oldPath: diff.oldPath };
+    }
+  }
 
   if (source === "stash") {
     if (!stashSelection) {
@@ -236,6 +255,8 @@ export function DiffViewer({ source }: { source: DiffSource }) {
           path={selection.path}
           rebasing={snapshot?.repo.operation?.kind === "rebase"}
         />
+      ) : imageSource ? (
+        <ImageDiff source={imageSource} />
       ) : diff?.binary ? (
         <p className="p-4 text-sm text-muted-foreground">Binary file</p>
       ) : !diff ? (

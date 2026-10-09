@@ -114,6 +114,26 @@ export interface FileDiff {
   lines: DiffLine[];
 }
 
+/** Where the two sides of an image diff come from; mirrors `ImageSource` in Rust. */
+export type ImageSource =
+  | { kind: "workdir"; path: string; staged: boolean }
+  | { kind: "commit"; oid: string; path: string; oldPath: string | null }
+  | { kind: "compare"; base: string; head: string; path: string; oldPath: string | null }
+  | { kind: "stash"; oid: string; path: string };
+
+export interface ImageSide {
+  dataUrl: string | null;
+  size: number;
+  /** The stored content is a Git LFS pointer, not the image. */
+  lfs: boolean;
+  tooLarge: boolean;
+}
+
+export interface ImagePair {
+  before: ImageSide | null;
+  after: ImageSide | null;
+}
+
 export interface CommitFile {
   path: string;
   oldPath: string | null;

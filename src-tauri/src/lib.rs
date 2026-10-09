@@ -207,6 +207,11 @@ async fn get_commit_diff(
 }
 
 #[tauri::command]
+async fn get_image_pair(repo_path: String, source: git::ImageSource) -> AppResult<git::ImagePair> {
+    with_repo_async(repo_path, move |repo| git::image_pair(repo, &source)).await
+}
+
+#[tauri::command]
 async fn compare_revisions(
     repo_path: String,
     base: String,
@@ -820,6 +825,7 @@ pub fn run() {
             get_commit_diff,
             compare_revisions,
             compare_file_diff,
+            get_image_pair,
             stage_paths,
             unstage_paths,
             discard_paths,
