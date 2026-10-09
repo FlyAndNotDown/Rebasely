@@ -83,9 +83,16 @@ async fn clone_repository(
     app: AppHandle,
 ) -> AppResult<String> {
     blocking(move || {
-        git::clone_repository(&url, &destination, progress_sink(&app, activity_id.as_deref()))
+        git::with_cancel(activity_id.as_deref(), || {
+            git::clone_repository(&url, &destination, progress_sink(&app, activity_id.as_deref()))
+        })
     })
     .await
+}
+
+#[tauri::command]
+fn cancel_activity(id: String) -> bool {
+    git::cancel_activity(&id)
 }
 
 #[tauri::command]
@@ -249,12 +256,14 @@ async fn fetch_remote(
     app: AppHandle,
 ) -> AppResult<WorkspaceSnapshot> {
     with_repo_async(repo_path, move |repo| {
-        git::fetch_remote(
-            repo,
-            remote.as_deref(),
-            all.unwrap_or(false),
-            progress_sink(&app, activity_id.as_deref()),
-        )
+        git::with_cancel(activity_id.as_deref(), || {
+            git::fetch_remote(
+                repo,
+                remote.as_deref(),
+                all.unwrap_or(false),
+                progress_sink(&app, activity_id.as_deref()),
+            )
+        })
     })
     .await
 }
@@ -269,12 +278,14 @@ async fn pull_remote(
 ) -> AppResult<WorkspaceSnapshot> {
     let rebase = rebase.unwrap_or(false);
     with_repo_async(repo_path, move |repo| {
-        git::pull_remote(
-            repo,
-            remote.as_deref(),
-            rebase,
-            progress_sink(&app, activity_id.as_deref()),
-        )
+        git::with_cancel(activity_id.as_deref(), || {
+            git::pull_remote(
+                repo,
+                remote.as_deref(),
+                rebase,
+                progress_sink(&app, activity_id.as_deref()),
+            )
+        })
     })
     .await
 }
@@ -291,13 +302,15 @@ async fn push_remote(
     let force = force.unwrap_or(false);
     let set_upstream = set_upstream.unwrap_or(false);
     with_repo_async(repo_path, move |repo| {
-        git::push_remote(
-            repo,
-            remote.as_deref(),
-            force,
-            set_upstream,
-            progress_sink(&app, activity_id.as_deref()),
-        )
+        git::with_cancel(activity_id.as_deref(), || {
+            git::push_remote(
+                repo,
+                remote.as_deref(),
+                force,
+                set_upstream,
+                progress_sink(&app, activity_id.as_deref()),
+            )
+        })
     })
     .await
 }
@@ -355,12 +368,9 @@ async fn push_tag(
     app: AppHandle,
 ) -> AppResult<WorkspaceSnapshot> {
     with_repo_async(repo_path, move |repo| {
-        git::push_tag(
-            repo,
-            &remote,
-            &name,
-            progress_sink(&app, activity_id.as_deref()),
-        )?;
+        git::with_cancel(activity_id.as_deref(), || {
+            git::push_tag(repo, &remote, &name, progress_sink(&app, activity_id.as_deref()))
+        })?;
         git::snapshot(repo)
     })
     .await
@@ -390,7 +400,9 @@ async fn delete_branch(
 ) -> AppResult<WorkspaceSnapshot> {
     let force = force.unwrap_or(false);
     with_repo_async(repo_path, move |repo| {
-        git::delete_branch(repo, &name, force, progress_sink(&app, activity_id.as_deref()))
+        git::with_cancel(activity_id.as_deref(), || {
+            git::delete_branch(repo, &name, force, progress_sink(&app, activity_id.as_deref()))
+        })
     })
     .await
 }
@@ -723,6 +735,7 @@ pub fn run() {
             load_session,
             save_session,
             clone_repository,
+            cancel_activity,
             open_repository,
             refresh_workspace,
             get_commits,

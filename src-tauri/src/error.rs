@@ -11,9 +11,20 @@ pub enum AppError {
     Message(String),
 }
 
+/// The frontend matches this exact text to tell a cancel from a failure.
+pub const CANCELLED: &str = "Cancelled";
+
 impl AppError {
     pub fn msg(message: impl Into<String>) -> Self {
         Self::Message(message.into())
+    }
+
+    pub fn cancelled() -> Self {
+        Self::Message(CANCELLED.to_string())
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        matches!(self, Self::Message(message) if message == CANCELLED)
     }
 }
 

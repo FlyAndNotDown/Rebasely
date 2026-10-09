@@ -810,6 +810,22 @@ fn conflicts_from_a_stash_apply_can_be_resolved() {
 }
 
 #[test]
+fn cancelling_a_clone_stops_git_and_removes_the_folder() {
+    let (root, mut repo) = temp_repo();
+    commit_file(&mut repo, &root, "a.txt", "a\n", "a");
+    let dest = PathBuf::from(format!("{}-clone", root.display()));
+    let _ = fs::remove_dir_all(&dest);
+    let result = with_cancel(Some("test-cancel-clone"), || {
+        assert!(cancel_activity("test-cancel-clone"));
+        clone_repository(&root.to_string_lossy(), &dest.to_string_lossy(), |_| {})
+    });
+    assert!(result.unwrap_err().is_cancelled());
+    assert!(!dest.exists());
+    assert!(!cancel_activity("test-cancel-clone"));
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
 fn tags_go_through_git_and_reject_bad_names() {
     let (root, mut repo) = temp_repo();
     commit_file(&mut repo, &root, "a.txt", "a\n", "a");

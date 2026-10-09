@@ -92,7 +92,8 @@ pub fn clone_repository(
     if !parent.is_dir() {
         return Err(AppError::msg("The parent folder does not exist"));
     }
-    if dest.exists() {
+    let existed = dest.exists();
+    if existed {
         if !dest.is_dir() {
             return Err(AppError::msg("Destination already exists"));
         }
@@ -102,11 +103,20 @@ pub fn clone_repository(
         }
     }
     let dest_arg = dest.to_string_lossy().into_owned();
-    run_git_progress(
+    if let Err(err) = run_git_progress(
         None,
         &["clone", "--progress", "--", url, &dest_arg],
         on_progress,
-    )?;
+    ) {
+        // A killed clone cannot clean up after itself.
+        if err.is_cancelled() {
+            let _ = fs::remove_dir_all(&dest);
+            if existed {
+                let _ = fs::create_dir(&dest);
+            }
+        }
+        return Err(err);
+    }
     let canonical = dest.canonicalize().unwrap_or(dest);
     Ok(strip_verbatim_prefix(&canonical.to_string_lossy()))
 }

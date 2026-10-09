@@ -526,6 +526,9 @@ pub(super) fn rebase_stop_error(repo: &Repository, err: AppError) -> AppError {
 }
 
 pub(super) fn operation_stop_error(repo: &Repository, err: AppError) -> AppError {
+    if err.is_cancelled() {
+        return err;
+    }
     let Some(operation) = git_operation(repo) else {
         return err;
     };

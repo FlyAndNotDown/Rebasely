@@ -35,6 +35,7 @@ mod tests;
 
 pub use changes::*;
 use cli::*;
+pub use cli::{cancel_activity, with_cancel};
 pub use conflicts::*;
 pub use diff::*;
 pub use files::*;

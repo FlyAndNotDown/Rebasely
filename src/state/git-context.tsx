@@ -14,7 +14,7 @@ import { useSyncExternalStoreWithSelector } from "use-sync-external-store/with-s
 import { listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { toast } from "sonner";
-import { emptyBinaryDiff, errorMessage, expandHistoryRevs, gitApi } from "@/lib/git";
+import { emptyBinaryDiff, errorMessage, expandHistoryRevs, gitApi, isCancelled } from "@/lib/git";
 import { sameRepoPath } from "@/lib/format";
 import { defaultPrefs, normalizePrefs, sameLayout } from "@/lib/prefs";
 import {
@@ -418,9 +418,10 @@ export function GitProvider({ children }: { children: ReactNode }) {
       label: string,
       detail: string | undefined,
       fn: (activityId: string) => Promise<T>,
+      cancellable = false,
     ) => {
       const id = crypto.randomUUID();
-      setActivities((current) => [...current, { id, label, detail }]);
+      setActivities((current) => [...current, { id, label, detail, cancellable }]);
       try {
         return await fn(id);
       } finally {
@@ -591,13 +592,17 @@ export function GitProvider({ children }: { children: ReactNode }) {
   const cloneRepository = useCallback(
     async (url: string, destination: string) => {
       try {
-        const path = await runActivity("Cloning repository", url.trim(), (activityId) =>
-          gitApi.cloneRepository(url, destination, activityId),
+        const path = await runActivity(
+          "Cloning repository",
+          url.trim(),
+          (activityId) => gitApi.cloneRepository(url, destination, activityId),
+          true,
         );
         await openPath(path);
         return true;
       } catch (error) {
-        toast.error(errorMessage(error));
+        if (isCancelled(error)) toast.info("Cancelled: Cloning repository");
+        else toast.error(errorMessage(error));
         return false;
       }
     },
@@ -1349,6 +1354,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       label: string,
       action: (repoPath: string, activityId: string) => Promise<WorkspaceSnapshot>,
       success?: string,
+      options?: { cancellable?: boolean },
     ) => {
       const repoPath = activeRepoPath();
       const tabId = activeTabIdRef.current;
@@ -1375,7 +1381,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
           }
           const headChanged = current?.snapshot?.repo.headId !== snapshot.repo.headId;
           return { snapshot, changeDiff, changeSelection: nextSelection, headChanged };
-        });
+        }, options?.cancellable);
         const selectionMoved = changeLoadGen.current !== changeGeneration;
         if (!selectionMoved) changeLoadGen.current += 1;
         patchSession(tabId, {
@@ -1395,7 +1401,8 @@ export function GitProvider({ children }: { children: ReactNode }) {
         if (success) toast.success(success);
         return true;
       } catch (error) {
-        toast.error(errorMessage(error));
+        if (isCancelled(error)) toast.info(`Cancelled: ${label}`);
+        else toast.error(errorMessage(error));
         return false;
       }
     },
@@ -1488,6 +1495,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
         target ? `Fetching ${target}` : "Fetching",
         (repoPath, activityId) => gitApi.fetchRemote(repoPath, activityId, named || undefined),
         target ? `Fetched ${target}` : "Fetched",
+        { cancellable: true },
       );
       await refreshAfterFetch(ok);
     },
@@ -1499,6 +1507,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       "Fetching all remotes",
       (repoPath, activityId) => gitApi.fetchRemote(repoPath, activityId, undefined, true),
       "Fetched all remotes",
+      { cancellable: true },
     );
     await refreshAfterFetch(ok);
   }, [refreshAfterFetch, runMutation]);
@@ -1514,6 +1523,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       rebase ? `Rebasing onto ${target}` : `Pulling from ${target}`,
       (repoPath, activityId) => gitApi.pullRemote(repoPath, activityId, target, rebase),
       rebase ? `Rebased onto ${target}` : `Pulled from ${target}`,
+      { cancellable: true },
     );
     await ensureBranches(true);
     if (ok) invalidateHistory(activeTabIdRef.current, sessionsRef.current[activeTabIdRef.current]?.view === "history");
@@ -1551,6 +1561,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
             setUpstream: publishing,
           }),
         success,
+        { cancellable: true },
       );
     },
     [runMutation],
@@ -1628,6 +1639,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
         `Pushing tag ${name}`,
         (repoPath, activityId) => gitApi.pushTag(repoPath, remote, name, activityId),
         `Pushed tag ${name}`,
+        { cancellable: true },
       );
     },
     [runMutation],
@@ -1643,8 +1655,11 @@ export function GitProvider({ children }: { children: ReactNode }) {
       try {
         const snapshot = keepRemoteBranches(
           current?.snapshot,
-          await runActivity(`Deleting ${name}`, current?.snapshot?.repo.name, (activityId) =>
-            gitApi.deleteBranch(repoPath, name, activityId, force),
+          await runActivity(
+            `Deleting ${name}`,
+            current?.snapshot?.repo.name,
+            (activityId) => gitApi.deleteBranch(repoPath, name, activityId, force),
+            wasRemote,
           ),
         );
         patchSession(tabId, { snapshot });
@@ -1658,7 +1673,8 @@ export function GitProvider({ children }: { children: ReactNode }) {
       } catch (error) {
         const message = errorMessage(error);
         if (!force && /not fully merged/i.test(message)) return "unmerged";
-        toast.error(message);
+        if (isCancelled(error)) toast.info(`Cancelled: Deleting ${name}`);
+        else toast.error(message);
         return false;
       }
     },
@@ -1889,6 +1905,8 @@ export function GitProvider({ children }: { children: ReactNode }) {
       await runMutation(
         `Fetching ${name}`,
         (repoPath, activityId) => gitApi.fetchRemote(repoPath, activityId, name),
+        undefined,
+        { cancellable: true },
       );
       const tabId = activeTabIdRef.current;
       patchSession(tabId, {

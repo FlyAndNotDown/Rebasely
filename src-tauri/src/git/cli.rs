@@ -1,5 +1,120 @@
 use super::*;
 
+use std::cell::RefCell;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::SystemTime;
+
+fn cancel_tokens() -> &'static Mutex<HashMap<String, Arc<AtomicBool>>> {
+    static TOKENS: OnceLock<Mutex<HashMap<String, Arc<AtomicBool>>>> = OnceLock::new();
+    TOKENS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+thread_local! {
+    static CURRENT_CANCEL: RefCell<Option<Arc<AtomicBool>>> = const { RefCell::new(None) };
+}
+
+struct CancelScope {
+    id: String,
+}
+
+impl Drop for CancelScope {
+    fn drop(&mut self) {
+        CURRENT_CANCEL.with(|current| *current.borrow_mut() = None);
+        cancel_tokens()
+            .lock()
+            .unwrap_or_else(|err| err.into_inner())
+            .remove(&self.id);
+    }
+}
+
+/// Runs `f` so that `cancel_activity(activity_id)` stops the git process it is
+/// waiting on. Without an id the work cannot be cancelled.
+pub fn with_cancel<T>(activity_id: Option<&str>, f: impl FnOnce() -> T) -> T {
+    let Some(id) = activity_id.filter(|id| !id.is_empty()) else {
+        return f();
+    };
+    let token = Arc::new(AtomicBool::new(false));
+    cancel_tokens()
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+        .insert(id.to_string(), token.clone());
+    CURRENT_CANCEL.with(|current| *current.borrow_mut() = Some(token));
+    let _scope = CancelScope { id: id.to_string() };
+    f()
+}
+
+pub fn cancel_activity(id: &str) -> bool {
+    let tokens = cancel_tokens().lock().unwrap_or_else(|err| err.into_inner());
+    match tokens.get(id) {
+        Some(token) => {
+            token.store(true, Ordering::Relaxed);
+            true
+        }
+        None => false,
+    }
+}
+
+fn current_cancel() -> Option<Arc<AtomicBool>> {
+    CURRENT_CANCEL.with(|current| current.borrow().clone())
+}
+
+/// `cmd\git.exe` on Windows is a launcher, so killing it alone would leave the
+/// real git and its remote helpers running with our pipes open.
+fn kill_tree(child: &mut std::process::Child) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let killed = Command::new("taskkill")
+            .args(["/T", "/F", "/PID", &child.id().to_string()])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .creation_flags(CREATE_NO_WINDOW)
+            .status()
+            .is_ok_and(|status| status.success());
+        if killed {
+            return;
+        }
+    }
+    let _ = child.kill();
+}
+
+/// A killed git cannot release its lock files, and every later command would
+/// then fail on them. Only locks created after `since` are removed.
+fn remove_stale_locks(root: &Path, since: SystemTime) {
+    let Ok(repo) = Repository::open(root) else { return };
+    let git_dir = repo.path().to_path_buf();
+    let common = repo.commondir().to_path_buf();
+    let mut candidates = vec![
+        git_dir.join("index.lock"),
+        git_dir.join("HEAD.lock"),
+        git_dir.join("ORIG_HEAD.lock"),
+        common.join("packed-refs.lock"),
+        common.join("config.lock"),
+        common.join("shallow.lock"),
+    ];
+    let mut dirs = vec![common.join("refs")];
+    while let Some(dir) = dirs.pop() {
+        let Ok(entries) = fs::read_dir(&dir) else { continue };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                dirs.push(path);
+            } else if path.extension().is_some_and(|ext| ext == "lock") {
+                candidates.push(path);
+            }
+        }
+    }
+    for lock in candidates {
+        let fresh = fs::metadata(&lock)
+            .and_then(|meta| meta.modified())
+            .is_ok_and(|modified| modified >= since);
+        if fresh {
+            let _ = fs::remove_file(&lock);
+        }
+    }
+}
+
 pub(super) fn run_git(root: &Path, args: &[&str]) -> AppResult<std::process::Output> {
     run_git_env(root, args, &[])
 }
@@ -105,6 +220,8 @@ pub(super) fn run_git_progress(
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         command.creation_flags(CREATE_NO_WINDOW);
     }
+    let cancel = current_cancel();
+    let started = SystemTime::now();
     let mut child = command
         .spawn()
         .map_err(|err| AppError::msg(err.to_string()))?;
@@ -136,7 +253,12 @@ pub(super) fn run_git_progress(
     });
 
     let mut logs = Vec::new();
+    let mut killed = false;
     loop {
+        if !killed && cancel.as_ref().is_some_and(|token| token.load(Ordering::Relaxed)) {
+            kill_tree(&mut child);
+            killed = true;
+        }
         match rx.recv_timeout(Duration::from_millis(30)) {
             Ok(line) => {
                 logs.push(line.clone());
@@ -160,6 +282,12 @@ pub(super) fn run_git_progress(
     let stdout_bytes = stdout_thread
         .and_then(|handle| handle.join().ok())
         .unwrap_or_default();
+    if killed {
+        if let Some(root) = root {
+            remove_stale_locks(root, started);
+        }
+        return Err(AppError::cancelled());
+    }
     if status.success() {
         return Ok(());
     }

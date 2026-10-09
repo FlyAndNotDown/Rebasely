@@ -1,10 +1,13 @@
 import { useState } from "react";
+import { XIcon } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { gitApi } from "@/lib/git";
 import { cn } from "@/lib/utils";
 import { useActivities } from "@/state/git-context";
 import type { Activity } from "@/types/git";
@@ -12,7 +15,13 @@ import type { Activity } from "@/types/git";
 export function ActivityMeter() {
   const activities = useActivities();
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [cancelling, setCancelling] = useState<ReadonlySet<string>>(() => new Set());
   if (activities.length === 0) return null;
+
+  function cancel(id: string) {
+    setCancelling((current) => new Set(current).add(id));
+    void gitApi.cancelActivity(id).catch(() => undefined);
+  }
 
   const latest = activities[activities.length - 1];
 
@@ -46,39 +55,54 @@ export function ActivityMeter() {
         </DropdownMenuLabel>
         {activities.map((activity) => {
           const expanded = expandedId === activity.id;
+          const stopping = cancelling.has(activity.id);
           return (
-            <button
-              key={activity.id}
-              type="button"
-              className="w-full px-2 py-1.5 text-left hover:bg-muted/60"
-              onClick={() =>
-                setExpandedId((current) => (current === activity.id ? null : activity.id))
-              }
-            >
-              <div className="flex items-center gap-2">
-                <div className={cn("min-w-0 flex-1 text-sm", expanded ? "whitespace-pre-wrap break-words" : "truncate")}>
-                  {activity.label}
+            <div key={activity.id} className="flex items-start gap-1 hover:bg-muted/60">
+              <button
+                type="button"
+                className="min-w-0 flex-1 px-2 py-1.5 text-left"
+                onClick={() =>
+                  setExpandedId((current) => (current === activity.id ? null : activity.id))
+                }
+              >
+                <div className="flex items-center gap-2">
+                  <div className={cn("min-w-0 flex-1 text-sm", expanded ? "whitespace-pre-wrap break-words" : "truncate")}>
+                    {stopping ? `Cancelling: ${activity.label}` : activity.label}
+                  </div>
+                  {activity.progress != null ? (
+                    <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
+                      {Math.round(activity.progress)}%
+                    </span>
+                  ) : null}
                 </div>
-                {activity.progress != null ? (
-                  <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
-                    {Math.round(activity.progress)}%
-                  </span>
+                <div className="mt-1.5">
+                  <ActivityBar activity={activity} />
+                </div>
+                {activity.detail ? (
+                  <div
+                    className={cn(
+                      "mt-1 font-mono text-[11px] text-muted-foreground",
+                      expanded ? "whitespace-pre-wrap break-all" : "truncate",
+                    )}
+                  >
+                    {activity.detail}
+                  </div>
                 ) : null}
-              </div>
-              <div className="mt-1.5">
-                <ActivityBar activity={activity} />
-              </div>
-              {activity.detail ? (
-                <div
-                  className={cn(
-                    "mt-1 font-mono text-[11px] text-muted-foreground",
-                    expanded ? "whitespace-pre-wrap break-all" : "truncate",
-                  )}
+              </button>
+              {activity.cancellable ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  className="mt-1 mr-1"
+                  disabled={stopping}
+                  aria-label={`Cancel ${activity.label}`}
+                  onClick={() => cancel(activity.id)}
                 >
-                  {activity.detail}
-                </div>
+                  <XIcon />
+                </Button>
               ) : null}
-            </button>
+            </div>
           );
         })}
       </DropdownMenuContent>

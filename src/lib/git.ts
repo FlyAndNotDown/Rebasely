@@ -52,6 +52,11 @@ export function errorMessage(error: unknown): string {
   return String(error);
 }
 
+/** Matches `CANCELLED` in the Rust backend. */
+export function isCancelled(error: unknown) {
+  return errorMessage(error) === "Cancelled";
+}
+
 export const gitApi = {
   listRecents: () => invoke<RecentRepo[]>("list_recents"),
   forgetRecent: (path: string) => invoke<RecentRepo[]>("forget_recent", { path }),
@@ -65,6 +70,7 @@ export const gitApi = {
       destination,
       activityId: activityId || null,
     }),
+  cancelActivity: (id: string) => invoke<boolean>("cancel_activity", { id }),
   refreshWorkspace: (repoPath: string) =>
     invoke<WorkspaceSnapshot>("refresh_workspace", { repoPath }),
   getCommits: (repoPath: string, limit = 80, skip = 0, query?: string, revs?: string[] | null) =>
