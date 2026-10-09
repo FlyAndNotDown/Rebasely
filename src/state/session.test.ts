@@ -31,6 +31,11 @@ describe("remotes", () => {
     expect(defaultFetchRemote(withRemotes(["fork"]))).toBeUndefined();
   });
 
+  it("reads the remote from an upstream that is not configured yet", () => {
+    expect(defaultFetchRemote(withRemotes(["origin"], "fork/feature"))).toBe("fork");
+    expect(defaultFetchRemote(withRemotes([], "fork/feature"))).toBe("fork");
+  });
+
   it("picks origin as the primary remote, else the first", () => {
     expect(primaryRemote(withRemotes(["fork", "origin"]))).toBe("origin");
     expect(primaryRemote(withRemotes(["fork", "upstream"]))).toBe("fork");
