@@ -17,6 +17,7 @@
         "height": 840,
         "minWidth": 960,
         "minHeight": 640,
+        "maximized": true,
         "decorations": false,
         "shadow": true,
         "visible": false,

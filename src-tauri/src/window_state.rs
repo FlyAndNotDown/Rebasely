@@ -42,7 +42,7 @@ impl Default for WindowState {
             height: DEFAULT_HEIGHT,
             x: None,
             y: None,
-            maximized: false,
+            maximized: true,
         }
     }
 }
@@ -143,9 +143,15 @@ fn persist(window: &WebviewWindow, app: &AppHandle) {
 
 pub fn restore(window: &WebviewWindow, app: &AppHandle) {
     let Some(state) = load_state(app) else {
+        let _ = window.maximize();
         return;
     };
     let (width, height) = clamp_size(state.width, state.height);
+    // The window is created maximized. Drop that before applying a saved
+    // restored size, otherwise set_size can be ignored while maximized.
+    if !state.maximized {
+        let _ = window.unmaximize();
+    }
     let _ = window.set_size(LogicalSize::new(width, height));
     if let (Some(x), Some(y)) = (state.x, state.y) {
         if position_on_a_monitor(window, x, y) {
