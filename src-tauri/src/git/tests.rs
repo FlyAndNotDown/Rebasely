@@ -1565,3 +1565,133 @@ fn tags_go_through_git_and_reject_bad_names() {
     );
     let _ = fs::remove_dir_all(&root);
 }
+
+#[test]
+fn directory_listing_grays_ignored_paths_but_not_tracked_ones() {
+    let (root, mut repo) = temp_repo();
+    commit_file(
+        &mut repo,
+        &root,
+        ".gitignore",
+        "secret.txt\nbuild/\n*.log\n",
+        "ignore",
+    );
+    commit_file(&mut repo, &root, "kept.log", "tracked\n", "track a matching name");
+    fs::write(root.join("secret.txt"), "nope\n").unwrap();
+    fs::write(root.join("notes.txt"), "yes\n").unwrap();
+    fs::write(root.join("debug.log"), "log\n").unwrap();
+    fs::create_dir_all(root.join("build")).unwrap();
+    fs::write(root.join("build").join("out.txt"), "bin\n").unwrap();
+    fs::create_dir_all(root.join("src")).unwrap();
+    fs::write(root.join("src").join("main.txt"), "code\n").unwrap();
+
+    let entries = list_directory(&repo, "").unwrap();
+    let ignored = |name: &str| {
+        entries
+            .iter()
+            .find(|entry| entry.name == name)
+            .map(|entry| entry.ignored)
+    };
+    assert_eq!(ignored("secret.txt"), Some(true));
+    assert_eq!(ignored("notes.txt"), Some(false));
+    assert_eq!(ignored("debug.log"), Some(true));
+    assert_eq!(ignored("kept.log"), Some(false));
+    assert_eq!(ignored("build"), Some(true));
+    assert_eq!(ignored("src"), Some(false));
+    assert_eq!(ignored(".gitignore"), Some(false));
+
+    let nested = list_directory(&repo, "build").unwrap();
+    assert!(nested.iter().all(|entry| entry.ignored), "{nested:?}");
+    let source = list_directory(&repo, "src").unwrap();
+    assert!(source.iter().all(|entry| !entry.ignored), "{source:?}");
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn ignored_directory_children_stay_ignored_unless_reincluded() {
+    let (root, mut repo) = temp_repo();
+    commit_file(&mut repo, &root, "keep.txt", "base\n", "base");
+    fs::write(
+        root.join(".gitignore"),
+        ".vs\nbuild/\n!build/keep.txt\nsecret/*\n!secret/keep.txt\n",
+    )
+    .unwrap();
+    fs::create_dir_all(root.join(".vs").join("ProjectEvaluation")).unwrap();
+    fs::write(
+        root.join(".vs").join("ProjectEvaluation").join("data.bin"),
+        "x",
+    )
+    .unwrap();
+    fs::create_dir_all(root.join(".vs").join("UE5")).unwrap();
+    fs::create_dir_all(root.join("build")).unwrap();
+    fs::write(root.join("build").join("out.txt"), "x").unwrap();
+    fs::write(root.join("build").join("keep.txt"), "x").unwrap();
+    fs::create_dir_all(root.join("secret")).unwrap();
+    fs::write(root.join("secret").join("hide.txt"), "x").unwrap();
+    fs::write(root.join("secret").join("keep.txt"), "x").unwrap();
+
+    let vs = list_directory(&repo, ".vs").unwrap();
+    assert!(vs.iter().all(|entry| entry.ignored), "{vs:?}");
+    let evaluation = list_directory(&repo, ".vs/ProjectEvaluation").unwrap();
+    assert!(
+        evaluation.iter().all(|entry| entry.ignored),
+        "{evaluation:?}"
+    );
+    let build = list_directory(&repo, "build").unwrap();
+    let flag = |items: &[DirEntry], name: &str| {
+        items.iter().find(|entry| entry.name == name).unwrap().ignored
+    };
+    assert!(flag(&build, "out.txt"));
+    assert!(flag(&build, "keep.txt"), "{build:?}");
+    let secret = list_directory(&repo, "secret").unwrap();
+    assert!(flag(&secret, "hide.txt"));
+    assert!(!flag(&secret, "keep.txt"), "{secret:?}");
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn unreal_style_ignore_recurses_into_excluded_directories() {
+    let (root, mut repo) = temp_repo();
+    commit_file(&mut repo, &root, "keep.txt", "base\n", "base");
+    fs::create_dir_all(root.join(".vs")).unwrap();
+    fs::write(root.join(".vs").join("tracked.txt"), "forced\n").unwrap();
+    let mut index = repo.index().unwrap();
+    index.add_path(Path::new(".vs/tracked.txt")).unwrap();
+    index.write().unwrap();
+    drop(index);
+    fs::write(root.join(".gitignore"), "*\n!*/\n!*.cpp\n.vs\n").unwrap();
+    fs::create_dir_all(root.join(".vs").join("ProjectEvaluation")).unwrap();
+    fs::write(
+        root.join(".vs").join("ProjectEvaluation").join("data.bin"),
+        "x",
+    )
+    .unwrap();
+    fs::write(
+        root.join(".vs").join("ProjectEvaluation").join("code.cpp"),
+        "x",
+    )
+    .unwrap();
+    fs::create_dir_all(root.join(".vs").join("UE5")).unwrap();
+    fs::create_dir_all(root.join("Engine")).unwrap();
+    fs::write(root.join("Engine").join("Game.cpp"), "code\n").unwrap();
+    fs::write(root.join("notes.txt"), "nope\n").unwrap();
+
+    let root_entries = list_directory(&repo, "").unwrap();
+    let flag = |items: &[DirEntry], name: &str| {
+        items.iter().find(|entry| entry.name == name).unwrap().ignored
+    };
+    assert!(flag(&root_entries, ".vs"), "{root_entries:?}");
+    assert!(!flag(&root_entries, "Engine"), "{root_entries:?}");
+    assert!(flag(&root_entries, "notes.txt"));
+
+    let vs = list_directory(&repo, ".vs").unwrap();
+    assert!(flag(&vs, "ProjectEvaluation"), "{vs:?}");
+    assert!(flag(&vs, "UE5"), "{vs:?}");
+    assert!(!flag(&vs, "tracked.txt"), "{vs:?}");
+    let evaluation = list_directory(&repo, ".vs/ProjectEvaluation").unwrap();
+    assert!(flag(&evaluation, "data.bin"), "{evaluation:?}");
+    assert!(flag(&evaluation, "code.cpp"), "{evaluation:?}");
+    let engine = list_directory(&repo, "Engine").unwrap();
+    assert!(!flag(&engine, "Game.cpp"), "{engine:?}");
+    let _ = fs::remove_dir_all(&root);
+}

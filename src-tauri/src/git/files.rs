@@ -6,6 +6,9 @@ pub struct DirEntry {
     pub name: String,
     pub path: String,
     pub dir: bool,
+    /// Matches a git ignore rule and is not in the index. Tracked paths stay
+    /// unmarked: a pattern does not ignore a file git already tracks.
+    pub ignored: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -29,6 +32,10 @@ pub fn list_directory(repo: &Repository, path: &str) -> AppResult<Vec<DirEntry>>
     let root = workdir(repo)?;
     let rel = safe_repo_path(path)?;
     let dir = root.join(&rel);
+    let index = repo.index().ok();
+    // An excluded directory stays excluded for everything inside it. `!` can
+    // re-include a path only when no parent directory was itself excluded.
+    let parent_ignored = excluded_directory(repo, &rel);
     let mut entries = Vec::new();
     for item in std::fs::read_dir(&dir).map_err(|_| AppError::msg("Folder not found"))? {
         let item = item?;
@@ -46,7 +53,13 @@ pub fn list_directory(repo: &Repository, path: &str) -> AppResult<Vec<DirEntry>>
         } else {
             format!("{rel}/{name}")
         };
-        entries.push(DirEntry { name, path, dir });
+        let ignored = path_ignored(repo, index.as_ref(), &path, dir, parent_ignored);
+        entries.push(DirEntry {
+            name,
+            path,
+            dir,
+            ignored,
+        });
     }
     entries.sort_by(|left, right| {
         right
@@ -55,6 +68,51 @@ pub fn list_directory(repo: &Repository, path: &str) -> AppResult<Vec<DirEntry>>
             .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
     });
     Ok(entries)
+}
+
+/// Ignore rules (`.gitignore`, `.git/info/exclude`, and the global excludes file)
+/// hide this path. A trailing slash lets directory-only patterns such as `out/` match.
+fn path_ignored(
+    repo: &Repository,
+    index: Option<&git2::Index>,
+    rel: &str,
+    dir: bool,
+    parent_ignored: bool,
+) -> bool {
+    if index.is_some_and(|index| {
+        let path = Path::new(rel);
+        (0..4).any(|stage| index.get_path(path, stage).is_some())
+    }) {
+        return false;
+    }
+    if parent_ignored {
+        return true;
+    }
+    let query = if dir { format!("{rel}/") } else { rel.to_string() };
+    repo.status_should_ignore(Path::new(&query)).unwrap_or(false)
+}
+
+/// True when `rel` or a parent is an excluded directory.
+///
+/// libgit2 reports a file inside an excluded directory as ignored, but a child
+/// directory there as not ignored when a rule like `!*/` re-includes directories.
+/// Git still ignores those children: a negation cannot bring back a path whose
+/// parent directory was excluded.
+fn excluded_directory(repo: &Repository, rel: &str) -> bool {
+    let mut current = rel;
+    loop {
+        if !current.is_empty()
+            && repo
+                .status_should_ignore(Path::new(&format!("{current}/")))
+                .unwrap_or(false)
+        {
+            return true;
+        }
+        let Some(index) = current.rfind('/') else {
+            return false;
+        };
+        current = &current[..index];
+    }
 }
 
 pub fn read_file(repo: &Repository, path: &str) -> AppResult<FileText> {

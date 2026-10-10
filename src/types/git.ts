@@ -215,6 +215,7 @@ export interface DirEntry {
   name: string;
   path: string;
   dir: boolean;
+  ignored: boolean;
 }
 
 export interface FileText {

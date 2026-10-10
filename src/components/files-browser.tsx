@@ -416,9 +416,11 @@ function DirRows({
           <div key={item.path}>
             <button
               type="button"
+              title={item.ignored ? "Ignored" : undefined}
               className={cn(
                 "flex h-7 w-full items-center gap-1 pr-2 text-left text-xs hover:bg-muted/70",
                 selected === item.path && "bg-muted",
+                item.ignored && "text-muted-foreground",
               )}
               style={{ paddingLeft: 8 + depth * 12 }}
               onClick={() => (item.dir ? onToggle(item.path) : onOpenFile(item.path))}
