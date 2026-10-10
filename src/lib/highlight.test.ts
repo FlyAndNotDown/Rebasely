@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { highlightDiff } from "./highlight";
+import { highlightDiff, highlightText } from "./highlight";
 
 const classesOf = (ranges: { cls: string }[] | undefined) => (ranges ?? []).map((range) => range.cls);
 
@@ -25,5 +25,21 @@ describe("highlightDiff", () => {
   it("gives up on unknown languages and very long lines", () => {
     expect(highlightDiff([{ kind: "add", text: "x" }], "nope")).toBeNull();
     expect(highlightDiff([{ kind: "add", text: "x".repeat(5000) }], "typescript")).toBeNull();
+  });
+});
+
+describe("highlightText", () => {
+  it("colors a file as one block, including a comment that spans lines", () => {
+    const ranges = highlightText(["/* starts", "ends */", "const n = 1;"], "typescript");
+    expect(ranges).not.toBeNull();
+    expect(classesOf(ranges?.[0])).toEqual(["comment"]);
+    expect(classesOf(ranges?.[1])).toEqual(["comment"]);
+    expect(classesOf(ranges?.[2])).toContain("keyword");
+    expect(classesOf(ranges?.[2])).toContain("number");
+  });
+
+  it("gives up on unknown languages and very long lines", () => {
+    expect(highlightText(["x"], "nope")).toBeNull();
+    expect(highlightText(["x".repeat(5000)], "cpp")).toBeNull();
   });
 });

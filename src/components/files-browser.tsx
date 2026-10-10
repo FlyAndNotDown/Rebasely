@@ -8,7 +8,7 @@ import { DiffSkeleton } from "@/components/skeletons";
 import { Button } from "@/components/ui/button";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { textColumns } from "@/lib/diff-text";
+import { languageFor, styleSpans, textColumns, type TokenRange } from "@/lib/diff-text";
 import { formatAbsoluteTime } from "@/lib/format";
 import { errorMessage, gitApi } from "@/lib/git";
 import { dirsToReload, touchesFile } from "@/lib/repo-paths";
@@ -269,6 +269,7 @@ function FileBrowsePane({
 
   return (
     <FileBrowse
+      path={path}
       textLoading={textLoading}
       blameLoading={blameLoading}
       binary={binary}
@@ -510,7 +511,31 @@ function blameRows(text: string, hunks: BlameHunk[] | null, blameLoading: boolea
   });
 }
 
+type TextHighlighter = (lines: string[], language: string) => TokenRange[][] | null;
+let loadedTextHighlighter: TextHighlighter | null = null;
+
+function useFileSyntax(path: string, text: string | null, binary: boolean) {
+  const language = binary || text == null ? null : languageFor(path);
+  const [highlighter, setHighlighter] = useState<TextHighlighter | null>(() => loadedTextHighlighter);
+  useEffect(() => {
+    if (!language || highlighter) return;
+    let live = true;
+    void import("@/lib/highlight").then((module) => {
+      loadedTextHighlighter = module.highlightText;
+      if (live) setHighlighter(() => module.highlightText);
+    });
+    return () => {
+      live = false;
+    };
+  }, [highlighter, language]);
+  return useMemo(() => {
+    if (!language || !highlighter || text == null) return null;
+    return highlighter(text.length === 0 ? [] : text.split("\n"), language);
+  }, [highlighter, language, text]);
+}
+
 const FileBrowse = memo(function FileBrowse({
+  path,
   textLoading,
   blameLoading,
   binary,
@@ -518,6 +543,7 @@ const FileBrowse = memo(function FileBrowse({
   hunks,
   onOpenCommit,
 }: {
+  path: string;
   textLoading: boolean;
   blameLoading: boolean;
   binary: boolean;
@@ -526,6 +552,7 @@ const FileBrowse = memo(function FileBrowse({
   onOpenCommit: (commitId: string) => void;
 }) {
   const rows = useMemo(() => blameRows(text ?? "", hunks, blameLoading), [blameLoading, hunks, text]);
+  const syntax = useFileSyntax(path, binary ? null : text, binary);
   const gutter = useMemo(
     () =>
       (hunks ?? []).reduce(
@@ -575,7 +602,9 @@ const FileBrowse = memo(function FileBrowse({
                 </button>
               )}
               <span className="pr-2 text-right text-muted-foreground/70 tabular-nums">{index + 1}</span>
-              <span className="whitespace-pre pr-4">{row.text}</span>
+              <span className="whitespace-pre pr-4">
+                <HighlightedLine text={row.text} ranges={syntax?.[index]} />
+              </span>
             </div>
           );
         })}
@@ -584,6 +613,17 @@ const FileBrowse = memo(function FileBrowse({
     </ScrollArea>
   );
 });
+
+function HighlightedLine({ text, ranges }: { text: string; ranges: TokenRange[] | undefined }) {
+  if (!ranges?.length) return text;
+  return styleSpans([{ text, changed: false }], ranges).map((span, index) =>
+    span.text ? (
+      <span key={index} className={span.cls ? `tok-${span.cls}` : undefined}>
+        {span.text}
+      </span>
+    ) : null,
+  );
+}
 
 function FileHistory({
   commits,

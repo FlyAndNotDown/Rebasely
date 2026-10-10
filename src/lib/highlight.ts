@@ -99,6 +99,16 @@ function flatten(stream: Prism.TokenStream, inherited: string | null, out: Flat[
   flatten(stream.content, tokenClass(stream) ?? inherited, out);
 }
 
+function withinLimits(lines: string[]): boolean {
+  let total = 0;
+  for (const line of lines) {
+    if (line.length > MAX_LINE) return false;
+    total += line.length;
+    if (total > MAX_TOTAL) return false;
+  }
+  return true;
+}
+
 /** Tokenizes consecutive lines as one block and returns ranges per line. */
 function tokenizeBlock(texts: string[], grammar: Prism.Grammar): TokenRange[][] {
   const out: TokenRange[][] = texts.map(() => []);
@@ -122,6 +132,13 @@ function tokenizeBlock(texts: string[], grammar: Prism.Grammar): TokenRange[][] 
   return out;
 }
 
+/** Syntax ranges for a whole file, or null when the language is unknown or the text is too large. */
+export function highlightText(lines: string[], language: string): TokenRange[][] | null {
+  const grammar = Prism.languages[language];
+  if (!grammar || !withinLimits(lines)) return null;
+  return tokenizeBlock(lines, grammar);
+}
+
 /**
  * Syntax ranges for every line of a diff, or null when the language is
  * unknown. Each hunk's old side (context and removals) and new side (context
@@ -133,13 +150,7 @@ export function highlightDiff(
   language: string,
 ): TokenRange[][] | null {
   const grammar = Prism.languages[language];
-  if (!grammar) return null;
-  let total = 0;
-  for (const line of lines) {
-    if (line.text.length > MAX_LINE) return null;
-    total += line.text.length;
-  }
-  if (total > MAX_TOTAL) return null;
+  if (!grammar || !withinLimits(lines.map((line) => line.text))) return null;
 
   const result: TokenRange[][] = lines.map(() => []);
   let oldSide: number[] = [];
