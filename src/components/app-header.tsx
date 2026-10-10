@@ -12,7 +12,6 @@ import {
   ChevronDownIcon,
   CodeXmlIcon,
   FolderOpenIcon,
-  GitBranchIcon,
   PlusIcon,
   SquareTerminalIcon,
   XIcon,
@@ -137,7 +136,6 @@ export function AppHeader() {
           >
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="sm" className="max-w-44 shrink-0 font-mono">
-                <GitBranchIcon data-icon="inline-start" />
                 <span className="truncate">{current}</span>
               </Button>
             </DropdownMenuTrigger>
