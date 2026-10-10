@@ -1,5 +1,5 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from "react";
-import { Columns2Icon, ExternalLinkIcon, PilcrowIcon, SquarePenIcon } from "lucide-react";
+import { Columns2Icon, ExternalLinkIcon, PilcrowIcon, SquarePenIcon, XIcon } from "lucide-react";
 import { ConflictEditor } from "@/components/conflict-editor";
 import { ImageDiff, isImagePath } from "@/components/image-diff";
 import { DiffSkeleton } from "@/components/skeletons";
@@ -89,6 +89,7 @@ export function DiffViewer({ source }: { source: DiffSource }) {
     setDiffOptions,
     openDifftool,
     openInEditor,
+    closeFile,
   } = useGitPick([
     "changeSelection",
     "historySelection",
@@ -105,6 +106,7 @@ export function DiffViewer({ source }: { source: DiffSource }) {
     "setDiffOptions",
     "openDifftool",
     "openInEditor",
+    "closeFile",
   ]);
   const ignoreWhitespace = prefs.diffIgnoreWhitespace;
   const comparing = source === "history" && comparison != null;
@@ -278,6 +280,16 @@ export function DiffViewer({ source }: { source: DiffSource }) {
               <SquarePenIcon />
             </Button>
           ) : null}
+          <Button
+            type="button"
+            size="icon-xs"
+            variant="ghost"
+            aria-label="Close"
+            title="Close"
+            onClick={() => closeFile(source)}
+          >
+            <XIcon />
+          </Button>
         </div>
       </div>
       {conflicted && selection.type === "change" ? (

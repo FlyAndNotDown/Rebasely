@@ -149,6 +149,12 @@ interface GitContextValue {
   selectCompareFile: (path: string) => Promise<void>;
   selectStash: (stash: StashInfo) => Promise<void>;
   selectStashFile: (id: string, path: string) => Promise<void>;
+  /** Clears the file open in a diff or the Files view's counterpart panes. */
+  closeFile: (source: "changes" | "history" | "stash") => void;
+  /** Clears the open stash, including its file list. */
+  closeStash: () => void;
+  /** Clears the open commit, including its file list. */
+  closeCommit: () => void;
   stage: (paths: string[]) => Promise<void>;
   unstage: (paths: string[]) => Promise<void>;
   discard: (paths: string[]) => Promise<void>;
@@ -1230,6 +1236,62 @@ export function GitProvider({ children }: { children: ReactNode }) {
     if (!current) return;
     void loadComparison(current.head, current.base);
   }, [loadComparison]);
+
+  const closeFile = useCallback(
+    (source: "changes" | "history" | "stash") => {
+      const tabId = activeTabIdRef.current;
+      const current = sessionsRef.current[tabId];
+      if (source === "changes") {
+        changeLoadGen.current += 1;
+        patchSession(tabId, { changeSelection: null, changeDiff: null });
+        return;
+      }
+      if (source === "stash") {
+        const selected = current?.stashSelection;
+        if (!selected?.path) return;
+        stashLoadGen.current += 1;
+        patchSession(tabId, {
+          stashSelection: { type: "stash", id: selected.id, index: selected.index },
+          stashDiff: null,
+        });
+        return;
+      }
+      historyLoadGen.current += 1;
+      compareLoadGen.current += 1;
+      if (current?.comparison) {
+        patchSession(tabId, {
+          comparison: { ...current.comparison, path: null },
+          historyDiff: null,
+        });
+        return;
+      }
+      const selected = current?.historySelection;
+      if (!selected?.path) return;
+      patchSession(tabId, {
+        historySelection: { type: "commit", id: selected.id },
+        historyDiff: null,
+      });
+    },
+    [patchSession],
+  );
+
+  const closeStash = useCallback(() => {
+    const tabId = activeTabIdRef.current;
+    stashLoadGen.current += 1;
+    patchSession(tabId, { stashSelection: null, stashDetails: null, stashDiff: null });
+  }, [patchSession]);
+
+  const closeCommit = useCallback(() => {
+    const tabId = activeTabIdRef.current;
+    historyLoadGen.current += 1;
+    compareLoadGen.current += 1;
+    patchSession(tabId, {
+      historySelection: null,
+      historyDiff: null,
+      commitDetails: null,
+      comparison: null,
+    });
+  }, [patchSession]);
 
   const closeComparison = useCallback(() => {
     const tabId = activeTabIdRef.current;
@@ -2478,6 +2540,9 @@ export function GitProvider({ children }: { children: ReactNode }) {
       selectCompareFile,
       selectStash,
       selectStashFile,
+      closeFile,
+      closeStash,
+      closeCommit,
       stage,
       unstage,
       discard,
@@ -2560,6 +2625,9 @@ export function GitProvider({ children }: { children: ReactNode }) {
       selectCompareFile,
       selectStash,
       selectStashFile,
+      closeFile,
+      closeStash,
+      closeCommit,
       stage,
       unstage,
       discard,

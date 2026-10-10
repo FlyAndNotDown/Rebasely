@@ -3,6 +3,7 @@ import { ArrowLeftRightIcon, XIcon } from "lucide-react";
 import { toast } from "sonner";
 import { AuthorAvatar } from "@/components/author-avatar";
 import { CommitFilesSkeleton } from "@/components/skeletons";
+import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { formatAbsoluteTime } from "@/lib/format";
 import { fileKindClass, fileKindLabel } from "@/lib/file-kind";
@@ -19,6 +20,7 @@ export function CommitFiles() {
     swapComparison,
     closeComparison,
     selectCompareFile,
+    closeCommit,
   } = useGitPick([
     "commitDetails",
     "historySelection",
@@ -27,6 +29,7 @@ export function CommitFiles() {
     "swapComparison",
     "closeComparison",
     "selectCompareFile",
+    "closeCommit",
   ]);
   const selectedPath = comparison ? comparison.path : historySelection?.path;
   const onSelect = useCallback(
@@ -116,7 +119,12 @@ export function CommitFiles() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="shrink-0 px-3 py-2">
-        <div className="text-sm font-medium">{commit.summary}</div>
+        <div className="flex items-start gap-2">
+          <div className="min-w-0 flex-1 text-sm font-medium">{commit.summary}</div>
+          <Button type="button" size="icon-xs" variant="ghost" aria-label="Close" title="Close" onClick={closeCommit}>
+            <XIcon />
+          </Button>
+        </div>
         <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
           <button
             type="button"

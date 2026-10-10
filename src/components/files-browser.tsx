@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ChevronRightIcon, FileIcon, FolderIcon, FolderOpenIcon, SquarePenIcon } from "lucide-react";
+import { ChevronRightIcon, FileIcon, FolderIcon, FolderOpenIcon, SquarePenIcon, XIcon } from "lucide-react";
 import { toast } from "sonner";
 import { AuthorAvatar } from "@/components/author-avatar";
 import { DiffLines } from "@/components/diff-viewer";
@@ -188,6 +188,19 @@ export function FilesBrowser() {
                   History
                 </Button>
               </div>
+              <Button
+                type="button"
+                size="icon-xs"
+                variant="ghost"
+                aria-label="Close"
+                title="Close"
+                onClick={() => {
+                  setPath(null);
+                  setPin(null);
+                }}
+              >
+                <XIcon />
+              </Button>
             </div>
             {mode === "browse" ? (
               <FileBrowsePane key={path} repoPath={repoPath} path={path} onOpenCommit={openBlameCommit} />
