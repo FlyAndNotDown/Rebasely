@@ -1,4 +1,5 @@
 import type { AppPrefs, PanelLayout, PanelLayouts } from "@/types/git";
+import { pathsIgnoreCase } from "@/lib/format";
 
 export const SIDEBAR_VIEWS = ["changes", "history", "stash", "files"] as const;
 
@@ -112,11 +113,7 @@ export function sameGitPath(left: string, right: string): boolean {
 
 function foldGitPath(path: string): string {
   const slash = path.trim().replace(/\\/g, "/").replace(/\/+$/, "");
-  return gitPathsIgnoreCase() ? slash.toLowerCase() : slash;
-}
-
-function gitPathsIgnoreCase(): boolean {
-  return typeof navigator !== "undefined" && /windows/i.test(navigator.userAgent);
+  return pathsIgnoreCase() ? slash.toLowerCase() : slash;
 }
 
 function normalizeGitPath(path: unknown): string {

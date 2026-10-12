@@ -80,7 +80,9 @@ fn current_cancel() -> Option<(String, Arc<AtomicBool>)> {
 }
 
 /// `cmd\git.exe` on Windows is a launcher, so killing it alone would leave the
-/// real git and its remote helpers running with our pipes open.
+/// real git and its remote helpers running with our pipes open. On Unix the
+/// same is true of `ssh` and `git-remote-https`, so the child is started in
+/// its own process group and the whole group is killed.
 fn kill_tree(child: &mut std::process::Child) {
     #[cfg(windows)]
     {
@@ -97,7 +99,55 @@ fn kill_tree(child: &mut std::process::Child) {
             return;
         }
     }
+    #[cfg(unix)]
+    {
+        unsafe extern "C" {
+            fn kill(pid: i32, sig: i32) -> i32;
+        }
+        let pid = child.id();
+        if pid > 0 {
+            unsafe {
+                kill(-(pid as i32), 9);
+            }
+        }
+    }
     let _ = child.kill();
+}
+
+pub(super) fn stop_child(child: &mut std::process::Child) {
+    kill_tree(child);
+    let _ = child.wait();
+}
+
+pub(super) fn git_command(program: impl AsRef<std::ffi::OsStr>) -> Command {
+    let mut command = crate::locate::command(program);
+    #[cfg(unix)]
+    isolate_process_group(&mut command);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    command
+}
+
+#[cfg(unix)]
+fn isolate_process_group(command: &mut Command) {
+    use std::os::unix::process::CommandExt;
+    unsafe extern "C" {
+        fn setpgid(pid: i32, pgid: i32) -> i32;
+    }
+    unsafe {
+        command.pre_exec(|| {
+            let rc = unsafe { setpgid(0, 0) };
+            if rc == 0 {
+                Ok(())
+            } else {
+                Err(std::io::Error::last_os_error())
+            }
+        });
+    }
 }
 
 /// A killed git cannot release its lock files, and every later command would
@@ -173,17 +223,11 @@ pub(super) fn run_git_env(
     env: &[(&str, &str)],
 ) -> AppResult<std::process::Output> {
     let git = require_git()?;
-    let mut command = Command::new(git);
+    let mut command = git_command(git);
     command.arg("-C").arg(root).args(args);
     command.env("GIT_TERMINAL_PROMPT", "0");
     for (key, value) in env {
         command.env(key, value);
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        command.creation_flags(CREATE_NO_WINDOW);
     }
     command
         .output()
@@ -198,19 +242,13 @@ pub(super) fn run_git_input_output(
     input: &[u8],
 ) -> AppResult<std::process::Output> {
     let git = require_git()?;
-    let mut command = Command::new(git);
+    let mut command = git_command(git);
     command.arg("-C").arg(root).args(args);
     command.env("GIT_TERMINAL_PROMPT", "0");
     command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        command.creation_flags(CREATE_NO_WINDOW);
-    }
     let mut child = command
         .spawn()
         .map_err(|err| AppError::msg(err.to_string()))?;
@@ -270,19 +308,13 @@ pub(super) fn run_git_progress(
     mut on_progress: impl FnMut(&str) + Send,
 ) -> AppResult<()> {
     let git = require_git()?;
-    let mut command = Command::new(git);
+    let mut command = git_command(git);
     if let Some(root) = root {
         command.arg("-C").arg(root);
     }
     command.args(args);
     command.env("GIT_TERMINAL_PROMPT", "0");
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        command.creation_flags(CREATE_NO_WINDOW);
-    }
     let scope = current_cancel();
     if BACKGROUND.with(|flag| flag.get()) {
         command.env("SSH_ASKPASS_REQUIRE", "never");
@@ -528,7 +560,7 @@ fn same_git_path(left: &str, right: &str) -> bool {
 fn fold_git_path(path: &str) -> String {
     let slash = path.trim().replace('\\', "/");
     let trimmed = slash.trim_end_matches('/');
-    if cfg!(windows) {
+    if cfg!(any(windows, target_os = "macos")) {
         trimmed.to_ascii_lowercase()
     } else {
         trimmed.to_string()
@@ -606,19 +638,13 @@ pub fn check_git_executable(path: &str) -> AppResult<()> {
 }
 
 fn git_version_output(path: &str) -> AppResult<std::process::Output> {
-    let mut command = Command::new(path);
+    let mut command = git_command(path);
     command.arg("--version");
     command.env("GIT_TERMINAL_PROMPT", "0");
     command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        command.creation_flags(CREATE_NO_WINDOW);
-    }
     let child = command
         .spawn()
         .map_err(|_| AppError::msg("That file is not a Git executable."))?;
@@ -659,56 +685,15 @@ fn kill_pid(pid: u32) {
 }
 
 pub(super) fn which(name: &str) -> Option<PathBuf> {
-    let paths = std::env::var_os("PATH")?;
-    let mut names = vec![name.to_string()];
-    if let Ok(pathext) = std::env::var("PATHEXT") {
-        for ext in pathext.split(';').filter(|ext| !ext.is_empty()) {
-            names.push(format!("{name}{ext}"));
-        }
-    }
-    for dir in std::env::split_paths(&paths) {
-        for candidate_name in &names {
-            let candidate = dir.join(candidate_name);
-            if candidate.is_file() {
-                return Some(on_disk_name(candidate));
-            }
-        }
-    }
-    None
-}
-
-/// Windows treats `git.EXE` and `git.exe` as the same file, and `PATHEXT` is
-/// uppercase, so the probe path is not the name stored on disk.
-fn on_disk_name(candidate: PathBuf) -> PathBuf {
-    let Some(wanted) = candidate.file_name() else {
-        return candidate;
-    };
-    let Some(dir) = candidate.parent() else {
-        return candidate;
-    };
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return candidate;
-    };
-    for entry in entries.flatten() {
-        if entry.file_name().eq_ignore_ascii_case(wanted) {
-            return dir.join(entry.file_name());
-        }
-    }
-    candidate
+    crate::locate::which(name)
 }
 
 pub(super) fn spawn_git_stdout(root: &Path, args: &[&str]) -> AppResult<std::process::Child> {
     let git = require_git()?;
-    let mut command = Command::new(git);
+    let mut command = git_command(git);
     command.arg("-C").arg(root).args(args);
     command.env("GIT_TERMINAL_PROMPT", "0");
     command.stdout(Stdio::piped()).stderr(Stdio::null());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        command.creation_flags(CREATE_NO_WINDOW);
-    }
     command
         .spawn()
         .map_err(|err| AppError::msg(err.to_string()))
@@ -803,10 +788,10 @@ mod git_executable_tests {
     }
 
     #[test]
-    fn folds_path_case_on_windows() {
+    fn folds_path_case_on_case_insensitive_systems() {
         assert_eq!(
             same_git_path(r"C:\Git\cmd\git.exe", "c:/git/cmd/git.exe"),
-            cfg!(windows)
+            cfg!(any(windows, target_os = "macos"))
         );
     }
 
@@ -817,7 +802,7 @@ mod git_executable_tests {
         std::fs::create_dir_all(&dir).unwrap();
         let real = dir.join("git.exe");
         std::fs::write(&real, b"").unwrap();
-        let found = super::on_disk_name(dir.join("git.EXE"));
+        let found = crate::locate::on_disk_name(dir.join("git.EXE"));
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(
             found.file_name().and_then(|name| name.to_str()),

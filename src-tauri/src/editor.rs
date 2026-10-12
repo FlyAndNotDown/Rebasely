@@ -1,5 +1,4 @@
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde::Serialize;
 
@@ -34,9 +33,12 @@ struct Editor {
     /// Install locations under %LOCALAPPDATA% or %ProgramFiles%, checked when
     /// the editor is not on PATH.
     windows_paths: &'static [&'static str],
+    mac_paths: &'static [&'static str],
+    linux_paths: &'static [&'static str],
     lines: LineStyle,
     /// Shown in Settings. IDEs stay openable when a saved preference already names them.
     listed: bool,
+    windows_only: bool,
 }
 
 const EDITORS: &[Editor] = &[
@@ -48,32 +50,56 @@ const EDITORS: &[Editor] = &[
             r"%LOCALAPPDATA%\Programs\Microsoft VS Code\Code.exe",
             r"%ProgramFiles%\Microsoft VS Code\Code.exe",
         ],
+        mac_paths: &[
+            "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code",
+            "~/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code",
+        ],
+        linux_paths: &["/usr/share/code/bin/code", "/snap/bin/code"],
         lines: LineStyle::Goto,
         listed: true,
+        windows_only: false,
     },
     Editor {
         id: "cursor",
         name: "Cursor",
         commands: &["cursor"],
         windows_paths: &[r"%LOCALAPPDATA%\Programs\cursor\Cursor.exe"],
+        mac_paths: &[
+            "/Applications/Cursor.app/Contents/Resources/app/bin/cursor",
+            "~/Applications/Cursor.app/Contents/Resources/app/bin/cursor",
+        ],
+        linux_paths: &["/usr/share/cursor/bin/cursor", "/snap/bin/cursor"],
         lines: LineStyle::Goto,
         listed: false,
+        windows_only: false,
     },
     Editor {
         id: "vscode-insiders",
         name: "VS Code Insiders",
         commands: &["code-insiders"],
         windows_paths: &[r"%LOCALAPPDATA%\Programs\Microsoft VS Code Insiders\Code - Insiders.exe"],
+        mac_paths: &[
+            "/Applications/Visual Studio Code - Insiders.app/Contents/Resources/app/bin/code-insiders",
+        ],
+        linux_paths: &[],
         lines: LineStyle::Goto,
         listed: false,
+        windows_only: false,
     },
     Editor {
         id: "zed",
         name: "Zed",
         commands: &["zed"],
         windows_paths: &[r"%LOCALAPPDATA%\Programs\Zed\zed.exe"],
+        mac_paths: &[
+            "/Applications/Zed.app/Contents/MacOS/zed",
+            "/Applications/Zed.app/Contents/MacOS/cli",
+            "~/Applications/Zed.app/Contents/MacOS/zed",
+        ],
+        linux_paths: &["/usr/bin/zed"],
         lines: LineStyle::Suffix,
         listed: true,
+        windows_only: false,
     },
     Editor {
         id: "sublime",
@@ -83,8 +109,14 @@ const EDITORS: &[Editor] = &[
             r"%ProgramFiles%\Sublime Text\subl.exe",
             r"%ProgramFiles%\Sublime Text 3\subl.exe",
         ],
+        mac_paths: &[
+            "/Applications/Sublime Text.app/Contents/SharedSupport/bin/subl",
+            "~/Applications/Sublime Text.app/Contents/SharedSupport/bin/subl",
+        ],
+        linux_paths: &["/opt/sublime_text/sublime_text"],
         lines: LineStyle::Suffix,
         listed: true,
+        windows_only: false,
     },
     Editor {
         id: "notepad++",
@@ -94,66 +126,66 @@ const EDITORS: &[Editor] = &[
             r"%ProgramFiles%\Notepad++\notepad++.exe",
             r"%ProgramFiles(x86)%\Notepad++\notepad++.exe",
         ],
+        mac_paths: &[],
+        linux_paths: &[],
         lines: LineStyle::NotepadPlusPlus,
         listed: true,
+        windows_only: true,
     },
     Editor {
         id: "rider",
         name: "JetBrains Rider",
         commands: &["rider", "rider64"],
         windows_paths: &[],
+        mac_paths: &["/Applications/Rider.app/Contents/MacOS/rider"],
+        linux_paths: &[],
         lines: LineStyle::JetBrains,
         listed: false,
+        windows_only: false,
     },
 ];
 
-pub(crate) fn expand_env(template: &str) -> Option<PathBuf> {
-    let mut out = String::new();
-    let mut rest = template;
-    while let Some(start) = rest.find('%') {
-        out.push_str(&rest[..start]);
-        let after = &rest[start + 1..];
-        let end = after.find('%')?;
-        out.push_str(&std::env::var(&after[..end]).ok()?);
-        rest = &after[end + 1..];
+pub(crate) use crate::locate::which;
+
+pub(crate) fn editor_program(id: &str) -> Option<String> {
+    let editor = EDITORS.iter().find(|editor| editor.id == id)?;
+    if let Some(name) = editor
+        .commands
+        .iter()
+        .copied()
+        .find(|name| which(name).is_some())
+    {
+        return Some(name.to_string());
     }
-    out.push_str(rest);
-    Some(PathBuf::from(out))
+    locate(editor)
+        .map(|path| crate::locate::quote_shell(&path.to_string_lossy().replace('\\', "/")))
+        .or_else(|| editor.commands.first().map(|name| (*name).to_string()))
 }
 
-pub(crate) fn which(name: &str) -> Option<PathBuf> {
-    let paths = std::env::var_os("PATH")?;
-    let mut names = vec![name.to_string()];
-    if cfg!(windows) {
-        if let Ok(pathext) = std::env::var("PATHEXT") {
-            for ext in pathext.split(';').filter(|ext| !ext.is_empty()) {
-                names.push(format!("{name}{ext}"));
-            }
-        }
-    }
-    for dir in std::env::split_paths(&paths) {
-        for candidate in &names {
-            let path = dir.join(candidate);
-            if path.is_file() {
-                return Some(path);
-            }
-        }
-    }
-    None
+fn first_existing(templates: &[&str]) -> Option<PathBuf> {
+    templates
+        .iter()
+        .filter_map(|template| crate::locate::expand_path(template))
+        .find(|path| path.is_file())
 }
 
 fn locate(editor: &Editor) -> Option<PathBuf> {
     if cfg!(windows) {
-        let installed = editor
-            .windows_paths
-            .iter()
-            .filter_map(|template| expand_env(template))
-            .find(|path| path.is_file());
-        if installed.is_some() {
-            return installed;
+        if let Some(path) = first_existing(editor.windows_paths) {
+            return Some(path);
         }
     }
-    editor.commands.iter().find_map(|command| which(command))
+    if let Some(path) = editor.commands.iter().find_map(|command| which(command)) {
+        return Some(path);
+    }
+    let templates: &[&str] = if cfg!(target_os = "macos") {
+        editor.mac_paths
+    } else if cfg!(windows) {
+        &[]
+    } else {
+        editor.linux_paths
+    };
+    first_existing(templates)
 }
 
 pub fn list_editors() -> Vec<EditorOption> {
@@ -163,7 +195,7 @@ pub fn list_editors() -> Vec<EditorOption> {
         available: true,
     }];
     for editor in EDITORS {
-        if !editor.listed {
+        if !editor.listed || (editor.windows_only && !cfg!(windows)) {
             continue;
         }
         items.push(EditorOption {
@@ -202,11 +234,11 @@ fn open_with_system(path: &str) -> AppResult<()> {
     #[cfg(not(windows))]
     {
         let mut command = if cfg!(target_os = "macos") {
-            let mut command = Command::new("open");
+            let mut command = crate::locate::command("open");
             command.arg(path);
             command
         } else {
-            let mut command = Command::new("xdg-open");
+            let mut command = crate::locate::command("xdg-open");
             command.arg(path);
             command
         };
@@ -264,7 +296,7 @@ pub fn open_in_editor(path: &str, line: Option<u32>, editor_id: &str) -> AppResu
         return open_with_system(&path);
     };
     let line = line.filter(|_| target.is_file());
-    let mut command = Command::new(&exe);
+    let mut command = crate::locate::command(&exe);
     match (editor.lines, line) {
         (LineStyle::Goto, Some(line)) => {
             command.arg("--goto").arg(format!("{path}:{line}"));
@@ -297,11 +329,11 @@ pub fn open_in_editor(path: &str, line: Option<u32>, editor_id: &str) -> AppResu
 
 #[cfg(test)]
 mod tests {
-    use super::expand_env;
+    use crate::locate::expand_env;
 
     #[test]
     fn expands_environment_variables_in_install_paths() {
-        std::env::set_var("REBASELY_EDITOR_TEST", r"C:\Users\me");
+        unsafe { std::env::set_var("REBASELY_EDITOR_TEST", r"C:\Users\me") };
         assert_eq!(
             expand_env(r"%REBASELY_EDITOR_TEST%\Programs\x.exe").unwrap(),
             std::path::PathBuf::from(r"C:\Users\me\Programs\x.exe")

@@ -1403,11 +1403,13 @@ fn submodules_are_listed_and_updated() {
 
     run_git_stdout(&root, &["submodule", "deinit", "-q", "--force", "libs/sub"]).unwrap();
     assert_eq!(list_submodules(&repo).unwrap()[0].state, "uninitialized");
-    std::env::set_var("GIT_CONFIG_COUNT", "1");
-    std::env::set_var("GIT_CONFIG_KEY_0", "protocol.file.allow");
-    std::env::set_var("GIT_CONFIG_VALUE_0", "always");
+    unsafe {
+        std::env::set_var("GIT_CONFIG_COUNT", "1");
+        std::env::set_var("GIT_CONFIG_KEY_0", "protocol.file.allow");
+        std::env::set_var("GIT_CONFIG_VALUE_0", "always");
+    }
     let result = update_submodules(&mut repo, &[], |_| {});
-    std::env::remove_var("GIT_CONFIG_COUNT");
+    unsafe { std::env::remove_var("GIT_CONFIG_COUNT") };
     result.unwrap();
     assert_eq!(list_submodules(&repo).unwrap()[0].state, "clean");
     assert!(root.join("libs/sub/lib.txt").is_file());

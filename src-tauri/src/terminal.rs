@@ -37,22 +37,46 @@ pub fn list_terminals() -> Vec<TerminalOption> {
     #[cfg(target_os = "macos")]
     {
         items.push(option("terminal", "Terminal", true));
+        items.push(option("iterm", "iTerm", mac_app("iTerm")));
         items.push(option(
-            "iterm",
-            "iTerm",
-            Path::new("/Applications/iTerm.app").exists(),
+            "kitty",
+            "Kitty",
+            mac_app("kitty") || exists_in_path("kitty"),
         ));
+        items.push(option(
+            "ghostty",
+            "Ghostty",
+            mac_app("Ghostty") || exists_in_path("ghostty"),
+        ));
+        items.push(option(
+            "wezterm",
+            "WezTerm",
+            mac_app("WezTerm") || exists_in_path("wezterm"),
+        ));
+        items.push(option("warp", "Warp", mac_app("Warp")));
     }
 
     #[cfg(all(unix, not(target_os = "macos")))]
     {
         for (id, name, bin) in [
+            ("kgx", "Console", "kgx"),
+            ("ptyxis", "Ptyxis", "ptyxis"),
             ("gnome-terminal", "GNOME Terminal", "gnome-terminal"),
             ("konsole", "Konsole", "konsole"),
             ("xfce4-terminal", "Xfce Terminal", "xfce4-terminal"),
+            ("mate-terminal", "MATE Terminal", "mate-terminal"),
             ("tilix", "Tilix", "tilix"),
+            ("terminator", "Terminator", "terminator"),
             ("kitty", "Kitty", "kitty"),
+            ("ghostty", "Ghostty", "ghostty"),
+            ("wezterm", "WezTerm", "wezterm"),
             ("alacritty", "Alacritty", "alacritty"),
+            ("foot", "Foot", "foot"),
+            (
+                "x-terminal-emulator",
+                "System terminal",
+                "x-terminal-emulator",
+            ),
             ("xterm", "xterm", "xterm"),
         ] {
             items.push(option(id, name, exists_in_path(bin)));
@@ -100,33 +124,23 @@ fn platform_fallback() -> String {
     } else if cfg!(target_os = "macos") {
         "terminal".to_string()
     } else {
-        "xterm".to_string()
+        "x-terminal-emulator".to_string()
     }
 }
 
 fn exists_in_path(name: &str) -> bool {
-    which(name).is_some()
+    crate::locate::which(name).is_some()
 }
 
-fn which(name: &str) -> Option<PathBuf> {
-    let paths = std::env::var_os("PATH")?;
-    let mut names = vec![name.to_string()];
-    if !name.contains('.') {
-        if let Ok(pathext) = std::env::var("PATHEXT") {
-            for ext in pathext.split(';').filter(|ext| !ext.is_empty()) {
-                names.push(format!("{name}{ext}"));
-            }
-        }
+#[cfg(target_os = "macos")]
+fn mac_app(name: &str) -> bool {
+    let app = format!("{name}.app");
+    if Path::new("/Applications").join(&app).exists() {
+        return true;
     }
-    for dir in std::env::split_paths(&paths) {
-        for candidate_name in &names {
-            let candidate = dir.join(candidate_name);
-            if candidate.is_file() {
-                return Some(candidate);
-            }
-        }
-    }
-    None
+    std::env::var_os("HOME")
+        .map(|home| PathBuf::from(home).join("Applications").join(app).exists())
+        .unwrap_or(false)
 }
 
 fn git_bash_path() -> Option<PathBuf> {
@@ -142,8 +156,8 @@ fn git_bash_path() -> Option<PathBuf> {
             return Some(path);
         }
     }
-    which("git-bash").or_else(|| {
-        which("bash").filter(|path| {
+    crate::locate::which("git-bash").or_else(|| {
+        crate::locate::which("bash").filter(|path| {
             let text = path.to_string_lossy();
             text.contains("Git") || text.contains("git")
         })
@@ -153,12 +167,12 @@ fn git_bash_path() -> Option<PathBuf> {
 fn spawn_terminal(id: &str, path: &str) -> AppResult<()> {
     let mut command = match id {
         "windows-terminal" => {
-            let mut command = Command::new("wt");
+            let mut command = crate::locate::command("wt");
             command.args(["-d", path]);
             command
         }
         "pwsh" => {
-            let mut command = Command::new("pwsh");
+            let mut command = crate::locate::command("pwsh");
             command.args([
                 "-NoExit",
                 "-Command",
@@ -167,7 +181,7 @@ fn spawn_terminal(id: &str, path: &str) -> AppResult<()> {
             command
         }
         "powershell" => {
-            let mut command = Command::new("powershell");
+            let mut command = crate::locate::command("powershell");
             command.args([
                 "-NoExit",
                 "-Command",
@@ -176,7 +190,7 @@ fn spawn_terminal(id: &str, path: &str) -> AppResult<()> {
             command
         }
         "cmd" => {
-            let mut command = Command::new("cmd");
+            let mut command = crate::locate::command("cmd");
             command.arg("/K").current_dir(path);
             command
         }
@@ -187,7 +201,7 @@ fn spawn_terminal(id: &str, path: &str) -> AppResult<()> {
                 .file_name()
                 .and_then(|name| name.to_str())
                 .is_some_and(|name| name.eq_ignore_ascii_case("git-bash.exe"));
-            let mut command = Command::new(bash);
+            let mut command = crate::locate::command(bash);
             if is_git_bash {
                 command.arg(format!("--cd={path}"));
             } else {
@@ -196,47 +210,71 @@ fn spawn_terminal(id: &str, path: &str) -> AppResult<()> {
             command
         }
         "terminal" => {
-            let mut command = Command::new("open");
+            let mut command = crate::locate::command("open");
             command.args(["-a", "Terminal", path]);
             command
         }
         "iterm" => {
-            let mut command = Command::new("open");
+            let mut command = crate::locate::command("open");
             command.args(["-a", "iTerm", path]);
             command
         }
-        "gnome-terminal" => {
-            let mut command = Command::new("gnome-terminal");
+        "warp" => {
+            let mut command = crate::locate::command("open");
+            command.args(["-a", "Warp", path]);
+            command
+        }
+        "gnome-terminal" | "mate-terminal" => {
+            let mut command = crate::locate::command(id);
             command.arg(format!("--working-directory={path}"));
             command
         }
         "konsole" => {
-            let mut command = Command::new("konsole");
+            let mut command = crate::locate::command("konsole");
             command.args(["--workdir", path]);
             command
         }
-        "xfce4-terminal" => {
-            let mut command = Command::new("xfce4-terminal");
+        "xfce4-terminal" | "terminator" => {
+            let mut command = crate::locate::command(id);
             command.arg(format!("--working-directory={path}"));
             command
         }
         "tilix" => {
-            let mut command = Command::new("tilix");
+            let mut command = crate::locate::command("tilix");
             command.args(["--working-directory", path]);
             command
         }
-        "kitty" => {
-            let mut command = Command::new("kitty");
-            command.args(["--directory", path]);
+        "kgx" | "ptyxis" => {
+            let mut command = crate::locate::command(id);
+            command.args(["--working-directory", path]);
             command
         }
+        "kitty" => mac_or_cli("kitty", "kitty", &["--directory", path]),
+        "ghostty" => {
+            let flag = format!("--working-directory={path}");
+            if cfg!(target_os = "macos") && crate::locate::which("ghostty").is_none() {
+                let mut command = crate::locate::command("open");
+                command.args(["-na", "Ghostty", "--args", &flag]);
+                command
+            } else {
+                let mut command = crate::locate::command("ghostty");
+                command.arg(flag);
+                command
+            }
+        }
+        "wezterm" => mac_or_cli("wezterm", "WezTerm", &["start", "--cwd", path]),
         "alacritty" => {
-            let mut command = Command::new("alacritty");
+            let mut command = crate::locate::command("alacritty");
             command.args(["--working-directory", path]);
             command
         }
-        "xterm" => {
-            let mut command = Command::new("xterm");
+        "foot" => {
+            let mut command = crate::locate::command("foot");
+            command.arg(format!("--working-directory={path}"));
+            command
+        }
+        "x-terminal-emulator" | "xterm" => {
+            let mut command = crate::locate::command(id);
             command.current_dir(path);
             command
         }
@@ -260,4 +298,17 @@ fn spawn_terminal(id: &str, path: &str) -> AppResult<()> {
 
 fn escape_ps(path: &str) -> String {
     path.replace('\'', "''")
+}
+
+fn mac_or_cli(cli: &str, app: &str, args: &[&str]) -> Command {
+    if cfg!(target_os = "macos") && crate::locate::which(cli).is_none() {
+        let mut command = crate::locate::command("open");
+        command.arg("-na").arg(app).arg("--args");
+        command.args(args);
+        command
+    } else {
+        let mut command = crate::locate::command(cli);
+        command.args(args);
+        command
+    }
 }

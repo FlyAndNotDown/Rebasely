@@ -17,8 +17,7 @@ struct LogStream {
 
 impl Drop for LogStream {
     fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        stop_child(&mut self.child);
     }
 }
 
@@ -55,10 +54,15 @@ fn close_idle_log_streams() {
 }
 
 fn root_key(path: &str) -> String {
-    strip_verbatim_prefix(path)
+    let slash = strip_verbatim_prefix(path)
         .replace('\\', "/")
         .trim_end_matches('/')
-        .to_lowercase()
+        .to_string();
+    if cfg!(any(windows, target_os = "macos")) {
+        slash.to_lowercase()
+    } else {
+        slash
+    }
 }
 
 /// Closes the history streams of repositories that are no longer open.

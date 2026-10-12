@@ -71,22 +71,10 @@ fn looks_like_path(value: &str) -> bool {
     value.contains('\\') || value.contains('/') || Path::new(value).is_file()
 }
 
-/// Editors git has no built-in driver for, as `(name, difftool cmd, mergetool cmd)`.
-const EDITOR_TOOLS: &[(&str, &str, &str)] = &[
-    (
-        "vscode",
-        r#"code --wait --diff "$LOCAL" "$REMOTE""#,
-        r#"code --wait --merge "$REMOTE" "$LOCAL" "$BASE" "$MERGED""#,
-    ),
-    (
-        "cursor",
-        r#"cursor --wait --diff "$LOCAL" "$REMOTE""#,
-        r#"cursor --wait --merge "$REMOTE" "$LOCAL" "$BASE" "$MERGED""#,
-    ),
-];
-
 /// Saves the tools to the global Git config. Choosing an editor that git does
-/// not know adds the command it needs unless one is already set.
+/// not know adds the command it needs unless one is already set. A tool found
+/// only as an application bundle gets that executable path, because the short
+/// name would not be on `PATH`.
 pub fn write_tool_config(config: &ToolConfig) -> AppResult<ToolConfig> {
     let path = global_gitconfig_path()?;
     if !path.exists() {
@@ -94,20 +82,87 @@ pub fn write_tool_config(config: &ToolConfig) -> AppResult<ToolConfig> {
     }
     assign_tool(&path, "diff", &config.diff_tool)?;
     assign_tool(&path, "merge", &config.merge_tool)?;
-    for (name, diff_cmd, merge_cmd) in EDITOR_TOOLS {
-        if config.diff_tool.trim() == *name
-            && config_get_file(&path, &format!("difftool.{name}.cmd")).is_none()
+    for id in [
+        "vscode", "cursor", "araxis", "bc", "kdiff3", "meld", "p4merge", "smerge",
+    ] {
+        let Some((diff_cmd, merge_cmd)) = launch_commands(id) else {
+            continue;
+        };
+        if config.diff_tool.trim() == id
+            && config_get_file(&path, &format!("difftool.{id}.cmd")).is_none()
         {
-            config_set_file(&path, &format!("difftool.{name}.cmd"), diff_cmd)?;
+            config_set_file(&path, &format!("difftool.{id}.cmd"), &diff_cmd)?;
         }
-        if config.merge_tool.trim() == *name
-            && config_get_file(&path, &format!("mergetool.{name}.cmd")).is_none()
+        if config.merge_tool.trim() == id
+            && config_get_file(&path, &format!("mergetool.{id}.cmd")).is_none()
         {
-            config_set_file(&path, &format!("mergetool.{name}.cmd"), merge_cmd)?;
-            config_set_file(&path, &format!("mergetool.{name}.trustExitCode"), "true")?;
+            config_set_file(&path, &format!("mergetool.{id}.cmd"), &merge_cmd)?;
+            if matches!(id, "vscode" | "cursor" | "araxis") {
+                config_set_file(&path, &format!("mergetool.{id}.trustExitCode"), "true")?;
+            }
         }
     }
     Ok(read_tool_config(None))
+}
+
+fn launch_commands(id: &str) -> Option<(String, String)> {
+    let program = explicit_program(id)?;
+    let (diff_args, merge_args) = match id {
+        "vscode" | "cursor" => (
+            "--wait --diff \"$LOCAL\" \"$REMOTE\"",
+            "--wait --merge \"$REMOTE\" \"$LOCAL\" \"$BASE\" \"$MERGED\"",
+        ),
+        "araxis" => (
+            "-wait \"$LOCAL\" \"$REMOTE\"",
+            "-wait -merge -3 -a1 \"$BASE\" \"$LOCAL\" \"$REMOTE\" \"$MERGED\"",
+        ),
+        "bc" => (
+            "\"$LOCAL\" \"$REMOTE\"",
+            "\"$LOCAL\" \"$REMOTE\" \"$BASE\" \"$MERGED\"",
+        ),
+        "kdiff3" => (
+            "--auto \"$LOCAL\" \"$REMOTE\"",
+            "--auto \"$BASE\" \"$LOCAL\" \"$REMOTE\" -o \"$MERGED\"",
+        ),
+        "meld" => (
+            "\"$LOCAL\" \"$REMOTE\"",
+            "\"$LOCAL\" \"$BASE\" \"$REMOTE\" --output \"$MERGED\"",
+        ),
+        "p4merge" => (
+            "\"$LOCAL\" \"$REMOTE\"",
+            "\"$BASE\" \"$LOCAL\" \"$REMOTE\" \"$MERGED\"",
+        ),
+        "smerge" => (
+            "diff --wait \"$LOCAL\" \"$REMOTE\"",
+            "mergetool \"$BASE\" \"$LOCAL\" \"$REMOTE\" -o \"$MERGED\"",
+        ),
+        _ => return None,
+    };
+    Some((
+        format!("{program} {diff_args}"),
+        format!("{program} {merge_args}"),
+    ))
+}
+
+/// `code` when that command is on PATH. Otherwise the application bundle, quoted
+/// for the shell Git uses to launch a tool. Git already knows the other tools,
+/// so those only need a command when the short name cannot be found.
+fn explicit_program(id: &str) -> Option<String> {
+    match id {
+        "vscode" | "cursor" => crate::editor::editor_program(id),
+        "araxis" | "bc" | "kdiff3" | "meld" | "p4merge" | "smerge" => {
+            let tool = GUI_TOOLS.iter().find(|tool| tool.id == id)?;
+            if tool.commands.iter().any(|name| which(name).is_some()) {
+                return None;
+            }
+            gui_tool_path(tool).map(|path| quote_git_program(&path))
+        }
+        _ => None,
+    }
+}
+
+fn quote_git_program(path: &Path) -> String {
+    crate::locate::quote_shell(&path.to_string_lossy().replace('\\', "/"))
 }
 
 /// Writes one tool. A filesystem path becomes a private tool name plus the command
@@ -151,6 +206,9 @@ struct GuiTool {
     name: &'static str,
     commands: &'static [&'static str],
     windows_paths: &'static [&'static str],
+    mac_paths: &'static [&'static str],
+    linux_paths: &'static [&'static str],
+    windows_only: bool,
 }
 
 const GUI_TOOLS: &[GuiTool] = &[
@@ -162,16 +220,37 @@ const GUI_TOOLS: &[GuiTool] = &[
             r"%LOCALAPPDATA%\Programs\Microsoft VS Code\Code.exe",
             r"%ProgramFiles%\Microsoft VS Code\Code.exe",
         ],
+        mac_paths: &[
+            "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code",
+            "~/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code",
+        ],
+        linux_paths: &["/usr/share/code/bin/code", "/snap/bin/code"],
+        windows_only: false,
+    },
+    GuiTool {
+        id: "cursor",
+        name: "Cursor",
+        commands: &["cursor"],
+        windows_paths: &[r"%LOCALAPPDATA%\Programs\cursor\Cursor.exe"],
+        mac_paths: &[
+            "/Applications/Cursor.app/Contents/Resources/app/bin/cursor",
+            "~/Applications/Cursor.app/Contents/Resources/app/bin/cursor",
+        ],
+        linux_paths: &["/usr/share/cursor/bin/cursor", "/snap/bin/cursor"],
+        windows_only: false,
     },
     GuiTool {
         id: "bc",
         name: "Beyond Compare",
-        commands: &["BCompare", "bcomp"],
+        commands: &["BCompare", "bcomp", "bcompare"],
         windows_paths: &[
             r"%ProgramFiles%\Beyond Compare 5\BCompare.exe",
             r"%ProgramFiles%\Beyond Compare 4\BCompare.exe",
             r"%ProgramFiles%\Beyond Compare 3\BComp.exe",
         ],
+        mac_paths: &["/Applications/Beyond Compare.app/Contents/MacOS/BCompare"],
+        linux_paths: &["/usr/bin/bcompare"],
+        windows_only: false,
     },
     GuiTool {
         id: "kdiff3",
@@ -181,6 +260,9 @@ const GUI_TOOLS: &[GuiTool] = &[
             r"%ProgramFiles%\KDiff3\kdiff3.exe",
             r"%LOCALAPPDATA%\Programs\KDiff3\kdiff3.exe",
         ],
+        mac_paths: &["/Applications/kdiff3.app/Contents/MacOS/kdiff3"],
+        linux_paths: &["/usr/bin/kdiff3"],
+        windows_only: false,
     },
     GuiTool {
         id: "meld",
@@ -190,18 +272,30 @@ const GUI_TOOLS: &[GuiTool] = &[
             r"%ProgramFiles%\Meld\Meld.exe",
             r"%LOCALAPPDATA%\Programs\Meld\Meld.exe",
         ],
+        mac_paths: &["/Applications/Meld.app/Contents/MacOS/Meld"],
+        linux_paths: &["/usr/bin/meld"],
+        windows_only: false,
     },
     GuiTool {
         id: "p4merge",
         name: "P4Merge",
         commands: &["p4merge"],
         windows_paths: &[r"%ProgramFiles%\Perforce\p4merge.exe"],
+        mac_paths: &[
+            "/Applications/p4merge.app/Contents/Resources/bin/p4merge",
+            "/Applications/p4merge.app/Contents/MacOS/p4merge",
+        ],
+        linux_paths: &["/opt/p4v/bin/p4merge", "/usr/bin/p4merge"],
+        windows_only: false,
     },
     GuiTool {
         id: "winmerge",
         name: "WinMerge",
         commands: &["WinMergeU"],
         windows_paths: &[r"%ProgramFiles%\WinMerge\WinMergeU.exe"],
+        mac_paths: &[],
+        linux_paths: &[],
+        windows_only: true,
     },
     GuiTool {
         id: "tortoisemerge",
@@ -211,18 +305,27 @@ const GUI_TOOLS: &[GuiTool] = &[
             r"%ProgramFiles%\TortoiseGit\bin\TortoiseGitMerge.exe",
             r"%ProgramFiles%\TortoiseSVN\bin\TortoiseMerge.exe",
         ],
+        mac_paths: &[],
+        linux_paths: &[],
+        windows_only: true,
     },
     GuiTool {
         id: "smerge",
         name: "Sublime Merge",
         commands: &["smerge"],
         windows_paths: &[r"%ProgramFiles%\Sublime Merge\smerge.exe"],
+        mac_paths: &["/Applications/Sublime Merge.app/Contents/SharedSupport/bin/smerge"],
+        linux_paths: &["/opt/sublime_merge/smerge", "/usr/bin/smerge"],
+        windows_only: false,
     },
     GuiTool {
         id: "araxis",
         name: "Araxis Merge",
-        commands: &[],
+        commands: &["compare"],
         windows_paths: &[r"%ProgramFiles%\Araxis\Araxis Merge\Compare.exe"],
+        mac_paths: &["/Applications/Araxis Merge.app/Contents/Utilities/compare"],
+        linux_paths: &[],
+        windows_only: false,
     },
 ];
 
@@ -234,24 +337,31 @@ pub struct GuiToolOption {
     pub installed: bool,
 }
 
-fn gui_tool_installed(tool: &GuiTool) -> bool {
-    if cfg!(windows)
-        && tool
-            .windows_paths
-            .iter()
-            .filter_map(|template| crate::editor::expand_env(template))
-            .any(|path| path.is_file())
-    {
-        return true;
-    }
-    tool.commands
+fn gui_tool_path(tool: &GuiTool) -> Option<PathBuf> {
+    let templates: &[&str] = if cfg!(windows) {
+        tool.windows_paths
+    } else if cfg!(target_os = "macos") {
+        tool.mac_paths
+    } else {
+        tool.linux_paths
+    };
+    templates
         .iter()
-        .any(|command| crate::editor::which(command).is_some())
+        .filter_map(|template| crate::locate::expand_path(template))
+        .find(|path| path.is_file())
+}
+
+fn gui_tool_installed(tool: &GuiTool) -> bool {
+    if tool.windows_only && !cfg!(windows) {
+        return false;
+    }
+    gui_tool_path(tool).is_some() || tool.commands.iter().any(|command| which(command).is_some())
 }
 
 pub fn list_gui_tools() -> Vec<GuiToolOption> {
     GUI_TOOLS
         .iter()
+        .filter(|tool| cfg!(windows) || !tool.windows_only)
         .map(|tool| GuiToolOption {
             id: tool.id.to_string(),
             name: tool.name.to_string(),

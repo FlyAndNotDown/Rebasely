@@ -53,17 +53,36 @@ export function parentPath(path: string): string {
 }
 
 export function displayPath(path: string): string {
+  let text = path;
   if (path.startsWith("\\\\?\\UNC\\")) {
-    return `\\\\${path.slice(8)}`;
+    text = `\\\\${path.slice(8)}`;
+  } else if (path.startsWith("\\\\?\\")) {
+    text = path.slice(4);
   }
-  if (path.startsWith("\\\\?\\")) {
-    return path.slice(4);
-  }
-  return path;
+  return text.normalize("NFC");
+}
+
+function runtimePlatform(): string {
+  const runtime = globalThis as { process?: { platform?: string } };
+  return runtime.process?.platform ?? "";
+}
+
+/** Windows and macOS compare paths without case. Linux does not. */
+export function pathsIgnoreCase(): boolean {
+  const agent = typeof navigator !== "undefined" ? navigator.userAgent : "";
+  if (/windows/i.test(agent) || /macintosh|mac os x/i.test(agent)) return true;
+  if (/linux/i.test(agent)) return false;
+  const platform = runtimePlatform();
+  return platform === "win32" || platform === "darwin";
+}
+
+export function foldRepoPath(path: string, ignoreCase: boolean): string {
+  const normalized = displayPath(path).replace(/\//g, "\\").replace(/\\+$/, "");
+  return ignoreCase ? normalized.toLowerCase() : normalized;
 }
 
 export function normalizeRepoPath(path: string): string {
-  return displayPath(path).replace(/\//g, "\\").replace(/\\+$/, "").toLowerCase();
+  return foldRepoPath(path, pathsIgnoreCase());
 }
 
 export function sameRepoPath(a: string, b: string): boolean {

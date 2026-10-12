@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { SearchIcon } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Kbd } from "@/components/ui/kbd";
+import { normalizeRepoPath } from "@/lib/format";
 import { fuzzyScore } from "@/lib/fuzzy";
 import { SHORTCUTS, formatCombo, isEditableTarget, matchesCombo, type ShortcutId } from "@/lib/shortcuts";
 import { cn } from "@/lib/utils";
@@ -146,9 +147,9 @@ export function CommandCenter() {
         });
       }
     }
-    const open = new Set(tabs.flatMap((tab) => (tab.kind === "repo" ? [tab.path.toLowerCase()] : [])));
+    const open = new Set(tabs.flatMap((tab) => (tab.kind === "repo" ? [normalizeRepoPath(tab.path)] : [])));
     for (const recent of recents) {
-      if (open.has(recent.path.toLowerCase())) continue;
+      if (open.has(normalizeRepoPath(recent.path))) continue;
       list.push({
         id: `repo:${recent.path}`,
         label: `Open ${recent.name}`,

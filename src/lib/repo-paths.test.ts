@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
+import { pathsIgnoreCase } from "./format";
 import { dirsToReload, repoRelative, touchesFile } from "./repo-paths";
 
 const repo = "C:\\work\\Repo";
 
 describe("repoRelative", () => {
   it("maps paths inside the repo and rejects the rest", () => {
-    expect(repoRelative(repo, "c:/work/repo/Src/A.ts")).toBe("src/a.ts");
+    expect(repoRelative(repo, "c:/work/repo/Src/A.ts")).toBe(pathsIgnoreCase() ? "src/a.ts" : null);
+    expect(repoRelative(repo, "C:\\work\\Repo\\Src\\A.ts")).toBe(pathsIgnoreCase() ? "src/a.ts" : "Src/A.ts");
     expect(repoRelative(repo, "C:\\work\\Repo")).toBe("");
     expect(repoRelative(repo, "C:\\work\\RepoOther\\a.ts")).toBeNull();
   });

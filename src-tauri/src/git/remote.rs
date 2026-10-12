@@ -215,7 +215,7 @@ pub fn probe_remote_url(repo: &Repository, url: &str) -> AppResult<RemoteProbe> 
         return Err(AppError::msg("Remote URL is required"));
     }
     let git = require_git()?;
-    let mut command = Command::new(git);
+    let mut command = git_command(git);
     command.arg("-C").arg(workdir(repo)?);
     command.args([
         "-c",
@@ -231,12 +231,6 @@ pub fn probe_remote_url(repo: &Repository, url: &str) -> AppResult<RemoteProbe> 
         "GIT_SSH_COMMAND",
         "ssh -o BatchMode=yes -o ConnectTimeout=15",
     );
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        command.creation_flags(CREATE_NO_WINDOW);
-    }
     let output = command
         .output()
         .map_err(|err| AppError::msg(err.to_string()))?;

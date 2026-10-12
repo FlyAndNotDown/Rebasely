@@ -561,7 +561,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       if (!tab || tab.kind !== "repo") return;
       if (sessionsRef.current[tabId]?.snapshot) return;
 
-      const pendingKey = tab.path.toLowerCase();
+      const pendingKey = normalizeRepoPath(tab.path);
       if (openingPathsRef.current.has(pendingKey)) return;
       openingPathsRef.current.add(pendingKey);
       try {
@@ -613,7 +613,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    const pendingKey = path.toLowerCase();
+    const pendingKey = normalizeRepoPath(path);
     if (openingPathsRef.current.has(pendingKey)) return;
     openingPathsRef.current.add(pendingKey);
     try {

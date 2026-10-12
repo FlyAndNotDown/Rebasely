@@ -228,8 +228,7 @@ pub(super) fn search_commits(
                 }
             }
         }
-        let _ = child.kill();
-        let _ = child.wait();
+        stop_child(&mut child);
     }
 
     apply_ref_labels(&mut items, &labels);

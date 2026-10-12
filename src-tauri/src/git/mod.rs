@@ -371,50 +371,105 @@ fn short_id(id: &str) -> String {
 
 pub fn open_in_file_manager(path: &str) -> AppResult<()> {
     let path = strip_verbatim_prefix(path);
-    let mut command = if cfg!(windows) {
-        let mut command = Command::new("explorer");
+    let command = if cfg!(windows) {
+        let mut command = crate::locate::command("explorer");
         command.arg(&path);
         command
     } else if cfg!(target_os = "macos") {
-        let mut command = Command::new("open");
+        let mut command = crate::locate::command("open");
         command.arg(&path);
         command
     } else {
-        let mut command = Command::new("xdg-open");
+        let mut command = crate::locate::command("xdg-open");
         command.arg(&path);
         command
     };
-    command
-        .spawn()
-        .map_err(|err| AppError::msg(format!("Could not open folder: {err}")))?;
-    Ok(())
+    spawn_folder(command)
 }
 
 /// Opens the file manager with `path` selected.
 pub fn reveal_in_file_manager(path: &str) -> AppResult<()> {
     let path = strip_verbatim_prefix(path);
     #[cfg(windows)]
-    let mut command = {
+    {
         use std::os::windows::process::CommandExt;
-        let mut command = Command::new("explorer");
+        let mut command = crate::locate::command("explorer");
         // Explorer parses its own arguments and needs the quotes after the comma.
         command.raw_arg(format!("/select,\"{}\"", path.replace('/', "\\")));
-        command
-    };
+        spawn_folder(command)
+    }
     #[cfg(target_os = "macos")]
-    let mut command = {
-        let mut command = Command::new("open");
+    {
+        let mut command = crate::locate::command("open");
         command.arg("-R").arg(&path);
-        command
-    };
-    #[cfg(all(not(windows), not(target_os = "macos")))]
-    let mut command = {
-        let mut command = Command::new("xdg-open");
-        command.arg(Path::new(&path).parent().unwrap_or(Path::new(&path)));
-        command
-    };
+        spawn_folder(command)
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    reveal_linux(&path)
+}
+
+fn spawn_folder(mut command: Command) -> AppResult<()> {
     command
         .spawn()
         .map_err(|err| AppError::msg(format!("Could not open folder: {err}")))?;
     Ok(())
+}
+
+/// `file:///home/me/My%20File.txt`. Commas and spaces are encoded so `dbus-send`
+/// keeps the URI as one argument.
+#[cfg(any(test, not(any(windows, target_os = "macos"))))]
+fn file_uri(path: &str) -> String {
+    let mut out = String::from("file://");
+    for byte in path.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'/' => {
+                out.push(byte as char);
+            }
+            _ => {
+                const HEX: &[u8; 16] = b"0123456789ABCDEF";
+                out.push('%');
+                out.push(HEX[(byte >> 4) as usize] as char);
+                out.push(HEX[(byte & 0x0f) as usize] as char);
+            }
+        }
+    }
+    out
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
+fn reveal_linux(path: &str) -> AppResult<()> {
+    let uri = file_uri(path);
+    let shown = crate::locate::command("dbus-send")
+        .args([
+            "--session",
+            "--dest=org.freedesktop.FileManager1",
+            "--type=method_call",
+            "/org/freedesktop/FileManager1",
+            "org.freedesktop.FileManager1.ShowItems",
+            &format!("array:string:{uri}"),
+            "string:",
+        ])
+        .status()
+        .is_ok_and(|status| status.success());
+    if shown {
+        return Ok(());
+    }
+    let parent = Path::new(path).parent().unwrap_or(Path::new(path));
+    let mut command = crate::locate::command("xdg-open");
+    command.arg(parent);
+    spawn_folder(command)
+}
+
+#[cfg(test)]
+mod file_uri_tests {
+    use super::file_uri;
+
+    #[test]
+    fn encodes_spaces_and_commas() {
+        assert_eq!(
+            file_uri("/home/me/My File.txt"),
+            "file:///home/me/My%20File.txt"
+        );
+        assert_eq!(file_uri("/home/me/a,b.txt"), "file:///home/me/a%2Cb.txt");
+    }
 }

@@ -7,6 +7,7 @@ import { ReflogDialog } from "@/components/lazy-dialogs";
 import { WelcomeScreen } from "@/components/welcome-screen";
 import { Workspace } from "@/components/workspace";
 import { Button } from "@/components/ui/button";
+import { WindowResizeBorders } from "@/components/window-controls";
 import { GIT_MISSING } from "@/lib/git";
 import { WELCOME_TAB_ID, useGitPick } from "@/state/git-context";
 
@@ -19,7 +20,8 @@ export default function App() {
   ]);
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-background">
+    <div className="relative flex h-full min-h-0 flex-col bg-background">
+      <WindowResizeBorders />
       <AppHeader />
       <MissingGitBanner />
       <div className="flex min-h-0 flex-1">

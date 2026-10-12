@@ -146,10 +146,11 @@ pub fn git_env(activity_id: Option<&str>) -> Vec<(String, String)> {
     let Some(server) = SERVER.get() else {
         return Vec::new();
     };
-    let mut env = vec![
+    let env = vec![
         ("GIT_ASKPASS".to_string(), server.exe.clone()),
         ("SSH_ASKPASS".to_string(), server.exe.clone()),
-        // OpenSSH only uses SSH_ASKPASS without a terminal when told to.
+        // OpenSSH 8.4+ uses SSH_ASKPASS when SSH_ASKPASS_REQUIRE=force, without
+        // a DISPLAY. A fake DISPLAY=:0 makes pinentry and ssh try a dead X server.
         ("SSH_ASKPASS_REQUIRE".to_string(), "force".to_string()),
         (
             ENV_ENDPOINT.to_string(),
@@ -160,9 +161,6 @@ pub fn git_env(activity_id: Option<&str>) -> Vec<(String, String)> {
             activity_id.unwrap_or_default().to_string(),
         ),
     ];
-    if std::env::var_os("DISPLAY").is_none() {
-        env.push(("DISPLAY".to_string(), ":0".to_string()));
-    }
     env
 }
 

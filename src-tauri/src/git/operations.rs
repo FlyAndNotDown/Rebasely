@@ -378,7 +378,7 @@ pub(super) fn message_editor(scratch: &Path, messages: &[String]) -> AppResult<S
             "#!/bin/sh\ndir=$(dirname \"$0\")\nn=$(cat \"$dir/counter\")\nif [ -f \"$dir/msg-$n\" ]; then cp \"$dir/msg-$n\" \"$1\"; fi\necho $((n + 1)) > \"$dir/counter\"\nexit 0\n",
         )?;
         make_executable(&script)?;
-        Ok(script.to_string_lossy().into_owned())
+        Ok(unix_editor_command(&script))
     }
 }
 
@@ -394,7 +394,7 @@ pub(super) fn noop_editor(scratch: &Path) -> AppResult<String> {
         let script = scratch.join("noop-editor");
         fs::write(&script, "#!/bin/sh\nexit 0\n")?;
         make_executable(&script)?;
-        Ok(script.to_string_lossy().into_owned())
+        Ok(unix_editor_command(&script))
     }
 }
 
@@ -417,8 +417,17 @@ pub(super) fn write_copy_editor(scratch: &Path, name: &str, source: &Path) -> Ap
         let from = source.to_string_lossy().replace('\'', "'\\''");
         fs::write(&script, format!("#!/bin/sh\ncp '{from}' \"$1\"\nexit 0\n"))?;
         make_executable(&script)?;
-        Ok(script.to_string_lossy().into_owned())
+        Ok(unix_editor_command(&script))
     }
+}
+
+pub(super) fn unix_editor_command(script: &Path) -> String {
+    // `/bin/sh script` reads the file, so this still works when the temp
+    // directory is mounted `noexec`, and the quotes survive paths with spaces.
+    format!(
+        "/bin/sh {}",
+        crate::locate::quote_shell(&script.to_string_lossy())
+    )
 }
 
 pub(super) fn make_executable(path: &Path) -> AppResult<()> {
@@ -583,4 +592,21 @@ pub(super) fn ensure_clean_for_replay(repo: &Repository) -> AppResult<()> {
         return Err(AppError::msg("Commit or stash your changes first"));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    #[test]
+    fn runs_editor_scripts_through_the_shell() {
+        assert_eq!(
+            super::unix_editor_command(Path::new("/tmp/rebasely/message-editor")),
+            "/bin/sh '/tmp/rebasely/message-editor'"
+        );
+        assert_eq!(
+            super::unix_editor_command(Path::new("/tmp/my dir/script")),
+            "/bin/sh '/tmp/my dir/script'"
+        );
+    }
 }

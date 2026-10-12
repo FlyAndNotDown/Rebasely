@@ -6,7 +6,9 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use notify::{
+    Config, ErrorKind, Event, EventKind, PollWatcher, RecommendedWatcher, RecursiveMode, Watcher,
+};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
@@ -48,8 +50,13 @@ struct WatchPlan {
 }
 
 struct WatchEntry {
-    watcher: RecommendedWatcher,
+    watcher: Box<dyn Watcher + Send>,
     rules: Arc<IgnoreRules>,
+}
+
+enum WatchFault {
+    Limit,
+    Other(notify::Error),
 }
 
 pub struct WatchState {
@@ -260,16 +267,33 @@ fn should_attach(root: &str, path: &Path, rules: &IgnoreRules) -> bool {
     depth <= WATCH_SPLIT_DEPTH as usize && path.is_dir() && !rules.ignores_dir(path)
 }
 
+fn is_watch_limit(err: &notify::Error) -> bool {
+    matches!(&err.kind, ErrorKind::MaxFilesWatch)
+}
+
+fn watch_fault(err: notify::Error) -> WatchFault {
+    if is_watch_limit(&err) {
+        WatchFault::Limit
+    } else {
+        WatchFault::Other(err)
+    }
+}
+
 fn watch_tree(
-    watcher: &mut RecommendedWatcher,
+    watcher: &mut dyn Watcher,
     path: &Path,
     depth: u8,
     rules: &IgnoreRules,
-) -> notify::Result<()> {
+) -> Result<(), WatchFault> {
+    let mode = if depth >= WATCH_SPLIT_DEPTH {
+        RecursiveMode::Recursive
+    } else {
+        RecursiveMode::NonRecursive
+    };
+    watcher.watch(path, mode).map_err(watch_fault)?;
     if depth >= WATCH_SPLIT_DEPTH {
-        return watcher.watch(path, RecursiveMode::Recursive);
+        return Ok(());
     }
-    watcher.watch(path, RecursiveMode::NonRecursive)?;
     let Ok(entries) = fs::read_dir(path) else {
         return Ok(());
     };
@@ -301,14 +325,34 @@ fn watch_tree(
         if ignored_dirs.contains(&format!("{rel}/")) {
             continue;
         }
-        let _ = watch_tree(watcher, &child, depth + 1, rules);
+        if let Err(WatchFault::Limit) = watch_tree(watcher, &child, depth + 1, rules) {
+            return Err(WatchFault::Limit);
+        }
     }
     Ok(())
 }
 
-fn watch_repo(watcher: &mut RecommendedWatcher, root: &Path, rules: &IgnoreRules) -> AppResult<()> {
-    watch_tree(watcher, root, 0, rules)
-        .map_err(|err| crate::error::AppError::msg(format!("Could not watch folder: {err}")))?;
+fn watch_optional(
+    watcher: &mut dyn Watcher,
+    path: &Path,
+    mode: RecursiveMode,
+) -> Result<(), WatchFault> {
+    if !path.is_dir() {
+        return Ok(());
+    }
+    match watcher.watch(path, mode) {
+        Ok(()) => Ok(()),
+        Err(err) if is_watch_limit(&err) => Err(WatchFault::Limit),
+        Err(_) => Ok(()),
+    }
+}
+
+fn watch_repo(
+    watcher: &mut dyn Watcher,
+    root: &Path,
+    rules: &IgnoreRules,
+) -> Result<(), WatchFault> {
+    watch_tree(watcher, root, 0, rules)?;
 
     // A linked worktree has a `.git` file pointing at its own git folder, and
     // shares refs with the main repository's.
@@ -316,16 +360,11 @@ fn watch_repo(watcher: &mut RecommendedWatcher, root: &Path, rules: &IgnoreRules
         Ok(repo) => (repo.path().to_path_buf(), repo.commondir().to_path_buf()),
         Err(_) => (root.join(".git"), root.join(".git")),
     };
-    if git_dir.is_dir() {
-        let _ = watcher.watch(&git_dir, RecursiveMode::NonRecursive);
+    watch_optional(watcher, &git_dir, RecursiveMode::NonRecursive)?;
+    if common_dir != git_dir {
+        watch_optional(watcher, &common_dir, RecursiveMode::NonRecursive)?;
     }
-    if common_dir != git_dir && common_dir.is_dir() {
-        let _ = watcher.watch(&common_dir, RecursiveMode::NonRecursive);
-    }
-    let refs = common_dir.join("refs");
-    if refs.is_dir() {
-        let _ = watcher.watch(&refs, RecursiveMode::Recursive);
-    }
+    watch_optional(watcher, &common_dir.join("refs"), RecursiveMode::Recursive)?;
     Ok(())
 }
 
@@ -363,34 +402,78 @@ fn note_change(
     }
 }
 
+fn event_handler(
+    path: String,
+    pending: Arc<Mutex<HashMap<String, Pending>>>,
+    attach: mpsc::Sender<AttachRequest>,
+    rules: Arc<IgnoreRules>,
+) -> impl Fn(Result<Event, notify::Error>) + Send + 'static {
+    move |result| {
+        let Ok(event) = result else { return };
+        if !interesting(&event, &rules) {
+            return;
+        }
+        if matches!(event.kind, EventKind::Create(_)) {
+            for changed in &event.paths {
+                if should_attach(&path, changed, &rules) {
+                    let _ = attach.send(AttachRequest {
+                        root: path.clone(),
+                        path: changed.clone(),
+                    });
+                }
+            }
+        }
+        note_change(pending.as_ref(), &path, &event, &rules);
+    }
+}
+
+fn open_watcher(
+    path: &str,
+    pending: Arc<Mutex<HashMap<String, Pending>>>,
+    attach: mpsc::Sender<AttachRequest>,
+    rules: Arc<IgnoreRules>,
+    poll: bool,
+) -> Result<Box<dyn Watcher + Send>, WatchFault> {
+    let mut watcher: Box<dyn Watcher + Send> = if poll {
+        PollWatcher::new(
+            event_handler(path.to_string(), pending, attach, rules.clone()),
+            Config::default().with_poll_interval(Duration::from_secs(4)),
+        )
+        .map(|watcher| Box::new(watcher) as Box<dyn Watcher + Send>)
+        .map_err(watch_fault)?
+    } else {
+        RecommendedWatcher::new(
+            event_handler(path.to_string(), pending, attach, rules.clone()),
+            Config::default(),
+        )
+        .map(|watcher| Box::new(watcher) as Box<dyn Watcher + Send>)
+        .map_err(watch_fault)?
+    };
+    watch_repo(&mut *watcher, Path::new(path), &rules)?;
+    Ok(watcher)
+}
+
+fn watch_error(fault: WatchFault) -> crate::error::AppError {
+    let detail = match &fault {
+        WatchFault::Limit => "OS file watch limit reached".to_string(),
+        WatchFault::Other(err) => err.to_string(),
+    };
+    crate::error::AppError::msg(format!("Could not watch folder: {detail}"))
+}
+
 fn watch_path(
     path: String,
     pending: Arc<Mutex<HashMap<String, Pending>>>,
     attach: mpsc::Sender<AttachRequest>,
 ) -> AppResult<WatchEntry> {
     let rules = Arc::new(IgnoreRules::open(Path::new(&path)));
-    let emit_path = path.clone();
-    let event_rules = rules.clone();
-    let mut watcher = notify::recommended_watcher(move |result: Result<Event, notify::Error>| {
-        let Ok(event) = result else { return };
-        if !interesting(&event, &event_rules) {
-            return;
+    let watcher = match open_watcher(&path, pending.clone(), attach.clone(), rules.clone(), false) {
+        Ok(watcher) => watcher,
+        Err(WatchFault::Limit) => {
+            open_watcher(&path, pending, attach, rules.clone(), true).map_err(watch_error)?
         }
-        if matches!(event.kind, EventKind::Create(_)) {
-            for changed in &event.paths {
-                if should_attach(&emit_path, changed, &event_rules) {
-                    let _ = attach.send(AttachRequest {
-                        root: emit_path.clone(),
-                        path: changed.clone(),
-                    });
-                }
-            }
-        }
-        note_change(pending.as_ref(), &emit_path, &event, &event_rules);
-    })
-    .map_err(|err| crate::error::AppError::msg(format!("Could not watch folder: {err}")))?;
-
-    watch_repo(&mut watcher, Path::new(&path), &rules)?;
+        Err(fault) => return Err(watch_error(fault)),
+    };
     Ok(WatchEntry { watcher, rules })
 }
 
@@ -419,7 +502,7 @@ fn ensure_debouncer(app: &AppHandle, state: &WatchState) {
             let depth =
                 relative_depth(&request.root, &request.path).unwrap_or(WATCH_SPLIT_DEPTH as usize);
             let rules = entry.rules.clone();
-            let _ = watch_tree(&mut entry.watcher, &request.path, depth as u8, &rules);
+            let _ = watch_tree(&mut *entry.watcher, &request.path, depth as u8, &rules);
         }
 
         thread::sleep(Duration::from_millis(150));
@@ -545,7 +628,7 @@ mod tests {
         fs::create_dir_all(root.join("out")).unwrap();
         fs::create_dir_all(root.join("src")).unwrap();
         let git = |args: &[&str]| {
-            let mut command = std::process::Command::new("git");
+            let mut command = crate::locate::command("git");
             command.arg("-C").arg(&root).args(args);
             #[cfg(windows)]
             {

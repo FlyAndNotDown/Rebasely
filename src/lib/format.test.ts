@@ -3,11 +3,13 @@ import {
   disambiguateRepoLabels,
   displayPath,
   fileName,
+  foldRepoPath,
   formatAbsoluteTime,
   formatRelativeTime,
   normalizeRepoPath,
   parentPath,
   pathSegments,
+  pathsIgnoreCase,
   sameRepoPath,
 } from "./format";
 
@@ -50,12 +52,17 @@ describe("paths", () => {
     expect(parentPath("a.ts")).toBe("");
   });
 
-  it("strips the Windows verbatim prefix and compares repos case-insensitively", () => {
+  it("strips the Windows verbatim prefix and folds case only where the filesystem does", () => {
     expect(displayPath("\\\\?\\C:\\work\\Repo")).toBe("C:\\work\\Repo");
     expect(displayPath("\\\\?\\UNC\\server\\share\\repo")).toBe("\\\\server\\share\\repo");
-    expect(normalizeRepoPath("C:/work/Repo/")).toBe("c:\\work\\repo");
-    expect(normalizeRepoPath("\\\\?\\C:\\work\\Repo\\")).toBe("c:\\work\\repo");
-    expect(sameRepoPath("C:/work/Repo", "c:\\work\\repo\\")).toBe(true);
+    expect(displayPath("cafe\u0301")).toBe("caf\u00e9");
+    const folded = pathsIgnoreCase();
+    expect(normalizeRepoPath("C:/work/Repo/")).toBe(folded ? "c:\\work\\repo" : "C:\\work\\Repo");
+    expect(normalizeRepoPath("\\\\?\\C:\\work\\Repo\\")).toBe(folded ? "c:\\work\\repo" : "C:\\work\\Repo");
+    expect(foldRepoPath("C:/work/Repo/", true)).toBe("c:\\work\\repo");
+    expect(foldRepoPath("C:/work/Repo/", false)).toBe("C:\\work\\Repo");
+    expect(sameRepoPath("C:/work/Repo", "c:\\work\\repo\\")).toBe(folded);
+    expect(sameRepoPath("C:/work/Repo", "C:\\work\\Repo\\")).toBe(true);
     expect(sameRepoPath("C:/work/Repo", "C:/work/Other")).toBe(false);
   });
 
