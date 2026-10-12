@@ -123,6 +123,16 @@ const LANGUAGE_BY_NAME: Record<string, string> = {
   ".gitignore": "ignore",
 };
 
+/**
+ * The section heading on a hunk header.
+ * `@@ -old,count +new,count @@` is git's range syntax; the line numbers are already in the gutter.
+ */
+export function hunkLabel(content: string): string {
+  const text = content.replace(/[\r\n]+$/, "");
+  const match = /^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@[ \t]?(.*)$/.exec(text);
+  return match ? match[1].trim() : text;
+}
+
 /** The Prism language for a path, or null when it has none worth highlighting. */
 export function languageFor(path: string): string | null {
   const name = (path.split("/").pop() ?? path).toLowerCase();

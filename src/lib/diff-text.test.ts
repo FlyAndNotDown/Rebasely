@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { diffLineSpans, languageFor, styleSpans, textColumns } from "./diff-text";
+import { diffLineSpans, hunkLabel, languageFor, styleSpans, textColumns } from "./diff-text";
 
 function assert(condition: boolean, message: string) {
   expect(condition, message).toBe(true);
@@ -106,6 +106,20 @@ describe("styleSpans", () => {
 
   it("passes spans through when there are no tokens", () => {
     expect(styleSpans([{ text: "a", changed: true }], null)).toEqual([{ text: "a", changed: true, cls: null }]);
+  });
+});
+
+describe("hunkLabel", () => {
+  it("drops the git range and keeps the function heading", () => {
+    expect(hunkLabel("@@ -225,6 +225,9 @@ float3 ReflectionEnvironment(FGBufferData GBuffer)")).toBe(
+      "float3 ReflectionEnvironment(FGBufferData GBuffer)",
+    );
+    expect(hunkLabel("@@ -1 +1,4 @@\r")).toBe("");
+    expect(hunkLabel("@@ -0,0 +1,3 @@")).toBe("");
+  });
+
+  it("leaves a line that is not a hunk header unchanged", () => {
+    expect(hunkLabel("@@ not a header")).toBe("@@ not a header");
   });
 });
 

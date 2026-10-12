@@ -16,6 +16,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { changeRange, hunkChanges, isChange, lineRefs, splitRows, type SplitRow } from "@/lib/diff-select";
 import {
   diffLineSpans,
+  hunkLabel,
   languageFor,
   styleSpans,
   textColumns,
@@ -331,7 +332,11 @@ export const DiffLines = memo(function DiffLines({
   const lineSpans = useMemo(() => diffLineSpans(diff.lines), [diff]);
   const syntax = useSyntaxRanges(diff, lineSpans);
   const widest = useMemo(
-    () => diff.lines.reduce((max, line) => Math.max(max, textColumns(line.content)), 0),
+    () =>
+      diff.lines.reduce(
+        (max, line) => Math.max(max, textColumns(line.kind === "hunk" ? hunkLabel(line.content) : line.content)),
+        0,
+      ),
     [diff],
   );
   const hunks = useMemo(() => hunkChanges(diff.lines), [diff]);
@@ -517,7 +522,7 @@ export const DiffLines = memo(function DiffLines({
         </span>
         {line.kind === "hunk" ? (
           <span className="flex min-w-0 items-center">
-            <span className="whitespace-pre">{line.content}</span>
+            <span className="whitespace-pre">{hunkLabel(line.content)}</span>
             {hunkActions(index)}
           </span>
         ) : (
@@ -560,7 +565,7 @@ export const DiffLines = memo(function DiffLines({
       return (
         <div key={key} className="flex h-5 items-center bg-muted/50 px-2 text-diff-hunk">
           <span className="w-[4.25rem] shrink-0" />
-          <span className="min-w-0 flex-1 truncate">{diff.lines[row.index].content}</span>
+          <span className="min-w-0 flex-1 truncate">{hunkLabel(diff.lines[row.index].content)}</span>
           {hunkActions(row.index)}
         </div>
       );
