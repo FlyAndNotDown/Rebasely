@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { CheckIcon, ChevronDownIcon, CircleAlertIcon, ListIcon } from "lucide-react";
+import { open as openFile } from "@tauri-apps/plugin-dialog";
+import { CheckIcon, ChevronDownIcon, CircleAlertIcon, ListIcon, PlusIcon, XIcon } from "lucide-react";
 import { useTheme } from "next-themes";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -24,7 +25,8 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Label } from "@/components/ui/label";
 import { errorMessage, gitApi } from "@/lib/git";
-import { AUTO_FETCH_CHOICES, normalizePrefs } from "@/lib/prefs";
+import { displayPath } from "@/lib/format";
+import { AUTO_FETCH_CHOICES, isGitFileName, normalizePrefs, sameGitPath } from "@/lib/prefs";
 import { cn } from "@/lib/utils";
 import { useGitPick } from "@/state/git-context";
 import type { TerminalOption, ToolConfig } from "@/types/git";
@@ -71,6 +73,11 @@ function SettingsForm({ onOpenChange }: { onOpenChange: (open: boolean) => void 
   const [guiToolsReady, setGuiToolsReady] = useState(false);
   const [autoFetch, setAutoFetch] = useState(String(prefs.autoFetchMinutes));
   const [prune, setPrune] = useState(prefs.fetchPrune);
+  const [gitPath, setGitPath] = useState(prefs.gitPath);
+  const [extraGitPaths, setExtraGitPaths] = useState(prefs.extraGitPaths);
+  const [pathGit, setPathGit] = useState<string | null>(null);
+  const [executablesReady, setExecutablesReady] = useState(false);
+  const [addingGit, setAddingGit] = useState(false);
   const [themeChoice, setThemeChoice] = useState<ThemeChoice>(() =>
     theme === "light" || theme === "dark" || theme === "system" ? theme : "dark",
   );
@@ -84,8 +91,9 @@ function SettingsForm({ onOpenChange }: { onOpenChange: (open: boolean) => void 
       gitApi.listEditors(),
       gitApi.getToolConfig(),
       gitApi.listGuiTools(),
+      gitApi.gitExecutables(),
     ])
-      .then(([identity, loadedPrefs, options, editorOptions, toolConfig, installedTools]) => {
+      .then(([identity, loadedPrefs, options, editorOptions, toolConfig, installedTools, executables]) => {
         const prefs = normalizePrefs(loadedPrefs);
         const visibleEditors = editorOptions.filter((editor) => editor.available);
         const visibleTerminals = options.filter((terminal) => terminal.available);
@@ -106,23 +114,68 @@ function SettingsForm({ onOpenChange }: { onOpenChange: (open: boolean) => void 
         setGuiToolsReady(true);
         setAutoFetch(String(prefs.autoFetchMinutes));
         setPrune(prefs.fetchPrune);
+        const onPath = executables.pathGit;
+        const selected = prefs.gitPath && onPath && sameGitPath(prefs.gitPath, onPath) ? "" : prefs.gitPath;
+        const extras = prefs.extraGitPaths.filter((path) => !onPath || !sameGitPath(path, onPath));
+        setPathGit(onPath);
+        setGitPath(selected);
+        setExtraGitPaths(
+          selected && !extras.some((path) => sameGitPath(path, selected)) ? [selected, ...extras] : extras,
+        );
+        setExecutablesReady(true);
       })
       .catch((error) => toast.error(errorMessage(error)));
   }, []);
 
+  async function addGitExecutable() {
+    const picked = await openFile({ multiple: false, title: "Git executable" });
+    if (typeof picked !== "string") return;
+    if (!isGitFileName(picked)) {
+      toast.error(
+        typeof navigator !== "undefined" && /windows/i.test(navigator.userAgent)
+          ? "Choose a file named git. On Windows, choose git.exe."
+          : "Choose a file named git.",
+      );
+      return;
+    }
+    if (pathGit && sameGitPath(picked, pathGit)) {
+      setGitPath("");
+      return;
+    }
+    setAddingGit(true);
+    try {
+      await gitApi.checkGitExecutable(picked);
+      setExtraGitPaths((current) =>
+        current.some((path) => sameGitPath(path, picked)) ? current : [...current, picked],
+      );
+      setGitPath(picked);
+    } catch (error) {
+      toast.error(errorMessage(error));
+    } finally {
+      setAddingGit(false);
+    }
+  }
+
+  function removeGitExecutable(path: string) {
+    setExtraGitPaths((current) => current.filter((item) => !sameGitPath(item, path)));
+    setGitPath((current) => (sameGitPath(current, path) ? "" : current));
+  }
+
   async function save() {
     setSaving(true);
     try {
+      await updatePrefs({
+        ...prefs,
+        terminalId,
+        editorId,
+        autoFetchMinutes: Number(autoFetch),
+        fetchPrune: prune,
+        gitPath,
+        extraGitPaths,
+      });
       await Promise.all([
         gitApi.setGitIdentity({ name: name.trim(), email: email.trim() }),
         gitApi.setToolConfig({ diffTool: tools.diffTool.trim(), mergeTool: tools.mergeTool.trim() }),
-        updatePrefs({
-          ...prefs,
-          terminalId,
-          editorId,
-          autoFetchMinutes: Number(autoFetch),
-          fetchPrune: prune,
-        }),
       ]);
       setTheme(themeChoice);
       toast.success("Saved settings");
@@ -152,10 +205,21 @@ function SettingsForm({ onOpenChange }: { onOpenChange: (open: boolean) => void 
               <DialogHeader>
                 <DialogTitle>Git</DialogTitle>
                 <DialogDescription>
-                  Identity, fetching, and the diff and merge tools stored in your global Git config.
+                  The Git executable Rebasely runs, plus identity, fetching, and the diff and merge tools in your
+                  global Git config.
                 </DialogDescription>
               </DialogHeader>
               <div className="mt-6 grid gap-8">
+                <GitExecutableSection
+                  ready={executablesReady}
+                  pathGit={pathGit}
+                  gitPath={gitPath}
+                  extras={extraGitPaths}
+                  busy={saving || addingGit}
+                  onSelect={setGitPath}
+                  onRemove={removeGitExecutable}
+                  onAdd={() => void addGitExecutable()}
+                />
                 <FieldGroup title="Identity">
                   <div className="grid gap-2">
                     <Label htmlFor="git-name">User name</Label>
@@ -360,6 +424,125 @@ function SupportGroup({
         ))
       )}
     </>
+  );
+}
+
+function GitExecutableSection({
+  ready,
+  pathGit,
+  gitPath,
+  extras,
+  busy,
+  onSelect,
+  onRemove,
+  onAdd,
+}: {
+  ready: boolean;
+  pathGit: string | null;
+  gitPath: string;
+  extras: string[];
+  busy: boolean;
+  onSelect: (path: string) => void;
+  onRemove: (path: string) => void;
+  onAdd: () => void;
+}) {
+  const unusable = ready && !pathGit && gitPath === "";
+  const selectedCustom = extras.find((path) => sameGitPath(path, gitPath));
+  const selectedPath = selectedCustom ?? (pathGit && gitPath === "" ? pathGit : null);
+  return (
+    <FieldGroup title="Executable">
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full justify-between font-normal"
+            disabled={!ready || busy}
+          >
+            {selectedPath ? (
+              <GitExecutableLabel path={selectedPath} pathTag={!selectedCustom} />
+            ) : (
+              <span className="truncate text-muted-foreground">
+                {ready ? "Not found" : "Looking for Git on PATH…"}
+              </span>
+            )}
+            <ChevronDownIcon />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="w-(--radix-dropdown-menu-trigger-width)">
+          {pathGit ? (
+            <DropdownMenuItem className="min-w-0" onClick={() => onSelect("")}>
+              <span className="min-w-4">{gitPath === "" ? <CheckIcon className="size-3.5" /> : null}</span>
+              <GitExecutableLabel path={pathGit} pathTag />
+            </DropdownMenuItem>
+          ) : null}
+          {extras.map((path) => (
+            <DropdownMenuItem
+              key={path}
+              className="min-w-0"
+              onSelect={(event) => {
+                if (event.target instanceof Element && event.target.closest("[data-remove-git]")) {
+                  event.preventDefault();
+                }
+              }}
+              onClick={() => onSelect(path)}
+            >
+              <span className="min-w-4">
+                {sameGitPath(gitPath, path) ? <CheckIcon className="size-3.5" /> : null}
+              </span>
+              <GitExecutableLabel path={path} />
+              <button
+                type="button"
+                data-remove-git=""
+                className="shrink-0 rounded-sm p-0.5 text-muted-foreground hover:text-foreground"
+                aria-label={`Remove ${displayPath(path)}`}
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onRemove(path);
+                }}
+              >
+                <XIcon className="size-3.5" />
+              </button>
+            </DropdownMenuItem>
+          ))}
+          {pathGit || extras.length > 0 ? <DropdownMenuSeparator /> : null}
+          <DropdownMenuItem onClick={() => window.setTimeout(onAdd, 0)}>
+            <span className="min-w-4">
+              <PlusIcon className="size-3.5" />
+            </span>
+            Add Git executable
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {unusable ? (
+        <p className="flex items-start gap-1.5 text-xs text-destructive" role="status">
+          <CircleAlertIcon className="mt-0.5 size-3.5 shrink-0" />
+          <span>
+            {extras.length === 0
+              ? "Git executable was not found. Add one to continue."
+              : "Git executable was not found. Select one of the added executables."}
+          </span>
+        </p>
+      ) : null}
+    </FieldGroup>
+  );
+}
+
+function GitExecutableLabel({ path, pathTag = false }: { path: string; pathTag?: boolean }) {
+  const label = displayPath(path);
+  return (
+    <span className="flex min-w-0 flex-1 items-center gap-2">
+      <span className="min-w-0 truncate font-mono text-xs" title={label}>
+        {label}
+      </span>
+      {pathTag ? (
+        <span className="inline-flex h-4 shrink-0 items-center rounded border bg-background px-1.5 font-sans text-[10px] leading-none text-muted-foreground">
+          PATH
+        </span>
+      ) : null}
+    </span>
   );
 }
 

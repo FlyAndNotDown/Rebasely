@@ -288,6 +288,17 @@ export interface AppPrefs {
   autoFetchMinutes: number;
   /** Remove remote-tracking branches that are gone from the remote when fetching. */
   fetchPrune: boolean;
+  /** Empty uses the git executable on PATH. Otherwise an absolute path. */
+  gitPath: string;
+  /** User-added git executables. The PATH entry is not included. */
+  extraGitPaths: string[];
+}
+
+export interface GitExecutables {
+  /** Full path of `git` on PATH, or null when PATH has none. */
+  pathGit: string | null;
+  /** Full path Rebasely will run, or null when none is usable. */
+  active: string | null;
 }
 
 export interface RemoteInfo {

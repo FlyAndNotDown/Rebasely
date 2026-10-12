@@ -24,6 +24,8 @@ export const defaultPrefs: AppPrefs = {
   diffIgnoreWhitespace: false,
   autoFetchMinutes: 60,
   fetchPrune: false,
+  gitPath: "",
+  extraGitPaths: [],
 };
 
 export const AUTO_FETCH_CHOICES = [0, 5, 15, 30, 60] as const;
@@ -96,6 +98,45 @@ export function normalizePanelLayouts(value?: Partial<PanelLayouts> | null): Pan
   };
 }
 
+export function isGitFileName(path: string): boolean {
+  const base = path.trim().split(/[/\\]/).pop() ?? "";
+  if (!base || base === "." || base === "..") return false;
+  const dot = base.lastIndexOf(".");
+  const stem = dot > 0 ? base.slice(0, dot) : base;
+  return stem.toLowerCase() === "git";
+}
+
+export function sameGitPath(left: string, right: string): boolean {
+  return foldGitPath(left) === foldGitPath(right);
+}
+
+function foldGitPath(path: string): string {
+  const slash = path.trim().replace(/\\/g, "/").replace(/\/+$/, "");
+  return gitPathsIgnoreCase() ? slash.toLowerCase() : slash;
+}
+
+function gitPathsIgnoreCase(): boolean {
+  return typeof navigator !== "undefined" && /windows/i.test(navigator.userAgent);
+}
+
+function normalizeGitPath(path: unknown): string {
+  if (typeof path !== "string") return "";
+  const trimmed = path.trim();
+  return isGitFileName(trimmed) ? trimmed : "";
+}
+
+function normalizeGitPaths(paths: unknown): string[] {
+  if (!Array.isArray(paths)) return [];
+  const next: string[] = [];
+  for (const raw of paths) {
+    if (typeof raw !== "string") continue;
+    const path = raw.trim();
+    if (!isGitFileName(path) || next.some((item) => sameGitPath(item, path))) continue;
+    next.push(path);
+  }
+  return next;
+}
+
 export function normalizePrefs(prefs: Partial<AppPrefs> | null | undefined): AppPrefs {
   return {
     terminalId: prefs?.terminalId || "auto",
@@ -111,5 +152,7 @@ export function normalizePrefs(prefs: Partial<AppPrefs> | null | undefined): App
         ? Math.round(prefs.autoFetchMinutes)
         : defaultPrefs.autoFetchMinutes,
     fetchPrune: prefs?.fetchPrune === true,
+    gitPath: normalizeGitPath(prefs?.gitPath),
+    extraGitPaths: normalizeGitPaths(prefs?.extraGitPaths),
   };
 }

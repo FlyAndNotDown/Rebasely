@@ -37,7 +37,10 @@ mod tools;
 
 pub use changes::*;
 use cli::*;
-pub use cli::{cancel_activity, with_background, with_cancel};
+pub use cli::{
+    active_git, cancel_activity, check_git_executable, git_on_path, prepare_git_prefs,
+    set_git_executable, with_background, with_cancel,
+};
 pub use conflicts::*;
 pub use diff::*;
 pub use files::*;

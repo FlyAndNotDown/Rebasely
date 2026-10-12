@@ -930,6 +930,29 @@ async fn run_mergetool(repo_path: String, path: String) -> AppResult<WorkspaceSn
     with_repo_async(repo_path, move |repo| git::run_mergetool(repo, &path)).await
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitExecutables {
+    path_git: Option<String>,
+    active: Option<String>,
+}
+
+#[tauri::command]
+async fn git_executables() -> AppResult<GitExecutables> {
+    blocking(|| {
+        Ok(GitExecutables {
+            path_git: git::git_on_path(),
+            active: git::active_git(),
+        })
+    })
+    .await
+}
+
+#[tauri::command]
+async fn check_git_executable(path: String) -> AppResult<()> {
+    blocking(move || git::check_git_executable(&path)).await
+}
+
 #[tauri::command]
 async fn get_prefs(app: AppHandle) -> AppResult<AppPrefs> {
     blocking(move || prefs::load_prefs(&app)).await
@@ -937,8 +960,14 @@ async fn get_prefs(app: AppHandle) -> AppResult<AppPrefs> {
 
 // Kept synchronous so rapid saves land in the order they were sent.
 #[tauri::command]
-fn set_prefs(prefs: AppPrefs, app: AppHandle) -> AppResult<AppPrefs> {
-    prefs::save_prefs(&app, prefs)
+fn set_prefs(mut prefs: AppPrefs, app: AppHandle) -> AppResult<AppPrefs> {
+    let extras = std::mem::take(&mut prefs.extra_git_paths);
+    let (git_path, extra_git_paths) = git::prepare_git_prefs(&prefs.git_path, extras)?;
+    prefs.git_path = git_path;
+    prefs.extra_git_paths = extra_git_paths;
+    let saved = prefs::save_prefs(&app, prefs)?;
+    git::set_git_executable(&saved.git_path);
+    Ok(saved)
 }
 
 #[tauri::command]
@@ -1016,6 +1045,9 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(WatchState::default())
         .setup(|app| {
+            if let Ok(prefs) = prefs::load_prefs(app.handle()) {
+                git::set_git_executable(&prefs.git_path);
+            }
             askpass::start(app.handle());
             if let Some(window) = app.get_webview_window("main") {
                 apply_window_chrome(&window, true);
@@ -1118,6 +1150,8 @@ pub fn run() {
             gui_tool_found,
             open_difftool,
             run_mergetool,
+            git_executables,
+            check_git_executable,
             get_prefs,
             set_prefs,
             open_in_terminal,

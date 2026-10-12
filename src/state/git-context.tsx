@@ -14,7 +14,7 @@ import { useSyncExternalStoreWithSelector } from "use-sync-external-store/with-s
 import { listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { toast } from "sonner";
-import { emptyBinaryDiff, errorMessage, expandHistoryRevs, gitApi, isCancelled } from "@/lib/git";
+import { emptyBinaryDiff, errorMessage, expandHistoryRevs, GIT_MISSING, gitApi, isCancelled, subscribeGitMissing } from "@/lib/git";
 import { normalizeRepoPath, sameRepoPath } from "@/lib/format";
 import { defaultPrefs, normalizePrefs, sameLayout } from "@/lib/prefs";
 import {
@@ -112,6 +112,8 @@ interface GitContextValue {
   /** An app-wide overlay that any view or the command palette can open. */
   openPanel: Panel | null;
   prefs: AppPrefs;
+  /** No usable Git executable is selected. */
+  gitMissing: boolean;
   loading: boolean;
   setOpenPanel: (panel: Panel | null) => void;
   setView: (view: View) => void;
@@ -241,6 +243,23 @@ const OPERATION_FINISHED: Record<string, string> = {
   revert: "Revert finished",
 };
 
+const OPEN_SETTINGS_EVENT = "rebasely-open-settings";
+
+function reportError(error: unknown) {
+  const message = errorMessage(error);
+  if (message === GIT_MISSING) {
+    toast.error(message, {
+      id: "git-missing",
+      action: {
+        label: "Settings",
+        onClick: () => window.dispatchEvent(new Event(OPEN_SETTINGS_EVENT)),
+      },
+    });
+    return;
+  }
+  toast.error(message);
+}
+
 const NO_COMMITS: CommitSummary[] = [];
 const NO_REVS: string[] = [];
 const NO_STASHES: StashInfo[] = [];
@@ -262,6 +281,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
   const [publishPrompt, setPublishPrompt] = useState<PublishPrompt | null>(null);
   const [openPanel, setOpenPanel] = useState<Panel | null>(null);
   const [prefs, setPrefs] = useState<AppPrefs>(defaultPrefs);
+  const [gitMissing, setGitMissing] = useState(false);
   const restoredRef = useRef(false);
   const refreshAfterReplayRef = useRef<() => Promise<void>>(async () => {});
   const prefsRef = useRef(prefs);
@@ -395,20 +415,36 @@ export function GitProvider({ children }: { children: ReactNode }) {
   }, [commitActiveTabId, commitSessions, commitTabs]);
 
   useEffect(() => {
+    const unsubscribe = subscribeGitMissing(() => setGitMissing(true));
+    const openSettings = () => setOpenPanel("settings");
+    window.addEventListener(OPEN_SETTINGS_EVENT, openSettings);
+    return () => {
+      unsubscribe();
+      window.removeEventListener(OPEN_SETTINGS_EVENT, openSettings);
+    };
+  }, [setOpenPanel]);
+
+  useEffect(() => {
     void (async () => {
       try {
-        const [recentsList, session, loadedPrefs] = await Promise.all([
+        const [recentsList, session, loadedPrefs, executables] = await Promise.all([
           gitApi.listRecents(),
           gitApi.loadSession(),
           gitApi.getPrefs().catch(() => defaultPrefs),
+          gitApi.gitExecutables().catch(() => null),
         ]);
         const nextPrefs = normalizePrefs(loadedPrefs);
         prefsRef.current = nextPrefs;
         setPrefs(nextPrefs);
         setRecents(recentsList);
         restoreSession(session, recentsList);
+        if (executables) {
+          const missing = executables.active === null;
+          setGitMissing(missing);
+          if (missing) reportError(GIT_MISSING);
+        }
       } catch (error) {
-        toast.error(errorMessage(error));
+        reportError(error);
       } finally {
         restoredRef.current = true;
         setLoading(false);
@@ -549,7 +585,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
         syncTabMeta(tabId, snapshot);
         setRecents(await gitApi.listRecents());
       } catch (error) {
-        toast.error(errorMessage(error));
+        reportError(error);
       } finally {
         openingPathsRef.current.delete(pendingKey);
       }
@@ -604,7 +640,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       commitActiveTabId(tab.id);
       setRecents(await gitApi.listRecents());
     } catch (error) {
-      toast.error(errorMessage(error));
+      reportError(error);
     } finally {
       openingPathsRef.current.delete(pendingKey);
     }
@@ -634,7 +670,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
         return true;
       } catch (error) {
         if (isCancelled(error)) toast.info("Cancelled: Cloning repository");
-        else toast.error(errorMessage(error));
+        else reportError(error);
         return false;
       }
     },
@@ -645,7 +681,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
     try {
       setRecents(await gitApi.forgetRecent(path));
     } catch (error) {
-      toast.error(errorMessage(error));
+      reportError(error);
     }
   }, []);
 
@@ -684,7 +720,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
     try {
       await gitApi.openInFileManager(path);
     } catch (error) {
-      toast.error(errorMessage(error));
+      reportError(error);
     }
   }, [activeRepoPath]);
 
@@ -694,7 +730,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
     try {
       await gitApi.openInTerminal(path);
     } catch (error) {
-      toast.error(errorMessage(error));
+      reportError(error);
     }
   }, [activeRepoPath]);
 
@@ -710,7 +746,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       if (!snapshot) return;
       patchSession(tabId, { snapshot: { ...snapshot, branches } });
     } catch (error) {
-      toast.error(errorMessage(error));
+      reportError(error);
     }
   }, [activeRepoPath, patchSession]);
 
@@ -758,7 +794,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
         stale = historyEpochRef.current[tabId] !== epoch;
         if (stale) return;
         patchSession(tabId, { commitsLoading: false });
-        toast.error(errorMessage(error));
+        reportError(error);
       } finally {
         historyInflightRef.current[tabId] = Math.max(0, (historyInflightRef.current[tabId] ?? 1) - 1);
         if (stale && historyInflightRef.current[tabId] === 0) {
@@ -1015,7 +1051,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       } catch (error) {
         if (changeLoadGen.current !== generation) return;
         patchSession(tabId, { changeDiff: null });
-        toast.error(errorMessage(error));
+        reportError(error);
       }
     },
     [activeRepoPath, patchSession],
@@ -1099,7 +1135,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       } catch (error) {
         if (historyLoadGen.current !== generation) return;
         patchSession(tabId, { commitDetails: null, historyDiff: null }, generation);
-        toast.error(errorMessage(error));
+        reportError(error);
       } finally {
         endActivity(activityId);
       }
@@ -1178,7 +1214,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       } catch (error) {
         if (historyLoadGen.current !== generation) return;
         patchSession(tabId, { historyDiff: null }, generation);
-        toast.error(errorMessage(error));
+        reportError(error);
       } finally {
         endActivity(activityId);
       }
@@ -1218,7 +1254,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       } catch (error) {
         if (compareLoadGen.current !== generation) return;
         patchSession(tabId, { comparison: null, historyDiff: null });
-        toast.error(errorMessage(error));
+        reportError(error);
       }
     },
     [activeRepoPath, patchSession],
@@ -1332,7 +1368,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       } catch (error) {
         if (compareLoadGen.current !== generation) return;
         patchSession(tabId, { historyDiff: null });
-        toast.error(errorMessage(error));
+        reportError(error);
       }
     },
     [activeRepoPath, patchSession],
@@ -1396,7 +1432,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       } catch (error) {
         if (stashLoadGen.current !== generation) return;
         patchSession(tabId, { stashDetails: null, stashDiff: null }, generation, "stash");
-        toast.error(errorMessage(error));
+        reportError(error);
       } finally {
         endActivity(activityId);
       }
@@ -1449,7 +1485,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       } catch (error) {
         if (stashLoadGen.current !== generation) return;
         patchSession(tabId, { stashDiff: null }, generation, "stash");
-        toast.error(errorMessage(error));
+        reportError(error);
       } finally {
         endActivity(activityId);
       }
@@ -1511,7 +1547,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
         return true;
       } catch (error) {
         if (isCancelled(error)) toast.info(`Cancelled: ${label}`);
-        else toast.error(errorMessage(error));
+        else reportError(error);
         return false;
       }
     },
@@ -1934,7 +1970,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
         const message = errorMessage(error);
         if (!force && /not fully merged/i.test(message)) return "unmerged";
         if (isCancelled(error)) toast.info(`Cancelled: Deleting ${name}`);
-        else toast.error(message);
+        else reportError(error);
         return false;
       }
     },
@@ -2133,7 +2169,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
         );
         toast.success("Saved patch");
       } catch (error) {
-        toast.error(errorMessage(error));
+        reportError(error);
       }
     },
     [activeRepoPath, runActivity],
@@ -2268,7 +2304,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       try {
         await gitApi.openInFileManager(full);
       } catch (error) {
-        toast.error(errorMessage(error));
+        reportError(error);
       }
     },
     [repoFilePath],
@@ -2281,7 +2317,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       try {
         await gitApi.revealInFileManager(full);
       } catch (error) {
-        toast.error(errorMessage(error));
+        reportError(error);
       }
     },
     [repoFilePath],
@@ -2294,7 +2330,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       try {
         await gitApi.openInEditor(full, line);
       } catch (error) {
-        toast.error(errorMessage(error));
+        reportError(error);
       }
     },
     [activeRepoPath, repoFilePath],
@@ -2307,7 +2343,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       try {
         await gitApi.openDifftool(repoPath, source);
       } catch (error) {
-        toast.error(errorMessage(error));
+        reportError(error);
       }
     },
     [activeRepoPath],
@@ -2367,6 +2403,12 @@ export function GitProvider({ children }: { children: ReactNode }) {
     const saved = normalizePrefs(await gitApi.setPrefs(next));
     prefsRef.current = saved;
     setPrefs(saved);
+    try {
+      const executables = await gitApi.gitExecutables();
+      setGitMissing(executables.active === null);
+    } catch {
+      // The choice is already saved. The next launch checks again.
+    }
     return saved;
   }, []);
 
@@ -2431,7 +2473,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
     try {
       await Promise.all(jobs);
     } catch (error) {
-      toast.error(errorMessage(error));
+      reportError(error);
     }
   }, [activeRepoPath, patchSession]);
 
@@ -2495,10 +2537,11 @@ export function GitProvider({ children }: { children: ReactNode }) {
       commitDraft: session?.commitDraft ?? null,
       openPanel,
       prefs,
+      gitMissing,
       loading,
       publishPrompt,
     }),
-    [activeTab, activeTabId, loading, openPanel, prefs, publishPrompt, recents, session, tabs],
+    [activeTab, activeTabId, gitMissing, loading, openPanel, prefs, publishPrompt, recents, session, tabs],
   );
 
   // Every action reads refs rather than render state, so this object keeps its

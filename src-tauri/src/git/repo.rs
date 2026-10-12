@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::error::{AppError, AppResult};
 
-use super::cli::{git_output_error, run_git, run_git_input_output, run_git_stdout};
+use super::cli::{git_output_error, require_git, run_git, run_git_input_output, run_git_stdout};
 use super::strip_verbatim_prefix;
 
 /// A non-bare repository addressed by the paths git itself reports.
@@ -77,9 +77,7 @@ impl CommitInfo {
 
 pub fn discover(path: &str) -> AppResult<Repository> {
     let path = strip_verbatim_prefix(path);
-    if super::cli::find_git().is_none() {
-        return Err(AppError::msg("Git executable was not found"));
-    }
+    require_git()?;
     open_repository(Path::new(&path)).map_err(|err| {
         if err.to_string() == "Bare repositories are not supported yet" {
             err

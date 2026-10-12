@@ -172,7 +172,7 @@ pub(super) fn run_git_env(
     args: &[&str],
     env: &[(&str, &str)],
 ) -> AppResult<std::process::Output> {
-    let git = find_git().ok_or_else(|| AppError::msg("Git executable was not found"))?;
+    let git = require_git()?;
     let mut command = Command::new(git);
     command.arg("-C").arg(root).args(args);
     command.env("GIT_TERMINAL_PROMPT", "0");
@@ -197,7 +197,7 @@ pub(super) fn run_git_input_output(
     args: &[&str],
     input: &[u8],
 ) -> AppResult<std::process::Output> {
-    let git = find_git().ok_or_else(|| AppError::msg("Git executable was not found"))?;
+    let git = require_git()?;
     let mut command = Command::new(git);
     command.arg("-C").arg(root).args(args);
     command.env("GIT_TERMINAL_PROMPT", "0");
@@ -269,7 +269,7 @@ pub(super) fn run_git_progress(
     args: &[&str],
     mut on_progress: impl FnMut(&str) + Send,
 ) -> AppResult<()> {
-    let git = find_git().ok_or_else(|| AppError::msg("Git executable was not found"))?;
+    let git = require_git()?;
     let mut command = Command::new(git);
     if let Some(root) = root {
         command.arg("-C").arg(root);
@@ -439,31 +439,223 @@ pub(super) fn run_git_stdout(root: &Path, args: &[&str]) -> AppResult<Vec<u8>> {
     }))
 }
 
-pub(super) fn find_git() -> Option<PathBuf> {
-    static GIT: OnceLock<PathBuf> = OnceLock::new();
-    if let Some(path) = GIT.get() {
-        return Some(path.clone());
-    }
-    let found = locate_git()?;
-    Some(GIT.get_or_init(|| found).clone())
+pub(super) fn require_git() -> AppResult<PathBuf> {
+    find_git().ok_or_else(|| AppError::msg(crate::error::GIT_MISSING))
 }
 
-pub(super) fn locate_git() -> Option<PathBuf> {
-    if let Some(path) = which("git") {
-        return Some(path);
+struct GitBin {
+    /// Empty selects the `git` executable on PATH.
+    selected: String,
+    resolved: Option<PathBuf>,
+    loaded: bool,
+}
+
+fn git_bin() -> &'static Mutex<GitBin> {
+    static BIN: OnceLock<Mutex<GitBin>> = OnceLock::new();
+    BIN.get_or_init(|| {
+        Mutex::new(GitBin {
+            selected: String::new(),
+            resolved: None,
+            loaded: false,
+        })
+    })
+}
+
+fn find_git() -> Option<PathBuf> {
+    let mut bin = git_bin().lock().unwrap_or_else(|err| err.into_inner());
+    if bin.resolved.as_ref().is_some_and(|path| path.is_file()) {
+        return bin.resolved.clone();
     }
-    const CANDIDATES: &[&str] = &[
-        r"C:\Program Files\Git\cmd\git.exe",
-        r"C:\Program Files\Git\bin\git.exe",
-        r"C:\Program Files (x86)\Git\cmd\git.exe",
-        "/usr/bin/git",
-        "/usr/local/bin/git",
-        "/opt/homebrew/bin/git",
-    ];
-    CANDIDATES
-        .iter()
-        .map(PathBuf::from)
-        .find(|path| path.is_file())
+    let resolved = resolve_git(&bin.selected);
+    bin.resolved = resolved.clone();
+    bin.loaded = true;
+    resolved
+}
+
+/// `selected` is empty to use PATH, or the full path of a chosen executable.
+/// A missing chosen file does not fall back to PATH.
+pub fn set_git_executable(selected: &str) {
+    let mut selected = selected.trim().to_string();
+    if !selected.is_empty() && !is_git_executable_name(Path::new(&selected)) {
+        selected.clear();
+    }
+    let mut bin = git_bin().lock().unwrap_or_else(|err| err.into_inner());
+    if bin.loaded
+        && bin.selected == selected
+        && bin.resolved.as_ref().is_some_and(|path| path.is_file())
+    {
+        return;
+    }
+    let resolved = resolve_git(&selected);
+    *bin = GitBin {
+        selected,
+        resolved,
+        loaded: true,
+    };
+}
+
+fn resolve_git(selected: &str) -> Option<PathBuf> {
+    if selected.is_empty() {
+        return which("git");
+    }
+    let path = PathBuf::from(selected);
+    if is_git_executable_name(&path) && path.is_file() {
+        Some(path)
+    } else {
+        None
+    }
+}
+
+pub fn git_on_path() -> Option<String> {
+    which("git").map(|path| path.to_string_lossy().into_owned())
+}
+
+pub fn active_git() -> Option<String> {
+    find_git().map(|path| path.to_string_lossy().into_owned())
+}
+
+/// The file name's stem must be `git`, so `git`, `git.exe`, and `git.cmd` pass.
+fn is_git_executable_name(path: &Path) -> bool {
+    path.file_stem()
+        .and_then(|stem| stem.to_str())
+        .is_some_and(|stem| stem.eq_ignore_ascii_case("git"))
+}
+
+fn same_git_path(left: &str, right: &str) -> bool {
+    fold_git_path(left) == fold_git_path(right)
+}
+
+fn fold_git_path(path: &str) -> String {
+    let slash = path.trim().replace('\\', "/");
+    let trimmed = slash.trim_end_matches('/');
+    if cfg!(windows) {
+        trimmed.to_ascii_lowercase()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+pub fn validate_git_choice(path: &str) -> AppResult<()> {
+    let path = path.trim();
+    if path.is_empty() {
+        return Ok(());
+    }
+    let file = Path::new(path);
+    if !is_git_executable_name(file) {
+        return Err(AppError::msg("Choose a file named git."));
+    }
+    if !file.is_file() {
+        return Err(AppError::msg(crate::error::GIT_MISSING));
+    }
+    Ok(())
+}
+
+pub fn normalize_extra_git_paths(paths: Vec<String>) -> Vec<String> {
+    let mut kept: Vec<String> = Vec::new();
+    for raw in paths {
+        let path = raw.trim();
+        if path.is_empty() || !is_git_executable_name(Path::new(path)) {
+            continue;
+        }
+        if kept.iter().any(|existing| same_git_path(existing, path)) {
+            continue;
+        }
+        kept.push(path.to_string());
+    }
+    kept
+}
+
+/// Drops a custom path that is the PATH executable, and keeps the chosen file
+/// in the added list so Settings can show it.
+pub fn prepare_git_prefs(git_path: &str, extras: Vec<String>) -> AppResult<(String, Vec<String>)> {
+    let mut git_path = git_path.trim().to_string();
+    let on_path = git_on_path();
+    if !git_path.is_empty() {
+        if let Some(found) = &on_path {
+            if same_git_path(&git_path, found) {
+                git_path.clear();
+            }
+        }
+    }
+    validate_git_choice(&git_path)?;
+    let mut extras = normalize_extra_git_paths(extras);
+    if let Some(found) = &on_path {
+        extras.retain(|path| !same_git_path(path, found));
+    }
+    if !git_path.is_empty() && !extras.iter().any(|path| same_git_path(path, &git_path)) {
+        extras.insert(0, git_path.clone());
+    }
+    Ok((git_path, extras))
+}
+
+pub fn check_git_executable(path: &str) -> AppResult<()> {
+    validate_git_choice(path)?;
+    let path = path.trim();
+    if path.is_empty() {
+        return Err(AppError::msg(crate::error::GIT_MISSING));
+    }
+    let output = git_version_output(path)?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let combined = format!("{stdout}{stderr}").to_ascii_lowercase();
+    if output.status.success() && combined.contains("git version") {
+        Ok(())
+    } else {
+        Err(AppError::msg("That file is not a Git executable."))
+    }
+}
+
+fn git_version_output(path: &str) -> AppResult<std::process::Output> {
+    let mut command = Command::new(path);
+    command.arg("--version");
+    command.env("GIT_TERMINAL_PROMPT", "0");
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    let child = command
+        .spawn()
+        .map_err(|_| AppError::msg("That file is not a Git executable."))?;
+    let pid = child.id();
+    let (sender, receiver) = mpsc::channel();
+    thread::spawn(move || {
+        let _ = sender.send(child.wait_with_output());
+    });
+    match receiver.recv_timeout(Duration::from_secs(5)) {
+        Ok(Ok(output)) => Ok(output),
+        _ => {
+            kill_pid(pid);
+            Err(AppError::msg("That file is not a Git executable."))
+        }
+    }
+}
+
+fn kill_pid(pid: u32) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let _ = Command::new("taskkill")
+            .args(["/T", "/F", "/PID", &pid.to_string()])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .creation_flags(CREATE_NO_WINDOW)
+            .status();
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = Command::new("kill")
+            .args(["-9", &pid.to_string()])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
 }
 
 pub(super) fn which(name: &str) -> Option<PathBuf> {
@@ -478,15 +670,35 @@ pub(super) fn which(name: &str) -> Option<PathBuf> {
         for candidate_name in &names {
             let candidate = dir.join(candidate_name);
             if candidate.is_file() {
-                return Some(candidate);
+                return Some(on_disk_name(candidate));
             }
         }
     }
     None
 }
 
+/// Windows treats `git.EXE` and `git.exe` as the same file, and `PATHEXT` is
+/// uppercase, so the probe path is not the name stored on disk.
+fn on_disk_name(candidate: PathBuf) -> PathBuf {
+    let Some(wanted) = candidate.file_name() else {
+        return candidate;
+    };
+    let Some(dir) = candidate.parent() else {
+        return candidate;
+    };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return candidate;
+    };
+    for entry in entries.flatten() {
+        if entry.file_name().eq_ignore_ascii_case(wanted) {
+            return dir.join(entry.file_name());
+        }
+    }
+    candidate
+}
+
 pub(super) fn spawn_git_stdout(root: &Path, args: &[&str]) -> AppResult<std::process::Child> {
-    let git = find_git().ok_or_else(|| AppError::msg("Git executable was not found"))?;
+    let git = require_git()?;
     let mut command = Command::new(git);
     command.arg("-C").arg(root).args(args);
     command.env("GIT_TERMINAL_PROMPT", "0");
@@ -532,4 +744,104 @@ pub(super) fn git_output_error(output: std::process::Output) -> AppError {
     } else {
         message
     })
+}
+
+#[cfg(test)]
+mod git_executable_tests {
+    use super::{
+        is_git_executable_name, normalize_extra_git_paths, same_git_path, validate_git_choice,
+    };
+    use std::path::Path;
+
+    #[test]
+    fn accepts_only_a_file_named_git() {
+        assert!(is_git_executable_name(Path::new("git")));
+        assert!(is_git_executable_name(Path::new("git.exe")));
+        assert!(is_git_executable_name(Path::new("GIT.EXE")));
+        assert!(is_git_executable_name(Path::new("git.cmd")));
+        assert!(is_git_executable_name(Path::new("/usr/bin/git")));
+        assert!(is_git_executable_name(Path::new(
+            r"C:\Program Files\Git\cmd\git.exe"
+        )));
+        assert!(!is_git_executable_name(Path::new("git-lfs.exe")));
+        assert!(!is_git_executable_name(Path::new("gitk.exe")));
+        assert!(!is_git_executable_name(Path::new("git.exe.bak")));
+    }
+
+    #[test]
+    fn rejects_a_missing_or_misnamed_choice() {
+        assert!(validate_git_choice("").is_ok());
+        assert!(validate_git_choice("   ").is_ok());
+        assert_eq!(
+            validate_git_choice("gitk.exe").unwrap_err().to_string(),
+            "Choose a file named git."
+        );
+        assert_eq!(
+            validate_git_choice("rebasely-no-such-dir/git.exe")
+                .unwrap_err()
+                .to_string(),
+            crate::error::GIT_MISSING
+        );
+    }
+
+    #[test]
+    fn keeps_distinct_git_executables() {
+        let paths = normalize_extra_git_paths(vec![
+            r"C:\Git\cmd\git.exe".into(),
+            "C:/Git/cmd/git.exe".into(),
+            "git-lfs.exe".into(),
+            "/usr/bin/git".into(),
+            "  ".into(),
+        ]);
+        assert_eq!(
+            paths,
+            vec![
+                r"C:\Git\cmd\git.exe".to_string(),
+                "/usr/bin/git".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn folds_path_case_on_windows() {
+        assert_eq!(
+            same_git_path(r"C:\Git\cmd\git.exe", "c:/git/cmd/git.exe"),
+            cfg!(windows)
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn keeps_the_on_disk_extension_case() {
+        let dir = std::env::temp_dir().join(format!("rebasely-git-case-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let real = dir.join("git.exe");
+        std::fs::write(&real, b"").unwrap();
+        let found = super::on_disk_name(dir.join("git.EXE"));
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(
+            found.file_name().and_then(|name| name.to_str()),
+            Some("git.exe")
+        );
+    }
+
+    #[test]
+    fn checks_the_git_on_path() {
+        let Some(path) = super::git_on_path() else {
+            return;
+        };
+        assert!(super::check_git_executable(&path).is_ok());
+    }
+
+    #[test]
+    fn rejects_a_file_that_is_not_git() {
+        let dir = std::env::temp_dir().join(format!("rebasely-not-git-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(if cfg!(windows) { "git.exe" } else { "git" });
+        std::fs::write(&path, b"not a git executable").unwrap();
+        let text = path.to_string_lossy().into_owned();
+        let message = super::check_git_executable(&text).unwrap_err().to_string();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(message, "That file is not a Git executable.");
+    }
 }

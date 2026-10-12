@@ -214,7 +214,7 @@ pub fn probe_remote_url(repo: &Repository, url: &str) -> AppResult<RemoteProbe> 
     if url.is_empty() {
         return Err(AppError::msg("Remote URL is required"));
     }
-    let git = find_git().ok_or_else(|| AppError::msg("Git executable was not found"))?;
+    let git = require_git()?;
     let mut command = Command::new(git);
     command.arg("-C").arg(workdir(repo)?);
     command.args([

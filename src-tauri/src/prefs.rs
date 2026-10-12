@@ -51,6 +51,12 @@ pub struct AppPrefs {
     pub auto_fetch_minutes: u32,
     #[serde(default)]
     pub fetch_prune: bool,
+    /// Empty uses the `git` executable on PATH.
+    #[serde(default)]
+    pub git_path: String,
+    /// User-added executables. The PATH entry is not stored here.
+    #[serde(default)]
+    pub extra_git_paths: Vec<String>,
 }
 
 fn default_auto_fetch_minutes() -> u32 {
@@ -87,6 +93,8 @@ impl Default for AppPrefs {
             diff_ignore_whitespace: false,
             auto_fetch_minutes: default_auto_fetch_minutes(),
             fetch_prune: false,
+            git_path: String::new(),
+            extra_git_paths: Vec::new(),
         }
     }
 }

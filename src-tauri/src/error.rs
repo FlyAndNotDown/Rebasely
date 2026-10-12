@@ -12,6 +12,9 @@ pub enum AppError {
 /// The frontend matches this exact text to tell a cancel from a failure.
 pub const CANCELLED: &str = "Cancelled";
 
+/// The frontend matches this exact text to open Settings.
+pub const GIT_MISSING: &str = "Git executable was not found. Choose one in Settings.";
+
 impl AppError {
     pub fn msg(message: impl Into<String>) -> Self {
         Self::Message(message.into())

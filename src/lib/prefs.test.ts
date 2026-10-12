@@ -7,6 +7,7 @@ import {
   normalizePanelLayouts,
   normalizePrefs,
   normalizeSidebarOrder,
+  sameGitPath,
   sameLayout,
 } from "./prefs";
 
@@ -91,6 +92,28 @@ describe("normalizePrefs", () => {
       autoFetchMinutes: 15,
       fetchPrune: true,
     });
+  });
+
+  it("keeps added git executables and drops other file names", () => {
+    expect(
+      normalizePrefs({
+        gitPath: "  /usr/bin/git  ",
+        extraGitPaths: [
+          "C:/Git/cmd/git.exe",
+          "C:\\Git\\cmd\\git.exe",
+          "C:/Git/cmd/git-lfs.exe",
+          "/usr/bin/git",
+          "gitk",
+          "",
+        ],
+      }),
+    ).toMatchObject({
+      gitPath: "/usr/bin/git",
+      extraGitPaths: ["C:/Git/cmd/git.exe", "/usr/bin/git"],
+    });
+    expect(normalizePrefs({ gitPath: "gitk.exe" }).gitPath).toBe("");
+    expect(normalizePrefs(null).extraGitPaths).toEqual([]);
+    expect(sameGitPath("C:/Git/cmd/git.exe", "C:\\Git\\cmd\\git.exe")).toBe(true);
   });
 
   it("keeps a chosen editor and rejects a negative fetch interval", () => {
