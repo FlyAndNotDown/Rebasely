@@ -4,6 +4,7 @@ import { AddRemoteDialog } from "@/components/lazy-dialogs";
 import { CreateTagDialog } from "@/components/create-ref-dialogs";
 import { MergeDialog, RebaseOntoDialog } from "@/components/rebase-dialog";
 import { RepoStructure } from "@/components/repo-structure";
+import { BranchSidebarSkeleton } from "@/components/skeletons";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -91,10 +92,17 @@ export function HistoryBranches() {
   const [deletingTag, setDeletingTag] = useState<string | null>(null);
   const [selectedNames, setSelectedNames] = useState<string[]>([]);
   const [deletingMany, setDeletingMany] = useState<BranchInfo[] | null>(null);
+  const [branchesReadyFor, setBranchesReadyFor] = useState("");
+  const [structureReadyFor, setStructureReadyFor] = useState("");
   const branchAnchor = useRef<string | null>(null);
   const canRebase =
     Boolean(snapshot?.repo.currentBranch) && !snapshot?.repo.isDetached && !snapshot?.repo.operation;
   const branches = snapshot?.branches;
+  const repoPath = snapshot?.repo.path ?? "";
+  // Local branches arrive with the snapshot. Remotes, tags, and worktrees each
+  // finish later, so the column stays a skeleton until that whole set is in.
+  const sidebarReady =
+    repoPath !== "" && branchesReadyFor === repoPath && structureReadyFor === repoPath;
   const watched = useMemo(() => new Set(historyRevs), [historyRevs]);
   const expanded = useMemo(
     () => new Set(historyExpanded ?? DEFAULT_EXPANDED),
@@ -102,8 +110,15 @@ export function HistoryBranches() {
   );
 
   useEffect(() => {
-    void ensureBranches();
-  }, [ensureBranches, branches?.remote.length]);
+    if (!repoPath) return;
+    let live = true;
+    void ensureBranches().finally(() => {
+      if (live) setBranchesReadyFor(repoPath);
+    });
+    return () => {
+      live = false;
+    };
+  }, [ensureBranches, branches?.remote.length, repoPath]);
 
   useEffect(() => {
     if (historyExpanded !== null) return;
@@ -265,7 +280,10 @@ export function HistoryBranches() {
   const allBranches = collectAllBranches(root);
 
   return (
-    <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
+    <div
+      className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden"
+      aria-busy={!sidebarReady}
+    >
       <div className="shrink-0 border-b px-2 py-1.5">
         <div className="relative">
           <SearchIcon className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -289,11 +307,13 @@ export function HistoryBranches() {
         </div>
       </div>
       <ScrollArea className="min-h-0 flex-1 py-1">
-        {root.length === 0 && needle ? (
+        {sidebarReady ? null : <BranchSidebarSkeleton />}
+        {sidebarReady && root.length === 0 && needle ? (
           <div className="px-3 py-6 text-center text-xs text-muted-foreground">
             No matching branches
           </div>
-        ) : (
+        ) : null}
+        {sidebarReady && (root.length > 0 || !needle) ? (
           <TreeRows
             nodes={root}
             depth={0}
@@ -334,8 +354,10 @@ export function HistoryBranches() {
             }}
             onDeleteBranches={setDeletingMany}
           />
-        )}
-        {needle ? null : <RepoStructure />}
+        ) : null}
+        <div className={cn((!sidebarReady || Boolean(needle)) && "hidden")}>
+          <RepoStructure onReady={setStructureReadyFor} />
+        </div>
       </ScrollArea>
       <MergeDialog
         target={merging ? { onto: merging.name, label: merging.name } : null}

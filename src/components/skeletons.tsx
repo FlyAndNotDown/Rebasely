@@ -47,6 +47,30 @@ export function HistorySkeleton({
   );
 }
 
+const branchRowWidths = ["w-3/5", "w-2/5", "w-4/5", "w-1/2", "w-2/3"];
+
+/** Placeholder for the history branch column until branches, tags, and worktrees arrive together. */
+export function BranchSidebarSkeleton() {
+  const sections = [5, 4, 3, 2];
+  return (
+    <div role="status" aria-label="Loading branches" className="py-1">
+      {sections.map((rows, section) => (
+        <div key={section}>
+          <div className="flex h-7 items-center px-2">
+            <Skeleton className="h-2.5 w-14" />
+          </div>
+          {Array.from({ length: rows }, (_, index) => (
+            <div key={index} className="flex h-7 items-center gap-2 pr-2 pl-7">
+              <Skeleton className="size-3.5 shrink-0 rounded-sm" />
+              <Skeleton className={cn("h-3", branchRowWidths[(section + index) % branchRowWidths.length])} />
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function CommitFilesSkeleton() {
   return (
     <div role="status" aria-label="Loading files" className="flex h-full min-h-0 flex-col">

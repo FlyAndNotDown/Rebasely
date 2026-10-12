@@ -37,7 +37,7 @@ function joinPath(root: string, relative: string) {
 }
 
 /** Submodule and worktree sections for the branches sidebar. */
-export function RepoStructure() {
+export function RepoStructure({ onReady }: { onReady?: (repoPath: string) => void }) {
   const { snapshot, openPath, updateSubmodules, beginActivity, endActivity } = useGitPick([
     "snapshot",
     "openPath",
@@ -52,6 +52,8 @@ export function RepoStructure() {
   const [openSections, setOpenSections] = useState({ submodules: true, worktrees: true });
   const [adding, setAdding] = useState(false);
   const [removing, setRemoving] = useState<WorktreeInfo | null>(null);
+  const [loadedFor, setLoadedFor] = useState("");
+  const structureReady = loadedFor === repoPath && repoPath !== "";
 
   // Any repository change can move a submodule or a worktree's branch.
   useEffect(() => {
@@ -62,12 +64,18 @@ export function RepoStructure() {
         if (!live) return;
         setSubmodules(modules);
         setWorktrees(trees);
+        setLoadedFor(repoPath);
+        onReady?.(repoPath);
       })
-      .catch(() => undefined);
+      .catch(() => {
+        if (!live) return;
+        setLoadedFor(repoPath);
+        onReady?.(repoPath);
+      });
     return () => {
       live = false;
     };
-  }, [repoPath, snapshot, reload]);
+  }, [onReady, repoPath, snapshot, reload]);
 
   async function copy(text: string) {
     try {
@@ -103,7 +111,7 @@ export function RepoStructure() {
 
   return (
     <>
-      {submodules.length > 0 ? (
+      {structureReady && submodules.length > 0 ? (
         <section>
           <SectionHeader
             label="Submodules"
@@ -170,6 +178,7 @@ export function RepoStructure() {
             : null}
         </section>
       ) : null}
+      {structureReady ? (
       <section>
         <ContextMenu>
           <ContextMenuTrigger asChild>
@@ -236,6 +245,7 @@ export function RepoStructure() {
             ))
           : null}
       </section>
+      ) : null}
       <AddWorktreeDialog
         open={adding}
         onOpenChange={setAdding}
