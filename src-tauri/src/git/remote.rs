@@ -43,15 +43,11 @@ pub fn delete_remote_tag(
 /// The full ref `branch` tracks on `remote`, when its upstream is on that remote.
 /// It can differ from the local name, e.g. `feature` tracking `origin/feat-x`.
 pub(super) fn tracked_ref_on(repo: &Repository, branch: &str, remote: &str) -> Option<String> {
-    let config = repo.config().ok()?.snapshot().ok()?;
-    let tracked_remote = config.get_string(&format!("branch.{branch}.remote")).ok()?;
+    let tracked_remote = config_get(repo, &format!("branch.{branch}.remote"))?;
     if tracked_remote != remote {
         return None;
     }
-    config
-        .get_string(&format!("branch.{branch}.merge"))
-        .ok()
-        .filter(|merge| !merge.is_empty())
+    config_get(repo, &format!("branch.{branch}.merge")).filter(|merge| !merge.is_empty())
 }
 
 pub fn pull_remote(
@@ -162,14 +158,34 @@ pub fn clone_repository(
 }
 
 pub fn list_remotes(repo: &Repository) -> AppResult<Vec<RemoteInfo>> {
-    let names = repo.remotes()?;
+    let stdout = run_git_stdout(workdir(repo)?, &["remote", "-v"])?;
+    let mut by_name: Vec<(String, Option<String>, Option<String>)> = Vec::new();
+    for line in String::from_utf8_lossy(&stdout).lines() {
+        let Some((name, rest)) = line.split_once('\t') else {
+            continue;
+        };
+        let Some((url, kind)) = rest.rsplit_once(' ') else {
+            continue;
+        };
+        let entry = if let Some(found) = by_name.iter_mut().find(|item| item.0 == name) {
+            found
+        } else {
+            by_name.push((name.to_string(), None, None));
+            by_name.last_mut().expect("just pushed")
+        };
+        match kind {
+            "(fetch)" => entry.1 = Some(url.to_string()),
+            "(push)" => entry.2 = Some(url.to_string()),
+            _ => {}
+        }
+    }
     let mut remotes = Vec::new();
-    for name in names.iter().flatten() {
-        let remote = repo.find_remote(name)?;
+    for (name, url, push) in by_name {
+        let push_url = push.filter(|value| url.as_ref() != Some(value));
         remotes.push(RemoteInfo {
-            name: name.to_string(),
-            url: remote.url().map(str::to_string),
-            push_url: remote.pushurl().map(str::to_string),
+            name,
+            url,
+            push_url,
         });
     }
     remotes.sort_by(|left, right| {
@@ -256,10 +272,10 @@ pub fn add_remote(repo: &Repository, name: &str, url: &str) -> AppResult<()> {
             "Remote name can only contain letters, numbers, dots, hyphens, and underscores",
         ));
     }
-    if repo.find_remote(name).is_ok() {
+    if remote_names(repo)?.iter().any(|existing| existing == name) {
         return Err(AppError::msg(format!("Remote `{name}` already exists")));
     }
-    repo.remote(name, url)?;
+    run_git_stdout(workdir(repo)?, &["remote", "add", name, url])?;
     Ok(())
 }
 
@@ -281,11 +297,11 @@ pub fn set_remote_url(repo: &Repository, name: &str, url: &str) -> AppResult<()>
     if url.is_empty() {
         return Err(AppError::msg("Remote URL is required"));
     }
-    repo.remote_set_url(name, url)?;
+    run_git_stdout(workdir(repo)?, &["remote", "set-url", name, url])?;
     Ok(())
 }
 
 pub fn delete_remote(repo: &Repository, name: &str) -> AppResult<()> {
-    repo.remote_delete(name)?;
+    run_git_stdout(workdir(repo)?, &["remote", "remove", name])?;
     Ok(())
 }

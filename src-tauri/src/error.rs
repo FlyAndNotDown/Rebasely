@@ -4,8 +4,6 @@ use std::io;
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
     #[error("{0}")]
-    Git(#[from] git2::Error),
-    #[error("{0}")]
     Io(#[from] io::Error),
     #[error("{0}")]
     Message(String),

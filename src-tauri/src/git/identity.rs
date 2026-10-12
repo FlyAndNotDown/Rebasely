@@ -1,29 +1,35 @@
 use super::*;
 
 pub fn read_git_identity() -> AppResult<GitIdentity> {
-    // The global file only. open_default also reads a repo discovered from the
-    // process cwd, which would show a local override as the shared identity.
-    let path = global_gitconfig_path()?;
-    let cfg = if path.is_file() {
-        git2::Config::open(&path).ok()
-    } else {
-        None
-    };
+    // Global only. A plain `git config` would also see a repository discovered
+    // from the process cwd and show a local override as the shared identity.
     Ok(GitIdentity {
-        name: cfg
-            .as_ref()
-            .and_then(|cfg| cfg.get_string("user.name").ok())
-            .unwrap_or_default(),
-        email: cfg
-            .as_ref()
-            .and_then(|cfg| cfg.get_string("user.email").ok())
-            .unwrap_or_default(),
+        name: config_get_global("user.name").unwrap_or_default(),
+        email: config_get_global("user.email").unwrap_or_default(),
     })
 }
 
 pub(super) fn global_gitconfig_path() -> AppResult<PathBuf> {
-    if let Ok(path) = git2::Config::find_global() {
-        return Ok(path);
+    let output = run_git(
+        &std::env::temp_dir(),
+        &["config", "--global", "--show-origin", "--list"],
+    )?;
+    if output.status.success() {
+        let text = String::from_utf8_lossy(&output.stdout);
+        for line in text.lines() {
+            let Some(rest) = line.strip_prefix("file:") else {
+                continue;
+            };
+            let path = rest
+                .split('\t')
+                .next()
+                .unwrap_or("")
+                .trim()
+                .trim_matches('"');
+            if !path.is_empty() {
+                return Ok(PathBuf::from(path));
+            }
+        }
     }
     let home = std::env::var("USERPROFILE")
         .or_else(|_| std::env::var("HOME"))
@@ -32,51 +38,47 @@ pub(super) fn global_gitconfig_path() -> AppResult<PathBuf> {
 }
 
 pub fn write_git_identity(name: &str, email: &str) -> AppResult<()> {
-    write_identity_to_config(&global_gitconfig_path()?, name, email)
-}
-
-pub(super) fn local_gitconfig_path(repo: &Repository) -> PathBuf {
-    repo.path().join("config")
+    write_scoped_identity(name, email, true)
 }
 
 pub fn read_local_git_identity(repo: &Repository) -> AppResult<GitIdentity> {
-    let path = local_gitconfig_path(repo);
-    let cfg = git2::Config::open(&path).ok();
     Ok(GitIdentity {
-        name: cfg
-            .as_ref()
-            .and_then(|cfg| cfg.get_string("user.name").ok())
-            .unwrap_or_default(),
-        email: cfg
-            .as_ref()
-            .and_then(|cfg| cfg.get_string("user.email").ok())
-            .unwrap_or_default(),
+        name: config_get_local(repo, "user.name").unwrap_or_default(),
+        email: config_get_local(repo, "user.email").unwrap_or_default(),
     })
 }
 
 pub fn write_local_git_identity(repo: &Repository, name: &str, email: &str) -> AppResult<()> {
-    write_identity_to_config(&local_gitconfig_path(repo), name, email)
-}
-
-pub(super) fn write_identity_to_config(path: &Path, name: &str, email: &str) -> AppResult<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    if !path.exists() {
-        fs::write(path, "")?;
-    }
-    let mut cfg = git2::Config::open(path)?;
     let name = name.trim();
     let email = email.trim();
     if name.is_empty() {
-        let _ = cfg.remove("user.name");
+        config_unset_local(repo, "user.name")?;
     } else {
-        cfg.set_str("user.name", name)?;
+        config_set_local(repo, "user.name", name)?;
     }
     if email.is_empty() {
-        let _ = cfg.remove("user.email");
+        config_unset_local(repo, "user.email")?;
     } else {
-        cfg.set_str("user.email", email)?;
+        config_set_local(repo, "user.email", email)?;
+    }
+    Ok(())
+}
+
+fn write_scoped_identity(name: &str, email: &str, global: bool) -> AppResult<()> {
+    let name = name.trim();
+    let email = email.trim();
+    if !global {
+        return Ok(());
+    }
+    if name.is_empty() {
+        config_unset_global("user.name")?;
+    } else {
+        config_set_global("user.name", name)?;
+    }
+    if email.is_empty() {
+        config_unset_global("user.email")?;
+    } else {
+        config_set_global("user.email", email)?;
     }
     Ok(())
 }

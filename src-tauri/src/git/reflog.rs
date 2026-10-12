@@ -16,27 +16,74 @@ pub struct ReflogEntry {
 
 /// The newest `limit` movements of HEAD.
 pub fn head_reflog(repo: &Repository, limit: usize) -> AppResult<Vec<ReflogEntry>> {
-    let reflog = match repo.reflog("HEAD") {
-        Ok(reflog) => reflog,
-        Err(err) if err.code() == ErrorCode::NotFound => return Ok(Vec::new()),
-        Err(err) => return Err(err.into()),
-    };
+    let count = limit.max(1).to_string();
+    let output = run_git(
+        workdir(repo)?,
+        &[
+            "reflog",
+            "show",
+            "-n",
+            &count,
+            "--format=%H%x1f%gs%x1f%gd%x1f%ct",
+            "HEAD",
+        ],
+    )?;
+    if !output.status.success() {
+        let message = git_output_error(output).to_string();
+        if message.contains("does not have a reflog")
+            || message.contains("no reflog")
+            || message.contains("unknown revision")
+            || message.contains("ambiguous argument")
+        {
+            return Ok(Vec::new());
+        }
+        return Err(AppError::msg(message));
+    }
     let mut entries = Vec::new();
-    for (index, entry) in reflog.iter().take(limit).enumerate() {
-        let id = entry.id_new();
-        let summary = repo
-            .find_commit(id)
-            .ok()
-            .and_then(|commit| commit.summary().map(str::to_string))
-            .unwrap_or_default();
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let mut fields = line.split('\u{1f}');
+        let Some(id) = fields.next().map(str::trim).filter(|id| !id.is_empty()) else {
+            continue;
+        };
+        let message = fields.next().unwrap_or("").trim().to_string();
+        let selector = fields.next().unwrap_or("").trim().to_string();
+        let timestamp = fields.next().unwrap_or("").trim().parse().unwrap_or(0);
         entries.push(ReflogEntry {
-            selector: format!("HEAD@{{{index}}}"),
+            selector: if selector.is_empty() {
+                format!("HEAD@{{{}}}", entries.len())
+            } else {
+                selector
+            },
             id: id.to_string(),
-            short_id: short_id(&id.to_string()),
-            message: entry.message().unwrap_or("").trim().to_string(),
-            timestamp: entry.committer().when().seconds(),
-            summary,
+            short_id: short_id(id),
+            message,
+            timestamp,
+            summary: String::new(),
         });
+    }
+    if !entries.is_empty() {
+        let mut args = vec![
+            "-c",
+            "log.showSignature=false",
+            "log",
+            "--no-walk",
+            "--format=%H%x1f%s",
+        ];
+        let ids: Vec<String> = entries.iter().map(|entry| entry.id.clone()).collect();
+        args.extend(ids.iter().map(String::as_str));
+        if let Ok(stdout) = run_git_stdout(workdir(repo)?, &args) {
+            let mut subjects = HashMap::new();
+            for line in String::from_utf8_lossy(&stdout).lines() {
+                if let Some((id, summary)) = line.split_once('\u{1f}') {
+                    subjects.insert(id.to_string(), summary.trim().to_string());
+                }
+            }
+            for entry in &mut entries {
+                if let Some(summary) = subjects.get(&entry.id) {
+                    entry.summary = summary.clone();
+                }
+            }
+        }
     }
     Ok(entries)
 }
@@ -55,22 +102,14 @@ pub fn undo_last_commit(repo: &mut Repository) -> AppResult<UndoneCommit> {
         return Err(AppError::msg("Finish or abort the current operation first"));
     }
     let (message, refname, parent) = {
-        let head = repo
-            .head()
-            .map_err(|_| AppError::msg("There is no commit to undo"))?;
-        if !head.is_branch() {
-            return Err(AppError::msg("Undo needs a checked-out branch"));
-        }
-        let commit = head.peel_to_commit()?;
-        let refname = head
-            .name()
-            .ok_or_else(|| AppError::msg("Invalid branch reference"))?
-            .to_string();
-        let parent = commit.parent_id(0).ok().map(|id| id.to_string());
+        let head = head_oid(repo).ok_or_else(|| AppError::msg("There is no commit to undo"))?;
+        let branch = symbolic_branch(repo)
+            .ok_or_else(|| AppError::msg("Undo needs a checked-out branch"))?;
+        let commit = commit_info(repo, &head)?;
         (
-            commit.message().unwrap_or("").trim().to_string(),
-            refname,
-            parent,
+            commit.message.trim().to_string(),
+            format!("refs/heads/{branch}"),
+            commit.parents.first().cloned(),
         )
     };
     let root = workdir_owned(repo)?;

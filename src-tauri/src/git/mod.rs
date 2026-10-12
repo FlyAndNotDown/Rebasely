@@ -8,10 +8,6 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
 
-use git2::{
-    BranchType, DiffFormat, DiffOptions, ErrorCode, ObjectType, Oid, Repository, Sort, Status,
-    StatusOptions,
-};
 use serde::Serialize;
 
 use crate::error::{AppError, AppResult};
@@ -31,6 +27,7 @@ mod partial;
 mod reflog;
 mod refs;
 mod remote;
+mod repo;
 mod stash;
 mod status;
 mod structure;
@@ -57,6 +54,14 @@ pub use stash::*;
 pub use status::*;
 pub use structure::*;
 pub use tools::*;
+
+use repo::{
+    cat_blob, commit_info, config_get, config_get_file, config_get_global, config_get_local,
+    config_get_system, config_set_file, config_set_global, config_set_local, config_unset_file,
+    config_unset_global, config_unset_local, head_oid, identity_configured, index_matches_head,
+    object_exists, peel_commit, ref_exists, remote_names, rev_parse, symbolic_branch, CommitInfo,
+};
+pub use repo::{discover, ignored_queries, open_at, Repository};
 
 const MAX_TEXT_BYTES: u64 = 2_000_000;
 const MAX_DIFF_LINES: usize = 4000;
@@ -315,8 +320,7 @@ fn looks_binary_path(path: &str) -> bool {
 }
 
 fn workdir(repo: &Repository) -> AppResult<&Path> {
-    repo.workdir()
-        .ok_or_else(|| AppError::msg("Bare repositories are not supported yet"))
+    Ok(repo.workdir())
 }
 
 fn workdir_owned(repo: &Repository) -> AppResult<PathBuf> {
@@ -336,24 +340,6 @@ fn ensure_inside_workdir(repo: &Repository, relative: &str) -> AppResult<PathBuf
         return Err(AppError::msg("Path is outside the repository"));
     }
     Ok(candidate)
-}
-
-pub fn discover(path: &str) -> AppResult<Repository> {
-    let path = strip_verbatim_prefix(path);
-    let repo = Repository::discover(&path)
-        .map_err(|_| AppError::msg(format!("No Git repository found at {path}")))?;
-    if repo.is_bare() {
-        return Err(AppError::msg("Bare repositories are not supported yet"));
-    }
-    Ok(repo)
-}
-
-pub fn open_at(path: &Path) -> AppResult<Repository> {
-    let repo = Repository::open(path)?;
-    if repo.is_bare() {
-        return Err(AppError::msg("Bare repositories are not supported yet"));
-    }
-    Ok(repo)
 }
 
 pub fn canonical_workdir(repo: &Repository) -> AppResult<PathBuf> {
@@ -378,14 +364,6 @@ fn safe_repo_path(path: &str) -> AppResult<String> {
 
 fn short_id(id: &str) -> String {
     id.chars().take(7).collect()
-}
-
-fn peel_commit<'repo>(repo: &'repo Repository, spec: &str) -> AppResult<git2::Commit<'repo>> {
-    let spec = spec.trim();
-    if spec.is_empty() {
-        return Err(AppError::msg("Commit is required"));
-    }
-    Ok(repo.revparse_single(spec)?.peel_to_commit()?)
 }
 
 pub fn open_in_file_manager(path: &str) -> AppResult<()> {

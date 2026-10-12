@@ -1,25 +1,29 @@
 use super::*;
 
 pub fn list_stashes(repo: &mut Repository) -> AppResult<Vec<StashInfo>> {
+    let output = run_git(workdir(repo)?, &["stash", "list", "--format=%H%x1f%gs"])?;
+    if !output.status.success() {
+        return Err(git_output_error(output));
+    }
     let mut stashes = Vec::new();
-    repo.stash_foreach(|index, message, id| {
+    for (index, line) in String::from_utf8_lossy(&output.stdout).lines().enumerate() {
+        let Some((id, message)) = line.split_once('\u{1f}') else {
+            continue;
+        };
+        if id.is_empty() {
+            continue;
+        }
         stashes.push(StashInfo {
             index,
             message: message.to_string(),
             id: id.to_string(),
         });
-        true
-    })?;
+    }
     Ok(stashes)
 }
 
-fn top_stash(repo: &mut Repository) -> Option<Oid> {
-    let mut top = None;
-    let _ = repo.stash_foreach(|_, _, oid| {
-        top = Some(*oid);
-        false
-    });
-    top
+fn top_stash(repo: &Repository) -> Option<String> {
+    rev_parse(repo, "refs/stash")
 }
 
 /// Stashing goes through `git stash` so clean and smudge filters such as Git LFS
@@ -30,8 +34,11 @@ pub fn stash_save(
     include_untracked: bool,
     paths: &[String],
 ) -> AppResult<()> {
-    repo.signature()
-        .map_err(|_| AppError::msg("Set user.name and user.email in Settings before stashing"))?;
+    if !identity_configured(repo) {
+        return Err(AppError::msg(
+            "Set user.name and user.email in Settings before stashing",
+        ));
+    }
     let message = message.trim();
     let message = if message.is_empty() { "WIP" } else { message };
     let before = top_stash(repo);
@@ -60,16 +67,12 @@ pub fn stash_save(
 /// Stash indexes shift whenever another stash is pushed or dropped, so callers
 /// name a stash by its commit id and it is looked up right before use.
 fn stash_index(repo: &mut Repository, id: &str) -> AppResult<usize> {
-    let target = Oid::from_str(id.trim())?;
-    let mut found = None;
-    repo.stash_foreach(|index, _, oid| {
-        if *oid == target {
-            found = Some(index);
-            return false;
-        }
-        true
-    })?;
-    found.ok_or_else(|| AppError::msg("That stash no longer exists"))
+    let target = id.trim();
+    list_stashes(repo)?
+        .into_iter()
+        .find(|stash| stash.id == target)
+        .map(|stash| stash.index)
+        .ok_or_else(|| AppError::msg("That stash no longer exists"))
 }
 
 fn run_stash(repo: &mut Repository, action: &str, id: &str) -> AppResult<()> {
@@ -89,7 +92,8 @@ pub fn stash_pop(repo: &mut Repository, id: &str) -> AppResult<()> {
 
 pub fn stash_drop(repo: &mut Repository, id: &str) -> AppResult<()> {
     let index = stash_index(repo, id)?;
-    repo.stash_drop(index)?;
+    let spec = format!("stash@{{{index}}}");
+    run_git_stdout(workdir(repo)?, &["stash", "drop", &spec])?;
     Ok(())
 }
 
@@ -102,25 +106,24 @@ pub struct StashDetails {
 }
 
 pub fn stash_details(repo: &Repository, oid: &str) -> AppResult<StashDetails> {
-    let oid = oid.trim();
-    let parsed = Oid::from_str(oid)?;
-    let commit = repo.find_commit(parsed)?;
-    let mut files = commit_files_from_git2(repo, parsed)?;
+    let info = commit_info(repo, oid)?;
+    let root = workdir(repo)?;
+    let mut files = commit_files_from_git(root, &info.id)?;
     // Parent 0 is HEAD, parent 1 is the index, parent 2 is untracked files.
-    if commit.parent_count() > 2 {
-        if let Ok(untracked) = commit.parent(2) {
-            for file in untracked_stash_files(repo, &untracked)? {
-                if files.iter().any(|existing| existing.path == file.path) {
-                    continue;
-                }
-                files.push(file);
+    if let Some(untracked) = info.parents.get(2) {
+        for mut file in commit_files_from_git(root, untracked)? {
+            file.kind = "untracked".to_string();
+            file.old_path = None;
+            if files.iter().any(|existing| existing.path == file.path) {
+                continue;
             }
+            files.push(file);
         }
     }
     files.sort_by_cached_key(|file| file.path.to_lowercase());
     Ok(StashDetails {
-        id: parsed.to_string(),
-        message: commit.summary().unwrap_or("").trim().to_string(),
+        id: info.id,
+        message: info.summary.trim().to_string(),
         files,
     })
 }
@@ -131,58 +134,16 @@ pub fn stash_file_diff(
     path: &str,
     ignore_whitespace: bool,
 ) -> AppResult<FileDiff> {
-    let parsed = Oid::from_str(oid.trim())?;
-    let commit = repo.find_commit(parsed)?;
-    let tracked = commit_file_diff(repo, oid, path, ignore_whitespace)?;
+    let info = commit_info(repo, oid)?;
+    let tracked = commit_file_diff(repo, &info.id, path, ignore_whitespace)?;
     if tracked.binary || !tracked.lines.is_empty() {
         return Ok(tracked);
     }
-    if commit.parent_count() > 2 {
-        if let Ok(untracked) = commit.parent(2) {
-            let tree = untracked.tree()?;
-            let rel = to_git_path(path);
-            let mut opts = view_options_for(&rel, false, ignore_whitespace);
-            let diff = repo.diff_tree_to_tree(None, Some(&tree), Some(&mut opts))?;
-            let file_diff = collect_patch(diff, &rel)?;
-            if file_diff.binary || !file_diff.lines.is_empty() {
-                return Ok(file_diff);
-            }
+    if let Some(untracked) = info.parents.get(2) {
+        let file_diff = diff_between(repo, EMPTY_TREE, untracked, path, ignore_whitespace)?;
+        if file_diff.binary || !file_diff.lines.is_empty() {
+            return Ok(file_diff);
         }
     }
     Ok(tracked)
-}
-
-pub(super) fn untracked_stash_files(
-    repo: &Repository,
-    commit: &git2::Commit<'_>,
-) -> AppResult<Vec<CommitFile>> {
-    let tree = commit.tree()?;
-    let mut opts = DiffOptions::new();
-    opts.skip_binary_check(true);
-    let diff = repo.diff_tree_to_tree(None, Some(&tree), Some(&mut opts))?;
-    let mut files = Vec::new();
-    diff.foreach(
-        &mut |delta, _| {
-            let path = delta
-                .new_file()
-                .path()
-                .or_else(|| delta.old_file().path())
-                .map(|item| item.to_string_lossy().replace('\\', "/"))
-                .unwrap_or_default();
-            if path.is_empty() {
-                return true;
-            }
-            files.push(CommitFile {
-                binary: looks_binary_path(&path),
-                path,
-                old_path: None,
-                kind: "untracked".to_string(),
-            });
-            true
-        },
-        None,
-        None,
-        None,
-    )?;
-    Ok(files)
 }

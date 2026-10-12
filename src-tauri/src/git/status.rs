@@ -8,46 +8,29 @@ pub fn repo_info(repo: &Repository) -> AppResult<RepoInfo> {
         .unwrap_or("repository")
         .to_string();
 
-    let current_branch;
-    let mut head_id = None;
-    let mut is_detached = false;
-    let mut ahead = None;
-    let mut behind = None;
-    let mut upstream = None;
-
-    match repo.head() {
-        Ok(head) => {
-            is_detached = !head.is_branch();
-            current_branch = head.shorthand().map(|name| name.to_string());
-            if let Some(oid) = head.target() {
-                head_id = Some(oid.to_string());
-            }
-            if head.is_branch() {
-                if let Ok(branch) =
-                    repo.find_branch(head.shorthand().unwrap_or(""), BranchType::Local)
-                {
-                    if let Ok(up) = branch.upstream() {
-                        upstream = up.name()?.map(|name| name.to_string());
-                        if let (Some(local_oid), Some(up_oid)) =
-                            (branch.get().target(), up.get().target())
-                        {
-                            if let Some((a, b)) = cached_ahead_behind(repo, local_oid, up_oid) {
-                                ahead = Some(a);
-                                behind = Some(b);
-                            }
-                        }
-                    }
+    let branch = symbolic_branch(repo);
+    let head = head_oid(repo);
+    let is_detached = branch.is_none() && head.is_some();
+    let current_branch = if is_detached {
+        Some("HEAD".to_string())
+    } else {
+        branch.clone()
+    };
+    let head_id = head.clone();
+    let (ahead, behind, upstream) = if branch.is_some() && head.is_some() {
+        match (head.as_deref(), rev_parse(repo, "@{upstream}")) {
+            (Some(local), Some(upstream_oid)) => {
+                let name = upstream_name(repo);
+                match cached_ahead_behind(repo, local, &upstream_oid) {
+                    Some((a, b)) => (Some(a), Some(b), name),
+                    None => (None, None, name),
                 }
             }
+            _ => (None, None, None),
         }
-        Err(err) if err.code() == ErrorCode::UnbornBranch => {
-            current_branch = repo.find_reference("HEAD").ok().and_then(|head| {
-                head.symbolic_target()
-                    .map(|target| target.trim_start_matches("refs/heads/").to_string())
-            });
-        }
-        Err(err) => return Err(err.into()),
-    }
+    } else {
+        (None, None, None)
+    };
 
     Ok(RepoInfo {
         path: path.to_string_lossy().into_owned(),
@@ -63,46 +46,25 @@ pub fn repo_info(repo: &Repository) -> AppResult<RepoInfo> {
     })
 }
 
-pub(super) fn kind_from_status(status: Status, staged: bool) -> &'static str {
-    if status.is_conflicted() {
-        return "conflicted";
+fn upstream_name(repo: &Repository) -> Option<String> {
+    let output = run_git(
+        repo.workdir(),
+        &["rev-parse", "--abbrev-ref", "@{upstream}"],
+    )
+    .ok()?;
+    if !output.status.success() {
+        return None;
     }
-    if staged {
-        if status.is_index_new() {
-            return "added";
-        }
-        if status.is_index_deleted() {
-            return "deleted";
-        }
-        if status.is_index_renamed() {
-            return "renamed";
-        }
-        if status.is_index_typechange() {
-            return "typechange";
-        }
-        return "modified";
+    let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if name.is_empty() || name == "@{upstream}" {
+        None
+    } else {
+        Some(name)
     }
-    if status.is_wt_new() {
-        return "untracked";
-    }
-    if status.is_wt_deleted() {
-        return "deleted";
-    }
-    if status.is_wt_renamed() {
-        return "renamed";
-    }
-    if status.is_wt_typechange() {
-        return "typechange";
-    }
-    "modified"
 }
 
 pub fn status_snapshot(repo: &Repository) -> AppResult<StatusSnapshot> {
-    let root = workdir(repo)?;
-    if let Ok(snapshot) = status_from_git(root) {
-        return Ok(snapshot);
-    }
-    status_from_libgit2(repo)
+    status_from_git(workdir(repo)?)
 }
 
 pub(super) fn status_from_git(root: &Path) -> AppResult<StatusSnapshot> {
@@ -216,72 +178,14 @@ pub(super) fn kind_from_xy(code: char) -> &'static str {
     }
 }
 
-pub(super) fn status_from_libgit2(repo: &Repository) -> AppResult<StatusSnapshot> {
-    let mut opts = StatusOptions::new();
-    opts.include_untracked(false)
-        .include_ignored(false)
-        .exclude_submodules(true)
-        .renames_head_to_index(false)
-        .renames_index_to_workdir(false);
-
-    let statuses = repo.statuses(Some(&mut opts))?;
-    let mut staged = Vec::new();
-    let mut unstaged = Vec::new();
-
-    for entry in statuses.iter() {
-        let status = entry.status();
-        if status.is_ignored() {
-            continue;
-        }
-
-        let path = entry.path().unwrap_or_default().replace('\\', "/");
-        let old_path = entry
-            .head_to_index()
-            .and_then(|delta| delta.old_file().path())
-            .map(|p| p.to_string_lossy().replace('\\', "/"));
-
-        let index_flags = Status::INDEX_NEW
-            | Status::INDEX_MODIFIED
-            | Status::INDEX_DELETED
-            | Status::INDEX_RENAMED
-            | Status::INDEX_TYPECHANGE;
-
-        if status.intersects(index_flags) || status.is_conflicted() {
-            staged.push(FileStatus {
-                path: path.clone(),
-                old_path: old_path.clone(),
-                kind: kind_from_status(status, true).to_string(),
-                staged: true,
-            });
-        }
-
-        let wt_flags = Status::WT_MODIFIED
-            | Status::WT_DELETED
-            | Status::WT_RENAMED
-            | Status::WT_TYPECHANGE
-            | Status::CONFLICTED;
-
-        if status.intersects(wt_flags) {
-            unstaged.push(FileStatus {
-                path,
-                old_path,
-                kind: kind_from_status(status, false).to_string(),
-                staged: false,
-            });
-        }
-    }
-
-    Ok(StatusSnapshot { staged, unstaged })
-}
-
 pub(super) fn cached_ahead_behind(
     repo: &Repository,
-    local: Oid,
-    upstream: Oid,
+    local: &str,
+    upstream: &str,
 ) -> Option<(usize, usize)> {
     struct Entry {
-        local: Oid,
-        upstream: Oid,
+        local: String,
+        upstream: String,
         ahead: usize,
         behind: usize,
     }
@@ -295,12 +199,23 @@ pub(super) fn cached_ahead_behind(
             return Some((hit.ahead, hit.behind));
         }
     }
-    let (ahead, behind) = repo.graph_ahead_behind(local, upstream).ok()?;
+    let output = run_git(
+        repo.workdir(),
+        &["rev-list", "--left-right", "--count", "HEAD...@{upstream}"],
+    )
+    .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut parts = text.split_whitespace();
+    let ahead = parts.next()?.parse().ok()?;
+    let behind = parts.next()?.parse().ok()?;
     if let Ok(mut guard) = cache.lock() {
         guard.retain(|entry| entry.local != local || entry.upstream != upstream);
         guard.push(Entry {
-            local,
-            upstream,
+            local: local.to_string(),
+            upstream: upstream.to_string(),
             ahead,
             behind,
         });
@@ -339,10 +254,7 @@ pub fn snapshot(repo: &mut Repository) -> AppResult<WorkspaceSnapshot> {
         Err(_) => Err(AppError::msg("Could not read status")),
     };
     let (info, branches, remotes, stashes, head) = built?;
-    let status = match status_result {
-        Ok(status) => status,
-        Err(_) => status_from_libgit2(repo)?,
-    };
+    let status = status_result?;
     Ok(WorkspaceSnapshot {
         repo: info,
         status,
@@ -354,6 +266,6 @@ pub fn snapshot(repo: &mut Repository) -> AppResult<WorkspaceSnapshot> {
 }
 
 pub(super) fn head_commit(repo: &Repository) -> Option<CommitSummary> {
-    let oid = repo.head().ok()?.target()?;
-    summarize_oid(repo, oid).ok()
+    let oid = head_oid(repo)?;
+    summarize_oid(repo, &oid).ok()
 }

@@ -2,13 +2,13 @@
 
 Rebasely is a desktop Git client for the work that sits between an editor and the command line: reading a working tree, reviewing history, and finishing branch operations without leaving the repository.
 
-It is a native window built with Tauri 2. The interface is React. Repository work runs in Rust, through [libgit2](https://github.com/libgit2/libgit2) where a structured result is enough, and through the `git` executable wherever Git's own behavior matters. Several repositories stay open in tabs, and the open set is restored on the next launch.
+It is a native window built with Tauri 2. The interface is React. Repository work runs in Rust by calling the `git` executable, so what the window shows is what Git itself would do. Several repositories stay open in tabs, and the open set is restored on the next launch.
 
 ## Design
 
 The window is a view of a real Git repository. Staging, commits, rebase, and push invoke `git` itself, so Git LFS, hooks, commit and tag signing, and sparse checkout follow the same rules as the command line.
 
-Reads that need structure — HEAD, branches, commit objects, ahead and behind counts — go through libgit2. Status, log, blame, diffs, rebase, and remote operations shell out to `git` and parse the result. The UI never starts Git on its own; every call is a Tauri command.
+Every repository read and write goes through `git` and the result is parsed in Rust. The UI never starts Git on its own; every call is a Tauri command.
 
 Long-running commands can be cancelled. Cancelling stops the Git process and the helpers it launched, then removes lock files that command created. Credential prompts return to the window through an askpass helper. Background fetches run with prompts turned off, so an automatic refresh does not open a password dialog.
 
@@ -38,7 +38,6 @@ React workspace
         │  Tauri commands
         ▼
 Rust backend
-  ├── libgit2     structured repository state
   ├── git         status, log, blame, diffs, writes, remotes
   ├── askpass     credential prompts back into the window
   ├── notify      work-tree refresh
@@ -73,7 +72,7 @@ src-tauri/src/
 | --- | --- |
 | Window | Tauri 2 |
 | Interface | React 19, TypeScript, Vite, Tailwind CSS, shadcn/ui |
-| Repository | Rust, `git2` with vendored libgit2, and the `git` executable |
+| Repository | Rust and the `git` executable |
 | Watching | `notify` |
 
 Release builds use a single codegen unit, link-time optimization, and stripped symbols.
@@ -83,7 +82,6 @@ Release builds use a single codegen unit, link-time optimization, and stripped s
 - Node.js 22+
 - Rust (stable)
 - Git on `PATH`
-- Windows: MSVC Build Tools and CMake, to compile vendored libgit2
 
 ## Develop
 

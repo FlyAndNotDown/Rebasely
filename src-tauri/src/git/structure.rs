@@ -47,18 +47,7 @@ pub fn list_submodules(repo: &Repository) -> AppResult<Vec<SubmoduleInfo>> {
     if !root.join(".gitmodules").is_file() {
         return Ok(Vec::new());
     }
-    let urls: HashMap<String, String> = repo
-        .submodules()
-        .map(|modules| {
-            modules
-                .iter()
-                .filter_map(|module| {
-                    let path = module.path().to_string_lossy().replace('\\', "/");
-                    module.url().map(|url| (path, url.to_string()))
-                })
-                .collect()
-        })
-        .unwrap_or_default();
+    let urls = submodule_urls(repo);
     let stdout = run_git_stdout(root, &["-c", "core.quotePath=off", "submodule", "status"])?;
     Ok(parse_submodule_status(&String::from_utf8_lossy(&stdout))
         .into_iter()
@@ -69,6 +58,40 @@ pub fn list_submodules(repo: &Repository) -> AppResult<Vec<SubmoduleInfo>> {
             path,
         })
         .collect())
+}
+
+fn submodule_urls(repo: &Repository) -> HashMap<String, String> {
+    let Ok(stdout) = run_git_stdout(
+        repo.workdir(),
+        &[
+            "config",
+            "--file",
+            ".gitmodules",
+            "--get-regexp",
+            r"^submodule\.",
+        ],
+    ) else {
+        return HashMap::new();
+    };
+    let mut paths = HashMap::new();
+    let mut urls = HashMap::new();
+    for line in String::from_utf8_lossy(&stdout).lines() {
+        let Some((key, value)) = line.split_once(' ') else {
+            continue;
+        };
+        let Some(name) = key.strip_prefix("submodule.") else {
+            continue;
+        };
+        if let Some(name) = name.strip_suffix(".path") {
+            paths.insert(name.to_string(), value.replace('\\', "/"));
+        } else if let Some(name) = name.strip_suffix(".url") {
+            urls.insert(name.to_string(), value.to_string());
+        }
+    }
+    paths
+        .into_iter()
+        .filter_map(|(name, path)| urls.get(&name).map(|url| (path, url.clone())))
+        .collect()
 }
 
 /// Initializes and checks out submodules at their recorded commits, nested

@@ -1,7 +1,7 @@
 use super::*;
 
-/// Staging goes through `git add` so clean filters such as Git LFS run; libgit2
-/// would store the raw file instead of the pointer.
+/// Staging goes through `git add` so clean filters such as Git LFS store a
+/// pointer instead of the file contents.
 pub fn stage_paths(repo: &Repository, paths: &[String]) -> AppResult<()> {
     let specs: Vec<String> = paths
         .iter()
@@ -16,33 +16,31 @@ pub fn stage_paths(repo: &Repository, paths: &[String]) -> AppResult<()> {
 }
 
 pub fn unstage_paths(repo: &Repository, paths: &[String]) -> AppResult<()> {
-    let specs: Vec<String> = paths.iter().map(|p| to_git_path(p)).collect();
-    match repo.head() {
-        Ok(head) => {
-            let object = head.peel(ObjectType::Any)?;
-            repo.reset_default(Some(&object), specs.iter())?;
-        }
-        Err(err) if err.code() == ErrorCode::UnbornBranch || err.code() == ErrorCode::NotFound => {
-            let mut index = repo.index()?;
-            for path in specs {
-                let _ = index.remove_path(Path::new(&path));
-            }
-            index.write()?;
-        }
-        Err(err) => return Err(err.into()),
+    let specs: Vec<String> = paths
+        .iter()
+        .map(|path| to_git_path(path))
+        .filter(|path| !path.is_empty())
+        .collect();
+    if specs.is_empty() {
+        return Ok(());
+    }
+    let root = workdir(repo)?;
+    if head_oid(repo).is_some() {
+        run_git_pathspecs(root, &["reset", "-q", "HEAD"], &specs)?;
+    } else {
+        run_git_pathspecs(root, &["rm", "-q", "--cached", "--ignore-unmatch"], &specs)?;
     }
     Ok(())
 }
 
-pub(super) fn is_untracked(status: Status) -> bool {
-    status.is_wt_new()
-        && !status.intersects(
-            Status::INDEX_NEW
-                | Status::INDEX_MODIFIED
-                | Status::INDEX_DELETED
-                | Status::INDEX_RENAMED
-                | Status::INDEX_TYPECHANGE,
-        )
+pub(super) fn is_untracked(repo: &Repository, rel: &str) -> bool {
+    let Ok(output) = run_git(
+        repo.workdir(),
+        &["status", "--porcelain=v1", "-z", "--ignored=no", "--", rel],
+    ) else {
+        return false;
+    };
+    output.status.success() && output.stdout.starts_with(b"??")
 }
 
 pub(super) fn remove_worktree_path(full: &Path) -> AppResult<()> {
@@ -70,16 +68,7 @@ pub(super) fn clear_readonly(full: &Path) -> AppResult<()> {
 }
 
 pub fn discard_paths(repo: &Repository, paths: &[String]) -> AppResult<()> {
-    let head = match repo.head() {
-        Ok(head) => Some(head.peel(ObjectType::Commit)?),
-        Err(err) if err.code() == ErrorCode::UnbornBranch => None,
-        Err(err) => return Err(err.into()),
-    };
-    let head_tree = head
-        .as_ref()
-        .map(|object| object.peel_to_tree())
-        .transpose()?;
-
+    let has_head = head_oid(repo).is_some();
     let mut in_head = Vec::new();
     let mut not_in_head = Vec::new();
     for raw in paths {
@@ -88,18 +77,11 @@ pub fn discard_paths(repo: &Repository, paths: &[String]) -> AppResult<()> {
             continue;
         }
         let full = ensure_inside_workdir(repo, &rel)?;
-        if repo
-            .status_file(Path::new(&rel))
-            .ok()
-            .is_some_and(is_untracked)
-        {
+        if is_untracked(repo, &rel) {
             remove_worktree_path(&full)?;
             continue;
         }
-        if head_tree
-            .as_ref()
-            .is_some_and(|tree| tree.get_path(Path::new(&rel)).is_ok())
-        {
+        if has_head && object_exists(repo, &format!("HEAD:{rel}")) {
             clear_readonly(&full)?;
             in_head.push(rel);
         } else {
@@ -108,17 +90,12 @@ pub fn discard_paths(repo: &Repository, paths: &[String]) -> AppResult<()> {
     }
 
     if !not_in_head.is_empty() {
-        match &head {
-            Some(object) => {
-                repo.reset_default(Some(object), not_in_head.iter().map(|(rel, _)| rel))?;
-            }
-            None => {
-                let mut index = repo.index()?;
-                for (rel, _) in &not_in_head {
-                    let _ = index.remove_path(Path::new(rel));
-                }
-                index.write()?;
-            }
+        let specs: Vec<String> = not_in_head.iter().map(|(rel, _)| rel.clone()).collect();
+        let root = workdir(repo)?;
+        if has_head {
+            run_git_pathspecs(root, &["reset", "-q", "HEAD"], &specs)?;
+        } else {
+            run_git_pathspecs(root, &["rm", "-q", "--cached", "--ignore-unmatch"], &specs)?;
         }
         for (_, full) in &not_in_head {
             remove_worktree_path(full)?;
@@ -196,29 +173,19 @@ pub fn commit(repo: &Repository, message: &str, amend: bool) -> AppResult<Commit
         return Err(AppError::msg("Commit message cannot be empty"));
     }
 
-    repo.signature().map_err(|_| {
-        AppError::msg("Set user.name and user.email in Git config before committing")
-    })?;
+    if !identity_configured(repo) {
+        return Err(AppError::msg(
+            "Set user.name and user.email in Git config before committing",
+        ));
+    }
 
-    let head = match repo.head() {
-        Ok(head) => Some(head.peel_to_commit()?),
-        Err(err) if err.code() == ErrorCode::UnbornBranch => None,
-        Err(err) => return Err(err.into()),
-    };
+    let head = head_oid(repo);
     if amend && head.is_none() {
         return Err(AppError::msg("Nothing to amend"));
     }
     // A merge may legitimately record the same tree as HEAD.
-    if !amend && git_operation(repo).is_none() {
-        let mut index = repo.index()?;
-        index.read(false)?;
-        let unchanged = match &head {
-            Some(parent) => parent.tree_id() == index.write_tree()?,
-            None => index.is_empty(),
-        };
-        if unchanged {
-            return Err(AppError::msg("Nothing to commit"));
-        }
+    if !amend && git_operation(repo).is_none() && index_matches_head(repo)? {
+        return Err(AppError::msg("Nothing to commit"));
     }
 
     let mut args = vec!["commit", "--file=-"];
@@ -226,9 +193,6 @@ pub fn commit(repo: &Repository, message: &str, amend: bool) -> AppResult<Commit
         args.push("--amend");
     }
     run_git_input(workdir(repo)?, &args, message.as_bytes())?;
-    let oid = repo
-        .head()?
-        .target()
-        .ok_or_else(|| AppError::msg("Commit did not move HEAD"))?;
-    summarize_oid(repo, oid)
+    let oid = head_oid(repo).ok_or_else(|| AppError::msg("Commit did not move HEAD"))?;
+    summarize_oid(repo, &oid)
 }

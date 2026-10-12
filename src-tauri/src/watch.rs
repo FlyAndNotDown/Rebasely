@@ -111,14 +111,16 @@ fn ignored(path: &Path) -> bool {
 /// the project ignores neither gets watched nor triggers a refresh.
 struct IgnoreRules {
     root: PathBuf,
-    repo: Mutex<Option<git2::Repository>>,
+    repo: Option<crate::git::Repository>,
+    cache: Mutex<HashMap<String, (u128, bool)>>,
 }
 
 impl IgnoreRules {
     fn open(root: &Path) -> Self {
         Self {
             root: root.to_path_buf(),
-            repo: Mutex::new(git2::Repository::open(root).ok()),
+            repo: crate::git::open_at(root).ok(),
+            cache: Mutex::new(HashMap::new()),
         }
     }
 
@@ -126,7 +128,8 @@ impl IgnoreRules {
     fn fixed_only() -> Self {
         Self {
             root: PathBuf::new(),
-            repo: Mutex::new(None),
+            repo: None,
+            cache: Mutex::new(HashMap::new()),
         }
     }
 
@@ -148,24 +151,74 @@ impl IgnoreRules {
         if rel == ".git" || rel.starts_with(".git/") {
             return false;
         }
-        let guard = self.repo.lock().unwrap_or_else(|err| err.into_inner());
-        let Some(repo) = guard.as_ref() else {
-            return false;
-        };
-        // A trailing slash lets directory-only patterns such as `out/` match.
-        let query = if dir { format!("{rel}/") } else { rel.clone() };
-        if !repo
-            .status_should_ignore(Path::new(&query))
-            .unwrap_or(false)
-        {
-            return false;
-        }
-        // Ignore rules do not apply to files git already tracks.
-        !repo.index().is_ok_and(|mut index| {
-            let _ = index.read(false);
-            index.get_path(Path::new(&rel), 0).is_some()
-        })
+        let query = if dir { format!("{rel}/") } else { rel };
+        self.query_ignored(&query)
     }
+
+    /// One `git check-ignore` for a whole directory of children. A failure is
+    /// treated as "not ignored" so a transient git error still delivers events.
+    fn ignored_set(&self, queries: &[String]) -> HashSet<String> {
+        let Some(repo) = &self.repo else {
+            return HashSet::new();
+        };
+        let mut ignored = HashSet::new();
+        let mut missing = Vec::new();
+        let mut guard = self.cache.lock().unwrap_or_else(|err| err.into_inner());
+        for query in queries {
+            let stamp = ignore_stamp(repo, query);
+            if let Some((cached_stamp, value)) = guard.get(query) {
+                if *cached_stamp == stamp {
+                    if *value {
+                        ignored.insert(query.clone());
+                    }
+                    continue;
+                }
+            }
+            missing.push((query.clone(), stamp));
+        }
+        if missing.is_empty() {
+            return ignored;
+        }
+        let asked: Vec<String> = missing.iter().map(|(query, _)| query.clone()).collect();
+        let found = crate::git::ignored_queries(repo, &asked).unwrap_or_default();
+        for (query, stamp) in missing {
+            let value = found.contains(&query);
+            if value {
+                ignored.insert(query.clone());
+            }
+            guard.insert(query, (stamp, value));
+        }
+        ignored
+    }
+
+    fn query_ignored(&self, query: &str) -> bool {
+        self.ignored_set(std::slice::from_ref(&query.to_string()))
+            .contains(query)
+    }
+}
+
+fn ignore_stamp(repo: &crate::git::Repository, query: &str) -> u128 {
+    fn mtime(path: &Path) -> u128 {
+        fs::metadata(path)
+            .and_then(|meta| meta.modified())
+            .ok()
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0)
+    }
+    let mut stamp = mtime(&repo.path().join("index"));
+    stamp = stamp.wrapping_add(mtime(&repo.path().join("info").join("exclude")));
+    stamp = stamp.wrapping_add(mtime(&repo.commondir().join("info").join("exclude")));
+    stamp = stamp.wrapping_add(mtime(&repo.workdir().join(".gitignore")));
+    let mut dir = Path::new(query.trim_end_matches('/'));
+    while let Some(parent) = dir.parent() {
+        stamp = stamp.wrapping_add(mtime(&repo.workdir().join(parent).join(".gitignore")));
+        if parent.as_os_str().is_empty() {
+            break;
+        }
+        dir = parent;
+    }
+    stamp
 }
 
 /// `path` relative to `root` with forward slashes; None for the root itself or outside it.
@@ -220,6 +273,7 @@ fn watch_tree(
     let Ok(entries) = fs::read_dir(path) else {
         return Ok(());
     };
+    let mut children = Vec::new();
     for entry in entries.flatten() {
         let child = entry.path();
         if !child.is_dir() {
@@ -229,7 +283,22 @@ fn watch_tree(
             .file_name()
             .and_then(|name| name.to_str())
             .unwrap_or("");
-        if name.is_empty() || name == ".git" || rules.ignores_dir(&child) {
+        if name.is_empty() || name == ".git" || ignored(&child) {
+            continue;
+        }
+        children.push(child);
+    }
+    let queries: Vec<String> = children
+        .iter()
+        .filter_map(|child| relative_path(&rules.root, child))
+        .map(|rel| format!("{rel}/"))
+        .collect();
+    let ignored_dirs = rules.ignored_set(&queries);
+    for child in children {
+        let Some(rel) = relative_path(&rules.root, &child) else {
+            continue;
+        };
+        if ignored_dirs.contains(&format!("{rel}/")) {
             continue;
         }
         let _ = watch_tree(watcher, &child, depth + 1, rules);
@@ -243,7 +312,7 @@ fn watch_repo(watcher: &mut RecommendedWatcher, root: &Path, rules: &IgnoreRules
 
     // A linked worktree has a `.git` file pointing at its own git folder, and
     // shares refs with the main repository's.
-    let (git_dir, common_dir) = match git2::Repository::open(root) {
+    let (git_dir, common_dir) = match crate::git::open_at(root) {
         Ok(repo) => (repo.path().to_path_buf(), repo.commondir().to_path_buf()),
         Err(_) => (root.join(".git"), root.join(".git")),
     };
@@ -475,12 +544,20 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(root.join("out")).unwrap();
         fs::create_dir_all(root.join("src")).unwrap();
-        let repo = git2::Repository::init(&root).unwrap();
+        let git = |args: &[&str]| {
+            let mut command = std::process::Command::new("git");
+            command.arg("-C").arg(&root).args(args);
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::CommandExt;
+                command.creation_flags(0x0800_0000);
+            }
+            assert!(command.status().unwrap().success(), "{args:?}");
+        };
+        git(&["init"]);
         fs::write(root.join(".gitignore"), "out/\n*.log\n").unwrap();
         fs::write(root.join("kept.log"), "tracked anyway\n").unwrap();
-        let mut index = repo.index().unwrap();
-        index.add_path(Path::new("kept.log")).unwrap();
-        index.write().unwrap();
+        git(&["add", "-f", "--", "kept.log"]);
 
         let rules = IgnoreRules::open(&root);
         assert!(rules.ignores_dir(&root.join("out")));

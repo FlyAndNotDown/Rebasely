@@ -102,12 +102,35 @@ fn kill_tree(child: &mut std::process::Child) {
 
 /// A killed git cannot release its lock files, and every later command would
 /// then fail on them. Only locks created after `since` are removed.
+fn git_path(root: &Path, flag: &str) -> Option<PathBuf> {
+    let absolute = ["rev-parse", "--path-format=absolute", flag];
+    let plain = ["rev-parse", flag];
+    for args in [absolute.as_slice(), plain.as_slice()] {
+        let Ok(output) = run_git(root, args) else {
+            return None;
+        };
+        if !output.status.success() {
+            continue;
+        }
+        let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if text.is_empty() {
+            continue;
+        }
+        let path = PathBuf::from(&text);
+        return Some(if path.is_absolute() {
+            path
+        } else {
+            root.join(path)
+        });
+    }
+    None
+}
+
 fn remove_stale_locks(root: &Path, since: SystemTime) {
-    let Ok(repo) = Repository::open(root) else {
+    let Some(git_dir) = git_path(root, "--git-dir") else {
         return;
     };
-    let git_dir = repo.path().to_path_buf();
-    let common = repo.commondir().to_path_buf();
+    let common = git_path(root, "--git-common-dir").unwrap_or_else(|| git_dir.clone());
     let mut candidates = vec![
         git_dir.join("index.lock"),
         git_dir.join("HEAD.lock"),
@@ -167,9 +190,13 @@ pub(super) fn run_git_env(
         .map_err(|err| AppError::msg(err.to_string()))
 }
 
-/// Runs git with `input` on stdin, so messages and path lists never hit the
-/// command-line length limit or need quoting.
-pub(super) fn run_git_input(root: &Path, args: &[&str], input: &[u8]) -> AppResult<Vec<u8>> {
+/// Runs git with `input` on stdin and returns the raw output, including a
+/// non-zero status. `git check-ignore` uses exit code 1 when nothing matches.
+pub(super) fn run_git_input_output(
+    root: &Path,
+    args: &[&str],
+    input: &[u8],
+) -> AppResult<std::process::Output> {
     let git = find_git().ok_or_else(|| AppError::msg("Git executable was not found"))?;
     let mut command = Command::new(git);
     command.arg("-C").arg(root).args(args);
@@ -198,6 +225,13 @@ pub(super) fn run_git_input(root: &Path, args: &[&str], input: &[u8]) -> AppResu
         .wait_with_output()
         .map_err(|err| AppError::msg(err.to_string()))?;
     let _ = writer.join();
+    Ok(output)
+}
+
+/// Runs git with `input` on stdin, so messages and path lists never hit the
+/// command-line length limit or need quoting.
+pub(super) fn run_git_input(root: &Path, args: &[&str], input: &[u8]) -> AppResult<Vec<u8>> {
+    let output = run_git_input_output(root, args, input)?;
     if output.status.success() {
         return Ok(output.stdout);
     }

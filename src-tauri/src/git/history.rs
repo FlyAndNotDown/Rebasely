@@ -1,26 +1,24 @@
 use super::*;
 
-pub(super) fn summarize_oid(repo: &Repository, oid: Oid) -> AppResult<CommitSummary> {
-    let commit = repo.find_commit(oid)?;
-    let id = oid.to_string();
-    let short_id = id.chars().take(7).collect();
-    let author = commit.author();
-    let author_name = author.name().unwrap_or("Unknown").to_string();
-    let author_email = author.email().unwrap_or("").to_string();
-    Ok(CommitSummary {
-        id,
-        short_id,
-        summary: commit.summary().unwrap_or("").to_string(),
-        body: commit.body().unwrap_or("").trim().to_string(),
-        author_name,
-        author_email,
-        timestamp: commit.time().seconds(),
-        parents: commit.parent_ids().map(|id| id.to_string()).collect(),
+pub(super) fn summarize_oid(repo: &Repository, oid: &str) -> AppResult<CommitSummary> {
+    Ok(summary_from_info(&commit_info(repo, oid)?))
+}
+
+pub(super) fn summary_from_info(info: &CommitInfo) -> CommitSummary {
+    CommitSummary {
+        id: info.id.clone(),
+        short_id: short_id(&info.id),
+        summary: info.summary.clone(),
+        body: info.body.clone(),
+        author_name: info.author_name.clone(),
+        author_email: info.author_email.clone(),
+        timestamp: info.timestamp,
+        parents: info.parents.clone(),
         refs: Vec::new(),
         on_current_branch: true,
         on_tracking_branch: false,
         path: None,
-    })
+    }
 }
 
 pub fn commits(
@@ -35,29 +33,23 @@ pub fn commits(
     if let Some(query) = query {
         return search_commits(repo, limit, skip, query, &revs);
     }
-    if let Ok(root) = workdir(repo) {
-        // Committer-date order, unlike author-date order, lets git stream from
-        // the commit-graph instead of sorting all of history first.
-        let args = git_log_args(
-            &revs,
-            &["-c", "log.showSignature=false", "log", "--date-order"],
-        );
-        let warming = if skip == 0 {
-            warm_reachable(repo)
-        } else {
-            Vec::new()
-        };
-        let page = log_page(root, &args, skip, limit);
-        for handle in warming {
-            let _ = handle.join();
-        }
-        if let Ok(stdout) = page {
-            let mut items = parse_git_log(&stdout)?;
-            decorate_commits(repo, &mut items);
-            return Ok(items);
-        }
+    let root = workdir(repo)?;
+    // Committer-date order, unlike author-date order, lets git stream from
+    // the commit-graph instead of sorting all of history first.
+    let args = git_log_args(
+        &revs,
+        &["-c", "log.showSignature=false", "log", "--date-order"],
+    );
+    let warming = if skip == 0 {
+        warm_reachable(repo)
+    } else {
+        Vec::new()
+    };
+    let page = log_page(root, &args, skip, limit);
+    for handle in warming {
+        let _ = handle.join();
     }
-    let mut items = commits_from_revwalk(repo, limit, skip, &revs)?;
+    let mut items = parse_git_log(&page?)?;
     decorate_commits(repo, &mut items);
     Ok(items)
 }
@@ -312,33 +304,6 @@ pub(super) fn commit_matches(
     })
 }
 
-pub(super) fn commits_from_revwalk(
-    repo: &Repository,
-    limit: usize,
-    skip: usize,
-    revs: &[String],
-) -> AppResult<Vec<CommitSummary>> {
-    let mut revwalk = repo.revwalk()?;
-    if revs.is_empty() {
-        let _ = revwalk.push_glob("refs/heads/*");
-        let _ = revwalk.push_glob("refs/remotes/*");
-    } else {
-        for rev in revs {
-            let object = repo.revparse_single(rev)?;
-            revwalk.push(object.peel_to_commit()?.id())?;
-        }
-    }
-    // TIME | TOPOLOGICAL matches `git log --date-order` (committer time, parents
-    // still below their children), the same order as the CLI path above.
-    revwalk.set_sorting(Sort::TIME | Sort::TOPOLOGICAL)?;
-
-    let mut items = Vec::new();
-    for oid in revwalk.skip(skip).take(limit) {
-        items.push(summarize_oid(repo, oid?)?);
-    }
-    Ok(items)
-}
-
 pub(super) fn parse_git_log(bytes: &[u8]) -> AppResult<Vec<CommitSummary>> {
     let text = String::from_utf8_lossy(bytes);
     let mut items = Vec::new();
@@ -393,104 +358,66 @@ pub(super) fn decorate_commits(repo: &Repository, commits: &mut [CommitSummary])
 }
 
 pub(super) fn mark_on_current_branch(repo: &Repository, commits: &mut [CommitSummary]) {
-    let head = repo.head().ok();
-    let head_oid = head.as_ref().and_then(|head| head.target());
-    let upstream_oid = head.as_ref().and_then(|head| upstream_oid_of(repo, head));
-    if commit_graph_available(repo) {
-        mark_branch_flags_with_graph(repo, commits, head_oid, upstream_oid);
-        return;
-    }
-    let on_head = head_oid.and_then(|oid| reachable_commits(repo, oid));
-    let on_upstream = upstream_oid.and_then(|oid| reachable_commits(repo, oid));
-    if (on_head.is_none() && head_oid.is_some())
-        || (on_upstream.is_none() && upstream_oid.is_some())
-    {
-        mark_branch_flags_with_graph(repo, commits, head_oid, upstream_oid);
-        return;
-    }
-    let head_id = head_oid.map(|oid| oid.to_string());
-    let upstream_id = upstream_oid.map(|oid| oid.to_string());
-    for commit in commits {
-        let Ok(oid) = Oid::from_str(&commit.id) else {
-            commit.on_current_branch = head_id.as_deref() == Some(commit.id.as_str());
-            commit.on_tracking_branch = upstream_id.as_deref() == Some(commit.id.as_str());
-            continue;
-        };
-        commit.on_current_branch = on_head.as_ref().is_some_and(|set| set.contains(&oid));
-        commit.on_tracking_branch = on_upstream.as_ref().is_some_and(|set| set.contains(&oid));
-    }
-}
-
-pub(super) fn mark_branch_flags_with_graph(
-    repo: &Repository,
-    commits: &mut [CommitSummary],
-    head_oid: Option<Oid>,
-    upstream_oid: Option<Oid>,
-) {
-    let head_id = head_oid.map(|oid| oid.to_string());
-    let upstream_id = upstream_oid.map(|oid| oid.to_string());
-    for commit in commits {
-        let Ok(oid) = Oid::from_str(&commit.id) else {
-            commit.on_current_branch = head_id.as_deref() == Some(commit.id.as_str());
-            commit.on_tracking_branch = upstream_id.as_deref() == Some(commit.id.as_str());
-            continue;
-        };
-        commit.on_current_branch = contains_commit(repo, head_oid, &head_id, oid, &commit.id);
-        commit.on_tracking_branch =
-            contains_commit(repo, upstream_oid, &upstream_id, oid, &commit.id);
-    }
-}
-
-pub(super) fn commit_graph_available(repo: &Repository) -> bool {
-    let git_dir = repo.path();
-    if git_dir.join("objects/info/commit-graph").is_file() {
-        return true;
-    }
-    git_dir
-        .join("objects/info/commit-graphs")
-        .read_dir()
-        .map(|mut entries| entries.next().is_some())
-        .unwrap_or(false)
-}
-
-/// Without a commit-graph, marking commits on the current branch walks all of
-/// history. Starting those walks on helper threads lets them overlap the
-/// `git log` process instead of following it.
-fn warm_reachable(repo: &Repository) -> Vec<thread::JoinHandle<()>> {
-    if commit_graph_available(repo) {
-        return Vec::new();
-    }
-    let Ok(head) = repo.head() else {
-        return Vec::new();
+    let head = head_oid(repo);
+    let upstream = if symbolic_branch(repo).is_some() {
+        rev_parse(repo, "@{upstream}")
+    } else {
+        None
     };
-    let mut tips: Vec<Oid> = [head.target(), upstream_oid_of(repo, &head)]
-        .into_iter()
-        .flatten()
-        .collect();
-    tips.dedup();
-    let git_dir = repo.path().to_path_buf();
+    let on_head = head.as_ref().and_then(|id| reachable_commits(repo, id));
+    let on_upstream = upstream.as_ref().and_then(|id| reachable_commits(repo, id));
+    let head_too_big = head.is_some() && on_head.is_none();
+    let upstream_too_big = upstream.is_some() && on_upstream.is_none();
+    for commit in commits.iter_mut() {
+        commit.on_current_branch = if head_too_big {
+            is_ancestor(repo, &commit.id, head.as_deref())
+        } else {
+            on_head.as_ref().is_some_and(|set| set.contains(&commit.id))
+        };
+        commit.on_tracking_branch = if upstream_too_big {
+            is_ancestor(repo, &commit.id, upstream.as_deref())
+        } else {
+            on_upstream
+                .as_ref()
+                .is_some_and(|set| set.contains(&commit.id))
+        };
+    }
+}
+
+/// `git rev-list` already reads the commit-graph. The walk starts while `git log`
+/// is still running so the two overlap.
+fn warm_reachable(repo: &Repository) -> Vec<thread::JoinHandle<()>> {
+    let mut tips = Vec::new();
+    if let Some(head) = head_oid(repo) {
+        tips.push(head);
+    }
+    if symbolic_branch(repo).is_some() {
+        if let Some(upstream) = rev_parse(repo, "@{upstream}") {
+            if !tips.contains(&upstream) {
+                tips.push(upstream);
+            }
+        }
+    }
     tips.into_iter()
         .map(|tip| {
-            let git_dir = git_dir.clone();
+            let repo = repo.clone();
             thread::spawn(move || {
-                if let Ok(repo) = Repository::open(&git_dir) {
-                    let _ = reachable_commits(&repo, tip);
-                }
+                let _ = reachable_commits(&repo, &tip);
             })
         })
         .collect()
 }
 
-pub(super) fn reachable_commits(repo: &Repository, tip: Oid) -> Option<Arc<HashSet<Oid>>> {
+pub(super) fn reachable_commits(repo: &Repository, tip: &str) -> Option<Arc<HashSet<String>>> {
     enum Cached {
-        Set(Arc<HashSet<Oid>>),
+        Set(Arc<HashSet<String>>),
         TooBig,
     }
     const MAX_REACHABLE: usize = 2_000_000;
-    static CACHE: OnceLock<Mutex<Vec<(Oid, Cached)>>> = OnceLock::new();
+    static CACHE: OnceLock<Mutex<Vec<(String, Cached)>>> = OnceLock::new();
     let cache = CACHE.get_or_init(|| Mutex::new(Vec::new()));
     if let Ok(guard) = cache.lock() {
-        if let Some((_, cached)) = guard.iter().find(|(oid, _)| *oid == tip) {
+        if let Some((_, cached)) = guard.iter().find(|(oid, _)| oid == tip) {
             return match cached {
                 Cached::Set(set) => Some(Arc::clone(set)),
                 Cached::TooBig => None,
@@ -507,8 +434,8 @@ pub(super) fn reachable_commits(repo: &Repository, tip: Oid) -> Option<Arc<HashS
         Cached::TooBig => None,
     };
     if let Ok(mut guard) = cache.lock() {
-        guard.retain(|(oid, _)| *oid != tip);
-        guard.push((tip, cached));
+        guard.retain(|(oid, _)| oid != tip);
+        guard.push((tip.to_string(), cached));
         if guard.len() > 4 {
             let extra = guard.len() - 4;
             guard.drain(0..extra);
@@ -517,46 +444,46 @@ pub(super) fn reachable_commits(repo: &Repository, tip: Oid) -> Option<Arc<HashS
     result
 }
 
-pub(super) fn walk_reachable(repo: &Repository, tip: Oid, limit: usize) -> Option<HashSet<Oid>> {
-    let mut walk = repo.revwalk().ok()?;
-    walk.push(tip).ok()?;
+pub(super) fn walk_reachable(
+    repo: &Repository,
+    tip: &str,
+    limit: usize,
+) -> Option<HashSet<String>> {
+    let output = run_git(repo.workdir(), &["rev-list", tip]).ok()?;
+    if !output.status.success() {
+        return None;
+    }
     let mut set = HashSet::new();
-    for oid in walk.flatten() {
-        set.insert(oid);
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let id = line.trim();
+        if id.is_empty() {
+            continue;
+        }
+        set.insert(id.to_string());
         if set.len() > limit {
             return None;
         }
     }
     if set.is_empty() {
-        return None;
+        None
+    } else {
+        Some(set)
     }
-    Some(set)
 }
 
-pub(super) fn upstream_oid_of(repo: &Repository, head: &git2::Reference) -> Option<Oid> {
-    if !head.is_branch() {
-        return None;
-    }
-    let branch = repo
-        .find_branch(head.shorthand()?, BranchType::Local)
-        .ok()?;
-    branch.upstream().ok()?.get().target()
-}
-
-pub(super) fn contains_commit(
-    repo: &Repository,
-    tip: Option<Oid>,
-    tip_id: &Option<String>,
-    oid: Oid,
-    id: &str,
-) -> bool {
-    if tip_id.as_deref() == Some(id) {
-        return true;
-    }
+fn is_ancestor(repo: &Repository, commit: &str, tip: Option<&str>) -> bool {
     let Some(tip) = tip else {
         return false;
     };
-    repo.graph_descendant_of(tip, oid).unwrap_or(false)
+    if commit == tip {
+        return true;
+    }
+    run_git(
+        repo.workdir(),
+        &["merge-base", "--is-ancestor", commit, tip],
+    )
+    .ok()
+    .is_some_and(|output| output.status.success())
 }
 
 pub(super) fn apply_ref_labels(
@@ -629,18 +556,16 @@ pub(super) fn collect_ref_labels(repo: &Repository) -> HashMap<String, Vec<Commi
         }
     }
 
-    if let Ok(head) = repo.head() {
-        if let Some(oid) = head.target() {
-            let entry = labels.entry(oid.to_string()).or_default();
-            if !entry.iter().any(|label| label.kind == "head") {
-                entry.insert(
-                    0,
-                    CommitRefLabel {
-                        name: "HEAD".to_string(),
-                        kind: "head".to_string(),
-                    },
-                );
-            }
+    if let Some(oid) = head_oid(repo) {
+        let entry = labels.entry(oid).or_default();
+        if !entry.iter().any(|label| label.kind == "head") {
+            entry.insert(
+                0,
+                CommitRefLabel {
+                    name: "HEAD".to_string(),
+                    kind: "head".to_string(),
+                },
+            );
         }
     }
     labels

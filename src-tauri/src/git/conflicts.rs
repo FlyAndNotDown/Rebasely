@@ -54,9 +54,11 @@ pub fn conflict_view(repo: &Repository, path: &str) -> AppResult<ConflictView> {
 /// A stash apply can leave conflicts without any merge or rebase in progress,
 /// so the index entry decides whether a path can be resolved.
 pub(super) fn ensure_conflicted(repo: &Repository, path: &str) -> AppResult<()> {
-    let mut index = repo.index()?;
-    index.read(false)?;
-    if (1..=3).any(|stage| index.get_path(Path::new(path), stage).is_some()) {
+    let output = run_git(workdir(repo)?, &["ls-files", "-u", "-z", "--", path])?;
+    if !output.status.success() {
+        return Err(git_output_error(output));
+    }
+    if !output.stdout.is_empty() {
         return Ok(());
     }
     Err(AppError::msg("This file has no conflict to resolve"))
@@ -94,14 +96,11 @@ pub(super) fn with_trailing_newline(text: String) -> String {
 }
 
 pub(super) fn stage_text(repo: &Repository, path: &str, stage: i32) -> Option<String> {
-    let index = repo.index().ok()?;
-    let entry = index.get_path(Path::new(path), stage)?;
-    let blob = repo.find_blob(entry.id).ok()?;
-    let bytes = blob.content();
+    let bytes = cat_blob(repo, &format!(":{stage}:{path}"))?;
     if bytes.contains(&0) {
         return None;
     }
-    Some(String::from_utf8_lossy(bytes).into_owned())
+    Some(String::from_utf8_lossy(&bytes).into_owned())
 }
 
 pub fn resolve_conflict(

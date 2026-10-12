@@ -10,44 +10,66 @@ fn temp_repo() -> (PathBuf, Repository) {
     ));
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(&root).unwrap();
-    let repo = Repository::init(&root).unwrap();
-    let mut config = repo.config().unwrap();
-    config.set_str("user.name", "Rebasely Test").unwrap();
-    config.set_str("user.email", "test@example.com").unwrap();
+    run_git_stdout(&root, &["init"]).unwrap();
+    run_git_stdout(&root, &["config", "user.name", "Rebasely Test"]).unwrap();
+    run_git_stdout(&root, &["config", "user.email", "test@example.com"]).unwrap();
+    let repo = open_at(&root).unwrap();
     (root, repo)
+}
+
+fn head_id(repo: &Repository) -> String {
+    head_oid(repo).unwrap()
+}
+
+fn switch_to(repo: &Repository, name: &str) {
+    let name = name.strip_prefix("refs/heads/").unwrap_or(name);
+    run_git_stdout(repo.workdir(), &["switch", "--quiet", name]).unwrap();
+}
+
+fn branch_here(repo: &Repository, name: &str) {
+    run_git_stdout(repo.workdir(), &["branch", name]).unwrap();
+}
+
+fn main_tip(repo: &Repository) -> String {
+    let name = if ref_exists(repo, "refs/heads/main") {
+        "main"
+    } else {
+        "master"
+    };
+    let stdout = run_git_stdout(
+        repo.workdir(),
+        &["rev-parse", &format!("refs/heads/{name}")],
+    )
+    .unwrap();
+    String::from_utf8_lossy(&stdout).trim().to_string()
+}
+
+fn other_branch(repo: &Repository, except: &str) -> String {
+    let stdout = run_git_stdout(
+        repo.workdir(),
+        &["for-each-ref", "--format=%(refname:short)", "refs/heads"],
+    )
+    .unwrap();
+    String::from_utf8_lossy(&stdout)
+        .lines()
+        .map(str::trim)
+        .find(|name| !name.is_empty() && *name != except)
+        .unwrap()
+        .to_string()
 }
 
 #[test]
 fn stash_diff_includes_tracked_and_untracked_files() {
     let (root, mut repo) = temp_repo();
-    fs::write(root.join("tracked.txt"), "base\n").unwrap();
-    fs::write(root.join("gone.txt"), "remove me\n").unwrap();
-    let mut index = repo.index().unwrap();
-    index.add_path(Path::new("tracked.txt")).unwrap();
-    index.add_path(Path::new("gone.txt")).unwrap();
-    index.write().unwrap();
-    let tree_id = index.write_tree().unwrap();
-    drop(index);
-    {
-        let tree = repo.find_tree(tree_id).unwrap();
-        let signature = repo.signature().unwrap();
-        repo.commit(Some("HEAD"), &signature, &signature, "init", &tree, &[])
-            .unwrap();
-    }
+    commit_file(&repo, &root, "tracked.txt", "base\n", "init");
+    commit_file(&repo, &root, "gone.txt", "remove me\n", "init2");
 
     fs::write(root.join("tracked.txt"), "changed\n").unwrap();
     fs::remove_file(root.join("gone.txt")).unwrap();
     fs::write(root.join("extra.txt"), "new\n").unwrap();
     stash_save(&mut repo, "wip", true, &[]).unwrap();
 
-    let mut id = String::new();
-    repo.stash_foreach(|index, _, oid| {
-        if index == 0 {
-            id = oid.to_string();
-        }
-        true
-    })
-    .unwrap();
+    let id = list_stashes(&mut repo).unwrap()[0].id.clone();
 
     let details = stash_details(&repo, &id).unwrap();
     let kind = |path: &str| {
@@ -79,62 +101,27 @@ fn stash_diff_includes_tracked_and_untracked_files() {
     let _ = fs::remove_dir_all(&root);
 }
 
-fn commit_file(repo: &mut Repository, root: &Path, name: &str, body: &str, message: &str) {
+fn commit_file(_repo: &Repository, root: &Path, name: &str, body: &str, message: &str) {
     fs::write(root.join(name), body).unwrap();
-    let mut index = repo.index().unwrap();
-    index.add_path(Path::new(name)).unwrap();
-    index.write().unwrap();
-    let tree_id = index.write_tree().unwrap();
-    drop(index);
-    let tree = repo.find_tree(tree_id).unwrap();
-    let signature = repo.signature().unwrap();
-    let parent = repo.head().ok().and_then(|head| head.peel_to_commit().ok());
-    let parents: Vec<_> = parent.iter().collect();
-    repo.commit(
-        Some("HEAD"),
-        &signature,
-        &signature,
-        message,
-        &tree,
-        &parents,
-    )
-    .unwrap();
+    run_git_stdout(root, &["add", "-f", "--", name]).unwrap();
+    run_git_input(root, &["commit", "--file=-"], message.as_bytes()).unwrap();
 }
 
 fn head_summary(repo: &Repository) -> String {
-    repo.head()
-        .unwrap()
-        .peel_to_commit()
-        .unwrap()
-        .summary()
-        .unwrap_or("")
-        .to_string()
+    commit_info(repo, "HEAD").unwrap().summary
 }
 
 #[test]
 fn rebase_onto_replays_commits() {
     let (root, mut repo) = temp_repo();
-    commit_file(&mut repo, &root, "base.txt", "base\n", "base");
-    repo.branch(
-        "feature",
-        &repo.head().unwrap().peel_to_commit().unwrap(),
-        false,
-    )
-    .unwrap();
-    commit_file(&mut repo, &root, "main.txt", "main\n", "main-tip");
-    repo.set_head("refs/heads/feature").unwrap();
-    repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
-        .unwrap();
-    commit_file(&mut repo, &root, "feature.txt", "one\n", "feature-one");
-    commit_file(&mut repo, &root, "feature.txt", "two\n", "feature-two");
+    commit_file(&repo, &root, "base.txt", "base\n", "base");
+    branch_here(&repo, "feature");
+    commit_file(&repo, &root, "main.txt", "main\n", "main-tip");
+    switch_to(&repo, "feature");
+    commit_file(&repo, &root, "feature.txt", "one\n", "feature-one");
+    commit_file(&repo, &root, "feature.txt", "two\n", "feature-two");
 
-    let onto = {
-        let main = repo
-            .find_branch("main", BranchType::Local)
-            .or_else(|_| repo.find_branch("master", BranchType::Local))
-            .unwrap();
-        main.get().target().unwrap().to_string()
-    };
+    let onto = main_tip(&repo);
     rebase_onto(&mut repo, &onto).unwrap();
     assert_eq!(head_summary(&repo), "feature-two");
     assert!(root.join("main.txt").exists());
@@ -145,14 +132,14 @@ fn rebase_onto_replays_commits() {
 #[test]
 fn interactive_rebase_can_reword_and_drop() {
     let (root, mut repo) = temp_repo();
-    commit_file(&mut repo, &root, "file.txt", "a\n", "base");
-    let onto = repo.head().unwrap().target().unwrap().to_string();
-    commit_file(&mut repo, &root, "file.txt", "b\n", "keep");
-    let keep = repo.head().unwrap().target().unwrap().to_string();
-    commit_file(&mut repo, &root, "file.txt", "c\n", "change-me");
-    let change = repo.head().unwrap().target().unwrap().to_string();
-    commit_file(&mut repo, &root, "file.txt", "d\n", "drop-me");
-    let drop = repo.head().unwrap().target().unwrap().to_string();
+    commit_file(&repo, &root, "file.txt", "a\n", "base");
+    let onto = head_id(&repo);
+    commit_file(&repo, &root, "file.txt", "b\n", "keep");
+    let keep = head_id(&repo);
+    commit_file(&repo, &root, "file.txt", "c\n", "change-me");
+    let change = head_id(&repo);
+    commit_file(&repo, &root, "file.txt", "d\n", "drop-me");
+    let drop = head_id(&repo);
 
     rebase_interactive(
         &mut repo,
@@ -188,57 +175,31 @@ fn interactive_rebase_can_reword_and_drop() {
 #[test]
 fn rebase_conflict_can_abort() {
     let (root, mut repo) = temp_repo();
-    commit_file(&mut repo, &root, "file.txt", "base\n", "base");
-    repo.branch(
-        "other",
-        &repo.head().unwrap().peel_to_commit().unwrap(),
-        false,
-    )
-    .unwrap();
-    commit_file(&mut repo, &root, "file.txt", "left\n", "left");
-    repo.set_head("refs/heads/other").unwrap();
-    repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
-        .unwrap();
-    commit_file(&mut repo, &root, "file.txt", "right\n", "right");
-    let original = repo.head().unwrap().target().unwrap();
-    let onto = {
-        let main = repo
-            .find_branch("main", BranchType::Local)
-            .or_else(|_| repo.find_branch("master", BranchType::Local))
-            .unwrap();
-        main.get().target().unwrap().to_string()
-    };
+    commit_file(&repo, &root, "file.txt", "base\n", "base");
+    branch_here(&repo, "other");
+    commit_file(&repo, &root, "file.txt", "left\n", "left");
+    switch_to(&repo, "other");
+    commit_file(&repo, &root, "file.txt", "right\n", "right");
+    let original = head_id(&repo);
+    let onto = main_tip(&repo);
     let err = rebase_onto(&mut repo, &onto).unwrap_err();
     assert!(err.to_string().contains("conflicts"), "{err}");
     assert!(rebase_progress(&repo).is_some());
     rebase_abort(&mut repo).unwrap();
     assert!(rebase_progress(&repo).is_none());
-    assert_eq!(repo.head().unwrap().target().unwrap(), original);
+    assert_eq!(head_id(&repo), original);
     let _ = fs::remove_dir_all(&root);
 }
 
 #[test]
 fn rebase_conflict_can_continue() {
     let (root, mut repo) = temp_repo();
-    commit_file(&mut repo, &root, "file.txt", "base\n", "base");
-    repo.branch(
-        "other",
-        &repo.head().unwrap().peel_to_commit().unwrap(),
-        false,
-    )
-    .unwrap();
-    commit_file(&mut repo, &root, "file.txt", "left\n", "left");
-    repo.set_head("refs/heads/other").unwrap();
-    repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
-        .unwrap();
-    commit_file(&mut repo, &root, "file.txt", "right\n", "right");
-    let onto = {
-        let main = repo
-            .find_branch("main", BranchType::Local)
-            .or_else(|_| repo.find_branch("master", BranchType::Local))
-            .unwrap();
-        main.get().target().unwrap().to_string()
-    };
+    commit_file(&repo, &root, "file.txt", "base\n", "base");
+    branch_here(&repo, "other");
+    commit_file(&repo, &root, "file.txt", "left\n", "left");
+    switch_to(&repo, "other");
+    commit_file(&repo, &root, "file.txt", "right\n", "right");
+    let onto = main_tip(&repo);
     assert!(rebase_onto(&mut repo, &onto).is_err());
     fs::write(root.join("file.txt"), "both\n").unwrap();
     run_git_stdout(&root, &["add", "file.txt"]).unwrap();
@@ -252,28 +213,19 @@ fn rebase_conflict_can_continue() {
 #[test]
 fn reset_can_move_to_a_commit_on_another_branch() {
     let (root, mut repo) = temp_repo();
-    commit_file(&mut repo, &root, "file.txt", "base\n", "base");
-    let current = repo.head().unwrap().name().unwrap().to_string();
-    repo.branch(
-        "other",
-        &repo.head().unwrap().peel_to_commit().unwrap(),
-        false,
-    )
-    .unwrap();
-    commit_file(&mut repo, &root, "file.txt", "left\n", "left");
+    commit_file(&repo, &root, "file.txt", "base\n", "base");
+    let current = symbolic_branch(&repo).unwrap();
+    branch_here(&repo, "other");
+    commit_file(&repo, &root, "file.txt", "left\n", "left");
     let other_tip = {
-        repo.set_head("refs/heads/other").unwrap();
-        repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
-            .unwrap();
-        commit_file(&mut repo, &root, "other.txt", "side\n", "side");
-        let tip = repo.head().unwrap().target().unwrap();
-        repo.set_head(&current).unwrap();
-        repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
-            .unwrap();
+        switch_to(&repo, "other");
+        commit_file(&repo, &root, "other.txt", "side\n", "side");
+        let tip = head_id(&repo);
+        switch_to(&repo, &current);
         tip
     };
-    reset_to_commit(&mut repo, &other_tip.to_string(), "hard").unwrap();
-    assert_eq!(repo.head().unwrap().target().unwrap(), other_tip);
+    reset_to_commit(&mut repo, &other_tip, "hard").unwrap();
+    assert_eq!(head_id(&repo), other_tip);
     assert_eq!(head_summary(&repo), "side");
     let _ = fs::remove_dir_all(&root);
 }
@@ -281,19 +233,12 @@ fn reset_can_move_to_a_commit_on_another_branch() {
 #[test]
 fn merge_conflict_can_take_ours_and_continue() {
     let (root, mut repo) = temp_repo();
-    commit_file(&mut repo, &root, "file.txt", "base\n", "base");
-    repo.branch(
-        "other",
-        &repo.head().unwrap().peel_to_commit().unwrap(),
-        false,
-    )
-    .unwrap();
-    commit_file(&mut repo, &root, "file.txt", "left\n", "left");
-    let incoming = repo.head().unwrap().target().unwrap().to_string();
-    repo.set_head("refs/heads/other").unwrap();
-    repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
-        .unwrap();
-    commit_file(&mut repo, &root, "file.txt", "right\n", "right");
+    commit_file(&repo, &root, "file.txt", "base\n", "base");
+    branch_here(&repo, "other");
+    commit_file(&repo, &root, "file.txt", "left\n", "left");
+    let incoming = head_id(&repo);
+    switch_to(&repo, "other");
+    commit_file(&repo, &root, "file.txt", "right\n", "right");
     assert!(merge_ref(&mut repo, &incoming)
         .unwrap_err()
         .to_string()
@@ -319,49 +264,41 @@ fn merge_conflict_can_take_ours_and_continue() {
 fn amend_keeps_original_author() {
     let (root, repo) = temp_repo();
     fs::write(root.join("a.txt"), "a\n").unwrap();
-    {
-        let mut index = repo.index().unwrap();
-        index.add_path(Path::new("a.txt")).unwrap();
-        index.write().unwrap();
-        let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
-        let author = git2::Signature::now("Original Author", "author@example.com").unwrap();
-        let committer = repo.signature().unwrap();
-        repo.commit(Some("HEAD"), &author, &committer, "first", &tree, &[])
-            .unwrap();
-    }
+    run_git_stdout(&root, &["add", "--", "a.txt"]).unwrap();
+    let committed = run_git_env(
+        &root,
+        &["commit", "-m", "first"],
+        &[
+            ("GIT_AUTHOR_NAME", "Original Author"),
+            ("GIT_AUTHOR_EMAIL", "author@example.com"),
+        ],
+    )
+    .unwrap();
+    assert!(committed.status.success());
     commit(&repo, "reworded", true).unwrap();
-    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    let head = commit_info(&repo, "HEAD").unwrap();
     assert_eq!(head.summary(), Some("reworded"));
-    assert_eq!(head.author().name(), Some("Original Author"));
-    assert_eq!(head.committer().name(), Some("Rebasely Test"));
+    assert_eq!(head.author_name, "Original Author");
+    assert_eq!(head.committer_name, "Rebasely Test");
     let _ = fs::remove_dir_all(&root);
 }
 
 #[test]
 fn merge_commit_lists_files_against_first_parent() {
     let (root, mut repo) = temp_repo();
-    commit_file(&mut repo, &root, "base.txt", "base\n", "base");
-    let main_ref = repo.head().unwrap().name().unwrap().to_string();
-    repo.branch(
-        "side",
-        &repo.head().unwrap().peel_to_commit().unwrap(),
-        false,
-    )
-    .unwrap();
-    commit_file(&mut repo, &root, "main.txt", "main\n", "main");
-    repo.set_head("refs/heads/side").unwrap();
-    repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
-        .unwrap();
-    commit_file(&mut repo, &root, "side.txt", "side\n", "side");
-    let side_tip = repo.head().unwrap().target().unwrap().to_string();
-    repo.set_head(&main_ref).unwrap();
-    repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
-        .unwrap();
+    commit_file(&repo, &root, "base.txt", "base\n", "base");
+    let main_ref = symbolic_branch(&repo).unwrap();
+    branch_here(&repo, "side");
+    commit_file(&repo, &root, "main.txt", "main\n", "main");
+    switch_to(&repo, "side");
+    commit_file(&repo, &root, "side.txt", "side\n", "side");
+    let side_tip = head_id(&repo);
+    switch_to(&repo, &main_ref);
     merge_ref(&mut repo, &side_tip).unwrap();
 
-    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    let head = commit_info(&repo, "HEAD").unwrap();
     assert_eq!(head.parent_count(), 2);
-    let details = commit_details(&repo, &head.id().to_string()).unwrap();
+    let details = commit_details(&repo, head.id()).unwrap();
     let paths: Vec<_> = details
         .files
         .iter()
@@ -373,9 +310,9 @@ fn merge_commit_lists_files_against_first_parent() {
 
 #[test]
 fn discard_restores_tracked_and_removes_new_files() {
-    let (root, mut repo) = temp_repo();
-    commit_file(&mut repo, &root, "tracked.txt", "base\n", "base");
-    commit_file(&mut repo, &root, "odd[1].txt", "base\n", "odd");
+    let (root, repo) = temp_repo();
+    commit_file(&repo, &root, "tracked.txt", "base\n", "base");
+    commit_file(&repo, &root, "odd[1].txt", "base\n", "odd");
     fs::write(root.join("tracked.txt"), "changed\n").unwrap();
     fs::write(root.join("odd[1].txt"), "changed\n").unwrap();
     fs::write(root.join("staged-new.txt"), "new\n").unwrap();
@@ -402,7 +339,7 @@ fn discard_restores_tracked_and_removes_new_files() {
     assert_eq!(read("odd[1].txt"), "base\n");
     assert!(!root.join("staged-new.txt").exists());
     assert!(!root.join("untracked.txt").exists());
-    let status = status_from_libgit2(&repo).unwrap();
+    let status = status_from_git(repo.workdir()).unwrap();
     assert!(status.staged.is_empty(), "{:?}", status.staged);
     assert!(status.unstaged.is_empty(), "{:?}", status.unstaged);
     let _ = fs::remove_dir_all(&root);
@@ -436,7 +373,7 @@ fn pathspec_chunks_split_long_lists() {
 #[test]
 fn stash_actions_follow_the_id_after_indexes_shift() {
     let (root, mut repo) = temp_repo();
-    commit_file(&mut repo, &root, "file.txt", "base\n", "base");
+    commit_file(&repo, &root, "file.txt", "base\n", "base");
     fs::write(root.join("file.txt"), "first\n").unwrap();
     stash_save(&mut repo, "first", false, &[]).unwrap();
     let first = list_stashes(&mut repo).unwrap()[0].id.clone();
@@ -454,16 +391,16 @@ fn stash_actions_follow_the_id_after_indexes_shift() {
 
 #[test]
 fn file_history_follows_a_rename() {
-    let (root, mut repo) = temp_repo();
+    let (root, repo) = temp_repo();
     commit_file(
-        &mut repo,
+        &repo,
         &root,
         "old.txt",
         "one\ntwo\nthree\nfour\n",
         "add old",
     );
     commit_file(
-        &mut repo,
+        &repo,
         &root,
         "old.txt",
         "one\ntwo\nthree\nfour\nfive\n",
@@ -497,8 +434,8 @@ fn file_history_follows_a_rename() {
 
 #[test]
 fn blame_of_a_file_not_in_head_is_empty_but_other_failures_surface() {
-    let (root, mut repo) = temp_repo();
-    commit_file(&mut repo, &root, "tracked.txt", "a\n", "base");
+    let (root, repo) = temp_repo();
+    commit_file(&repo, &root, "tracked.txt", "a\n", "base");
     fs::write(root.join("loose.txt"), "b\n").unwrap();
     assert!(file_blame(&repo, "loose.txt").unwrap().is_empty());
     assert_eq!(file_blame(&repo, "tracked.txt").unwrap().len(), 1);
@@ -550,14 +487,8 @@ fn porcelain_status_splits_staged_unstaged_renames_and_conflicts() {
 
 #[test]
 fn staged_rename_is_listed_under_its_new_name() {
-    let (root, mut repo) = temp_repo();
-    commit_file(
-        &mut repo,
-        &root,
-        "old.txt",
-        "one\ntwo\nthree\nfour\n",
-        "base",
-    );
+    let (root, repo) = temp_repo();
+    commit_file(&repo, &root, "old.txt", "one\ntwo\nthree\nfour\n", "base");
     run_git_stdout(&root, &["mv", "old.txt", "new.txt"]).unwrap();
     let status = status_from_git(&root).unwrap();
     assert_eq!(status.staged.len(), 1, "{:?}", status.staged);
@@ -635,10 +566,10 @@ fn keeping_both_sides_drops_markers_and_the_diff3_base() {
 
 #[test]
 fn history_pages_are_contiguous_whether_or_not_the_stream_is_reused() {
-    let (root, mut repo) = temp_repo();
+    let (root, repo) = temp_repo();
     for n in 0..10 {
         commit_file(
-            &mut repo,
+            &repo,
             &root,
             "file.txt",
             &format!("{n}\n"),
@@ -690,7 +621,7 @@ fn bench_history_pages() {
     let started = std::time::Instant::now();
     for _ in 0..50 {
         let repo = open_at(Path::new(&path)).unwrap();
-        let _ = repo.head().unwrap().target();
+        let _ = head_oid(&repo).unwrap();
     }
     println!("open + head: {:?} each", started.elapsed() / 50);
 }
@@ -712,21 +643,25 @@ fn follow_log_parser_tracks_names_across_records() {
 /// A clean/smudge pair standing in for Git LFS: the index stores `CLEAN` and the
 /// working tree reads `smudged`, so either side shows whether git ran the filter.
 fn use_test_filter(repo: &Repository, root: &Path) {
-    let mut config = repo.config().unwrap();
-    config
-        .set_str(
+    run_git_stdout(
+        repo.workdir(),
+        &[
+            "config",
             "filter.probe.clean",
             "sed -e s/plain/CLEAN/ -e s/smudged/CLEAN/",
-        )
-        .unwrap();
-    config
-        .set_str("filter.probe.smudge", "sed s/CLEAN/smudged/")
-        .unwrap();
+        ],
+    )
+    .unwrap();
+    run_git_stdout(
+        repo.workdir(),
+        &["config", "filter.probe.smudge", "sed s/CLEAN/smudged/"],
+    )
+    .unwrap();
     fs::write(root.join(".gitattributes"), "*.dat filter=probe\n").unwrap();
 }
 
 fn blob_text(repo: &Repository, spec: &str) -> String {
-    let bytes = run_git_stdout(repo.workdir().unwrap(), &["cat-file", "blob", spec]).unwrap();
+    let bytes = run_git_stdout(repo.workdir(), &["cat-file", "blob", spec]).unwrap();
     String::from_utf8_lossy(&bytes).replace("\r\n", "\n")
 }
 
@@ -751,21 +686,15 @@ fn staging_and_committing_run_the_clean_filter() {
 
 #[test]
 fn checkout_runs_the_smudge_filter() {
-    let (root, mut repo) = temp_repo();
-    commit_file(&mut repo, &root, "readme.txt", "base\n", "base");
+    let (root, repo) = temp_repo();
+    commit_file(&repo, &root, "readme.txt", "base\n", "base");
     create_branch(&repo, "assets", true, None).unwrap();
     use_test_filter(&repo, &root);
     fs::write(root.join("asset.dat"), "plain\n").unwrap();
     stage_paths(&repo, &[".gitattributes".into(), "asset.dat".into()]).unwrap();
     commit(&repo, "add asset", false).unwrap();
 
-    let main = repo
-        .branches(Some(BranchType::Local))
-        .unwrap()
-        .flatten()
-        .map(|(branch, _)| branch.name().unwrap().unwrap().to_string())
-        .find(|name| name != "assets")
-        .unwrap();
+    let main = other_branch(&repo, "assets");
     checkout_branch(&repo, &main).unwrap();
     assert!(!root.join("asset.dat").exists());
     checkout_branch(&repo, "assets").unwrap();
@@ -797,8 +726,8 @@ fn stash_round_trip_runs_both_filters() {
 #[test]
 fn stashing_nothing_is_an_error_and_paths_limit_the_stash() {
     let (root, mut repo) = temp_repo();
-    commit_file(&mut repo, &root, "a.txt", "a\n", "a");
-    commit_file(&mut repo, &root, "b.txt", "b\n", "b");
+    commit_file(&repo, &root, "a.txt", "a\n", "a");
+    commit_file(&repo, &root, "b.txt", "b\n", "b");
     assert!(stash_save(&mut repo, "empty", false, &[]).is_err());
 
     fs::write(root.join("a.txt"), "a2\n").unwrap();
@@ -820,29 +749,24 @@ fn commit_runs_the_pre_commit_hook() {
     stage_paths(&repo, &["a.txt".into()]).unwrap();
     let err = commit(&repo, "first", false).unwrap_err().to_string();
     assert!(err.contains("blocked-by-hook"), "{err}");
-    assert!(repo.head().is_err());
+    assert!(head_oid(&repo).is_none());
     let _ = fs::remove_dir_all(&root);
 }
 
 #[test]
 fn committing_during_a_merge_records_both_parents() {
     let (root, mut repo) = temp_repo();
-    commit_file(&mut repo, &root, "file.txt", "base\n", "base");
-    repo.branch(
-        "other",
-        &repo.head().unwrap().peel_to_commit().unwrap(),
-        false,
-    )
-    .unwrap();
-    commit_file(&mut repo, &root, "file.txt", "left\n", "left");
-    let incoming = repo.head().unwrap().target().unwrap().to_string();
+    commit_file(&repo, &root, "file.txt", "base\n", "base");
+    branch_here(&repo, "other");
+    commit_file(&repo, &root, "file.txt", "left\n", "left");
+    let incoming = head_id(&repo);
     checkout_branch(&repo, "other").unwrap();
-    commit_file(&mut repo, &root, "file.txt", "right\n", "right");
+    commit_file(&repo, &root, "file.txt", "right\n", "right");
     assert!(merge_ref(&mut repo, &incoming).is_err());
     resolve_conflict(&mut repo, "file.txt", "ours").unwrap();
 
     commit(&repo, "merge left", false).unwrap();
-    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    let head = commit_info(&repo, "HEAD").unwrap();
     assert_eq!(head.parent_count(), 2);
     assert_eq!(head.summary(), Some("merge left"));
     assert!(git_operation(&repo).is_none());
@@ -852,7 +776,7 @@ fn committing_during_a_merge_records_both_parents() {
 #[test]
 fn continuing_a_cherry_pick_with_an_edited_message_keeps_the_author() {
     let (root, mut repo) = temp_repo();
-    commit_file(&mut repo, &root, "file.txt", "base\n", "base");
+    commit_file(&repo, &root, "file.txt", "base\n", "base");
     create_branch(&repo, "side", true, None).unwrap();
     fs::write(root.join("file.txt"), "side\n").unwrap();
     stage_paths(&repo, &["file.txt".into()]).unwrap();
@@ -869,16 +793,10 @@ fn continuing_a_cherry_pick_with_an_edited_message_keeps_the_author() {
         b"side change",
     )
     .unwrap();
-    let picked = repo.head().unwrap().target().unwrap().to_string();
-    let main = repo
-        .branches(Some(BranchType::Local))
-        .unwrap()
-        .flatten()
-        .map(|(branch, _)| branch.name().unwrap().unwrap().to_string())
-        .find(|name| name != "side")
-        .unwrap();
+    let picked = head_id(&repo);
+    let main = other_branch(&repo, "side");
     checkout_branch(&repo, &main).unwrap();
-    commit_file(&mut repo, &root, "file.txt", "main\n", "main change");
+    commit_file(&repo, &root, "file.txt", "main\n", "main change");
 
     assert!(cherry_pick_commit(&mut repo, &picked).is_err());
     assert_eq!(
@@ -889,27 +807,21 @@ fn continuing_a_cherry_pick_with_an_edited_message_keeps_the_author() {
     operation_continue(&mut repo, Some("side change, reworded")).unwrap();
 
     assert!(git_operation(&repo).is_none());
-    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    let head = commit_info(&repo, "HEAD").unwrap();
     assert_eq!(head.summary(), Some("side change, reworded"));
-    assert_eq!(head.author().name(), Some("Side Author"));
+    assert_eq!(head.author_name, "Side Author");
     let _ = fs::remove_dir_all(&root);
 }
 
 #[test]
 fn continuing_a_rebase_with_an_edited_message_uses_it() {
     let (root, mut repo) = temp_repo();
-    commit_file(&mut repo, &root, "file.txt", "base\n", "base");
+    commit_file(&repo, &root, "file.txt", "base\n", "base");
     create_branch(&repo, "feature", true, None).unwrap();
-    commit_file(&mut repo, &root, "file.txt", "feature\n", "feature change");
-    let main = repo
-        .branches(Some(BranchType::Local))
-        .unwrap()
-        .flatten()
-        .map(|(branch, _)| branch.name().unwrap().unwrap().to_string())
-        .find(|name| name != "feature")
-        .unwrap();
+    commit_file(&repo, &root, "file.txt", "feature\n", "feature change");
+    let main = other_branch(&repo, "feature");
     checkout_branch(&repo, &main).unwrap();
-    commit_file(&mut repo, &root, "file.txt", "main\n", "main change");
+    commit_file(&repo, &root, "file.txt", "main\n", "main change");
     checkout_branch(&repo, "feature").unwrap();
 
     assert!(rebase_onto(&mut repo, &main).is_err());
@@ -928,10 +840,10 @@ fn continuing_a_rebase_with_an_edited_message_uses_it() {
 #[test]
 fn conflicts_from_a_stash_apply_can_be_resolved() {
     let (root, mut repo) = temp_repo();
-    commit_file(&mut repo, &root, "file.txt", "base\n", "base");
+    commit_file(&repo, &root, "file.txt", "base\n", "base");
     fs::write(root.join("file.txt"), "stashed\n").unwrap();
     stash_save(&mut repo, "wip", false, &[]).unwrap();
-    commit_file(&mut repo, &root, "file.txt", "committed\n", "move on");
+    commit_file(&repo, &root, "file.txt", "committed\n", "move on");
     let id = list_stashes(&mut repo).unwrap()[0].id.clone();
     assert!(stash_apply(&mut repo, &id).is_err());
     assert!(git_operation(&repo).is_none());
@@ -942,8 +854,8 @@ fn conflicts_from_a_stash_apply_can_be_resolved() {
 
 #[test]
 fn cancelling_a_clone_stops_git_and_removes_the_folder() {
-    let (root, mut repo) = temp_repo();
-    commit_file(&mut repo, &root, "a.txt", "a\n", "a");
+    let (root, repo) = temp_repo();
+    commit_file(&repo, &root, "a.txt", "a\n", "a");
     let dest = PathBuf::from(format!("{}-clone", root.display()));
     let _ = fs::remove_dir_all(&dest);
     let result = with_cancel(Some("test-cancel-clone"), || {
@@ -958,8 +870,8 @@ fn cancelling_a_clone_stops_git_and_removes_the_folder() {
 
 #[test]
 fn pull_and_push_follow_an_upstream_with_a_different_name() {
-    let (origin_root, mut origin) = temp_repo();
-    commit_file(&mut origin, &origin_root, "a.txt", "a\n", "base");
+    let (origin_root, origin) = temp_repo();
+    commit_file(&origin, &origin_root, "a.txt", "a\n", "base");
     create_branch(&origin, "feat-x", false, None).unwrap();
 
     let local_root = PathBuf::from(format!("{}-local", origin_root.display()));
@@ -971,41 +883,29 @@ fn pull_and_push_follow_an_upstream_with_a_different_name() {
     )
     .unwrap();
     let mut local = open_at(&local_root).unwrap();
-    {
-        let mut config = local.config().unwrap();
-        config.set_str("user.name", "Rebasely Test").unwrap();
-        config.set_str("user.email", "test@example.com").unwrap();
-    }
+    run_git_stdout(&local_root, &["config", "user.name", "Rebasely Test"]).unwrap();
+    run_git_stdout(&local_root, &["config", "user.email", "test@example.com"]).unwrap();
     run_git_stdout(
         &local_root,
         &["switch", "-c", "feature", "--track", "origin/feat-x"],
     )
     .unwrap();
 
-    origin.set_head("refs/heads/feat-x").unwrap();
-    origin
-        .checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
-        .unwrap();
-    commit_file(&mut origin, &origin_root, "b.txt", "b\n", "upstream change");
-    let upstream_tip = origin.head().unwrap().target().unwrap();
-    let main = origin
-        .branches(Some(BranchType::Local))
-        .unwrap()
-        .flatten()
-        .map(|(branch, _)| branch.name().unwrap().unwrap().to_string())
-        .find(|name| name != "feat-x")
-        .unwrap();
+    switch_to(&origin, "feat-x");
+    commit_file(&origin, &origin_root, "b.txt", "b\n", "upstream change");
+    let upstream_tip = head_id(&origin);
+    let main = other_branch(&origin, "feat-x");
     checkout_branch(&origin, &main).unwrap();
 
     pull_remote(&mut local, Some("origin"), false, |_| {}).unwrap();
-    assert_eq!(local.head().unwrap().target().unwrap(), upstream_tip);
+    assert_eq!(head_id(&local), upstream_tip);
 
-    commit_file(&mut local, &local_root, "c.txt", "c\n", "local change");
-    let local_tip = local.head().unwrap().target().unwrap();
+    commit_file(&local, &local_root, "c.txt", "c\n", "local change");
+    let local_tip = head_id(&local);
     push_remote(&mut local, Some("origin"), false, false, |_| {}).unwrap();
-    let pushed = origin.find_branch("feat-x", BranchType::Local).unwrap();
-    assert_eq!(pushed.get().target().unwrap(), local_tip);
-    assert!(origin.find_branch("feature", BranchType::Local).is_err());
+    let pushed = run_git_stdout(origin.workdir(), &["rev-parse", "refs/heads/feat-x"]).unwrap();
+    assert_eq!(String::from_utf8_lossy(&pushed).trim(), local_tip);
+    assert!(!ref_exists(&origin, "refs/heads/feature"));
 
     let _ = fs::remove_dir_all(&local_root);
     let _ = fs::remove_dir_all(&origin_root);
@@ -1013,8 +913,8 @@ fn pull_and_push_follow_an_upstream_with_a_different_name() {
 
 #[test]
 fn ignoring_appends_new_patterns_once_and_hides_the_files() {
-    let (root, mut repo) = temp_repo();
-    commit_file(&mut repo, &root, ".gitignore", "target/\r\n", "ignore");
+    let (root, repo) = temp_repo();
+    commit_file(&repo, &root, ".gitignore", "target/\r\n", "ignore");
     fs::write(root.join("debug.log"), "x\n").unwrap();
     fs::write(root.join("keep.txt"), "x\n").unwrap();
     ignore_patterns(&repo, &["*.log".into(), "target/".into(), "*.log".into()]).unwrap();
@@ -1067,7 +967,7 @@ fn pick_lines(
 #[test]
 fn staging_selected_lines_leaves_the_rest_unstaged() {
     let (root, mut repo) = temp_repo();
-    commit_file(&mut repo, &root, "file.txt", &numbered_lines(20), "base");
+    commit_file(&repo, &root, "file.txt", &numbered_lines(20), "base");
     let edited = numbered_lines(20)
         .replace("line 2\n", "line two\nline two and a half\n")
         .replace("line 15\n", "line fifteen\n");
@@ -1088,7 +988,7 @@ fn staging_selected_lines_leaves_the_rest_unstaged() {
 #[test]
 fn unstaging_and_discarding_selected_lines_touch_only_those_lines() {
     let (root, mut repo) = temp_repo();
-    commit_file(&mut repo, &root, "file.txt", &numbered_lines(20), "base");
+    commit_file(&repo, &root, "file.txt", &numbered_lines(20), "base");
     let edited = numbered_lines(20)
         .replace("line 2\n", "line two\n")
         .replace("line 15\n", "line fifteen\n");
@@ -1116,7 +1016,7 @@ fn unstaging_and_discarding_selected_lines_touch_only_those_lines() {
 #[test]
 fn part_of_a_new_file_can_be_staged() {
     let (root, mut repo) = temp_repo();
-    commit_file(&mut repo, &root, "base.txt", "base\n", "base");
+    commit_file(&repo, &root, "base.txt", "base\n", "base");
     fs::write(root.join("new.txt"), "alpha\nbeta\ngamma\n").unwrap();
     let diff = workdir_diff(&repo, "new.txt", false, false).unwrap();
     assert_eq!(diff.lines[0].kind, "hunk");
@@ -1131,7 +1031,7 @@ fn part_of_a_new_file_can_be_staged() {
 #[test]
 fn a_last_line_without_a_newline_can_be_staged() {
     let (root, mut repo) = temp_repo();
-    commit_file(&mut repo, &root, "file.txt", "one\ntwo", "base");
+    commit_file(&repo, &root, "file.txt", "one\ntwo", "base");
     fs::write(root.join("file.txt"), "one\nTWO").unwrap();
     let picked = pick_lines(&repo, "file.txt", false, |_| true);
     apply_lines(&mut repo, "file.txt", false, "stage", &picked).unwrap();
@@ -1142,10 +1042,7 @@ fn a_last_line_without_a_newline_can_be_staged() {
 #[test]
 fn line_actions_work_on_crlf_working_trees() {
     let (root, mut repo) = temp_repo();
-    repo.config()
-        .unwrap()
-        .set_bool("core.autocrlf", true)
-        .unwrap();
+    run_git_stdout(repo.workdir(), &["config", "core.autocrlf", "true"]).unwrap();
     fs::write(
         root.join("file.txt"),
         numbered_lines(12).replace('\n', "\r\n"),
@@ -1182,9 +1079,9 @@ fn line_actions_work_on_crlf_working_trees() {
 
 #[test]
 fn hiding_whitespace_drops_indentation_only_changes() {
-    let (root, mut repo) = temp_repo();
+    let (root, repo) = temp_repo();
     commit_file(
-        &mut repo,
+        &repo,
         &root,
         "file.txt",
         "fn main() {\nbody();\n}\n",
@@ -1204,7 +1101,7 @@ fn hiding_whitespace_drops_indentation_only_changes() {
 #[test]
 fn stale_line_selections_are_rejected() {
     let (root, mut repo) = temp_repo();
-    commit_file(&mut repo, &root, "file.txt", "one\ntwo\n", "base");
+    commit_file(&repo, &root, "file.txt", "one\ntwo\n", "base");
     fs::write(root.join("file.txt"), "one\nTWO\n").unwrap();
     let stale = vec![LineRef {
         old: Some(40),
@@ -1242,7 +1139,7 @@ fn image_pairs_read_each_side_and_flag_lfs_pointers() {
 
     stage_paths(&repo, &["icon.png".into()]).unwrap();
     commit(&repo, "update icon", false).unwrap();
-    let head = repo.head().unwrap().target().unwrap().to_string();
+    let head = head_id(&repo);
     let source = FileSource::Commit {
         oid: head,
         path: "icon.png".into(),
@@ -1270,11 +1167,11 @@ fn image_pairs_read_each_side_and_flag_lfs_pointers() {
 
 #[test]
 fn difftool_arguments_mirror_each_diff_view() {
-    let (root, mut repo) = temp_repo();
-    commit_file(&mut repo, &root, "a.txt", "a\n", "root");
-    let root_commit = repo.head().unwrap().target().unwrap().to_string();
-    commit_file(&mut repo, &root, "a.txt", "b\n", "second");
-    let head = repo.head().unwrap().target().unwrap().to_string();
+    let (root, repo) = temp_repo();
+    commit_file(&repo, &root, "a.txt", "a\n", "root");
+    let root_commit = head_id(&repo);
+    commit_file(&repo, &root, "a.txt", "b\n", "second");
+    let head = head_id(&repo);
 
     let staged = difftool_args(
         &repo,
@@ -1330,8 +1227,8 @@ fn difftool_arguments_mirror_each_diff_view() {
 
 #[test]
 fn fetch_can_prune_and_remote_tags_can_be_deleted() {
-    let (origin_root, mut origin) = temp_repo();
-    commit_file(&mut origin, &origin_root, "a.txt", "a\n", "base");
+    let (origin_root, origin) = temp_repo();
+    commit_file(&origin, &origin_root, "a.txt", "a\n", "base");
     create_branch(&origin, "gone", false, None).unwrap();
     create_tag(&origin, "v1", None, None).unwrap();
 
@@ -1344,26 +1241,20 @@ fn fetch_can_prune_and_remote_tags_can_be_deleted() {
     )
     .unwrap();
     let mut local = open_at(&local_root).unwrap();
-    assert!(local.find_branch("origin/gone", BranchType::Remote).is_ok());
+    assert!(ref_exists(&local, "refs/remotes/origin/gone"));
 
-    origin
-        .find_branch("gone", BranchType::Local)
-        .unwrap()
-        .delete()
-        .unwrap();
+    run_git_stdout(origin.workdir(), &["branch", "-D", "gone"]).unwrap();
     with_background(true, || {
         fetch_remote(&mut local, Some("origin"), false, false, |_| {})
     })
     .unwrap();
-    assert!(local.find_branch("origin/gone", BranchType::Remote).is_ok());
+    assert!(ref_exists(&local, "refs/remotes/origin/gone"));
     fetch_remote(&mut local, Some("origin"), false, true, |_| {}).unwrap();
-    assert!(local
-        .find_branch("origin/gone", BranchType::Remote)
-        .is_err());
+    assert!(!ref_exists(&local, "refs/remotes/origin/gone"));
 
     delete_remote_tag(&mut local, "origin", "v1", |_| {}).unwrap();
-    assert!(origin.find_reference("refs/tags/v1").is_err());
-    assert!(local.find_reference("refs/tags/v1").is_ok());
+    assert!(!ref_exists(&origin, "refs/tags/v1"));
+    assert!(ref_exists(&local, "refs/tags/v1"));
 
     let _ = fs::remove_dir_all(&local_root);
     let _ = fs::remove_dir_all(&origin_root);
@@ -1396,7 +1287,7 @@ fn undoing_commits_keeps_their_changes_staged_and_shows_in_the_reflog() {
 
     let undone = undo_last_commit(&mut repo).unwrap();
     assert_eq!(undone.message, "first");
-    assert!(repo.head().is_err());
+    assert!(head_oid(&repo).is_none());
     assert_eq!(undone.snapshot.status.staged.len(), 1);
     let _ = fs::remove_dir_all(&root);
 }
@@ -1486,10 +1377,10 @@ fn submodule_status_lines_are_parsed() {
 
 #[test]
 fn submodules_are_listed_and_updated() {
-    let (sub_root, mut sub) = temp_repo();
-    commit_file(&mut sub, &sub_root, "lib.txt", "lib\n", "lib");
+    let (sub_root, sub) = temp_repo();
+    commit_file(&sub, &sub_root, "lib.txt", "lib\n", "lib");
     let (root, mut repo) = temp_repo();
-    commit_file(&mut repo, &root, "a.txt", "a\n", "base");
+    commit_file(&repo, &root, "a.txt", "a\n", "base");
     run_git_stdout(
         &root,
         &[
@@ -1526,8 +1417,8 @@ fn submodules_are_listed_and_updated() {
 
 #[test]
 fn worktrees_can_be_added_listed_and_removed() {
-    let (root, mut repo) = temp_repo();
-    commit_file(&mut repo, &root, "a.txt", "a\n", "base");
+    let (root, repo) = temp_repo();
+    commit_file(&repo, &root, "a.txt", "a\n", "base");
     let tree = PathBuf::from(format!("{}-wt", root.display()));
     let _ = fs::remove_dir_all(&tree);
 
@@ -1551,32 +1442,40 @@ fn worktrees_can_be_added_listed_and_removed() {
 
 #[test]
 fn tags_go_through_git_and_reject_bad_names() {
-    let (root, mut repo) = temp_repo();
-    commit_file(&mut repo, &root, "a.txt", "a\n", "a");
+    let (root, repo) = temp_repo();
+    commit_file(&repo, &root, "a.txt", "a\n", "a");
     create_tag(&repo, "v1.0", Some("first release"), None).unwrap();
     create_tag(&repo, "light", None, None).unwrap();
     assert!(create_tag(&repo, "bad name", None, None).is_err());
     assert!(create_tag(&repo, "bad..name", None, None).is_err());
-    let annotated = repo.revparse_single("v1.0").unwrap();
-    assert_eq!(annotated.kind(), Some(ObjectType::Tag));
-    assert_eq!(
-        annotated.as_tag().unwrap().message(),
-        Some("first release\n")
+    let kind = run_git_stdout(repo.workdir(), &["cat-file", "-t", "v1.0"]).unwrap();
+    assert_eq!(String::from_utf8_lossy(&kind).trim(), "tag");
+    let body = run_git_stdout(repo.workdir(), &["cat-file", "-p", "v1.0"]).unwrap();
+    let text = String::from_utf8_lossy(&body);
+    assert!(
+        text.contains("\n\nfirst release\n") || text.trim_end().ends_with("first release"),
+        "{text}"
     );
     let _ = fs::remove_dir_all(&root);
 }
 
 #[test]
 fn directory_listing_grays_ignored_paths_but_not_tracked_ones() {
-    let (root, mut repo) = temp_repo();
+    let (root, repo) = temp_repo();
     commit_file(
-        &mut repo,
+        &repo,
         &root,
         ".gitignore",
         "secret.txt\nbuild/\n*.log\n",
         "ignore",
     );
-    commit_file(&mut repo, &root, "kept.log", "tracked\n", "track a matching name");
+    commit_file(
+        &repo,
+        &root,
+        "kept.log",
+        "tracked\n",
+        "track a matching name",
+    );
     fs::write(root.join("secret.txt"), "nope\n").unwrap();
     fs::write(root.join("notes.txt"), "yes\n").unwrap();
     fs::write(root.join("debug.log"), "log\n").unwrap();
@@ -1609,8 +1508,8 @@ fn directory_listing_grays_ignored_paths_but_not_tracked_ones() {
 
 #[test]
 fn ignored_directory_children_stay_ignored_unless_reincluded() {
-    let (root, mut repo) = temp_repo();
-    commit_file(&mut repo, &root, "keep.txt", "base\n", "base");
+    let (root, repo) = temp_repo();
+    commit_file(&repo, &root, "keep.txt", "base\n", "base");
     fs::write(
         root.join(".gitignore"),
         ".vs\nbuild/\n!build/keep.txt\nsecret/*\n!secret/keep.txt\n",
@@ -1639,7 +1538,11 @@ fn ignored_directory_children_stay_ignored_unless_reincluded() {
     );
     let build = list_directory(&repo, "build").unwrap();
     let flag = |items: &[DirEntry], name: &str| {
-        items.iter().find(|entry| entry.name == name).unwrap().ignored
+        items
+            .iter()
+            .find(|entry| entry.name == name)
+            .unwrap()
+            .ignored
     };
     assert!(flag(&build, "out.txt"));
     assert!(flag(&build, "keep.txt"), "{build:?}");
@@ -1651,14 +1554,11 @@ fn ignored_directory_children_stay_ignored_unless_reincluded() {
 
 #[test]
 fn unreal_style_ignore_recurses_into_excluded_directories() {
-    let (root, mut repo) = temp_repo();
-    commit_file(&mut repo, &root, "keep.txt", "base\n", "base");
+    let (root, repo) = temp_repo();
+    commit_file(&repo, &root, "keep.txt", "base\n", "base");
     fs::create_dir_all(root.join(".vs")).unwrap();
     fs::write(root.join(".vs").join("tracked.txt"), "forced\n").unwrap();
-    let mut index = repo.index().unwrap();
-    index.add_path(Path::new(".vs/tracked.txt")).unwrap();
-    index.write().unwrap();
-    drop(index);
+    run_git_stdout(repo.workdir(), &["add", "--", ".vs/tracked.txt"]).unwrap();
     fs::write(root.join(".gitignore"), "*\n!*/\n!*.cpp\n.vs\n").unwrap();
     fs::create_dir_all(root.join(".vs").join("ProjectEvaluation")).unwrap();
     fs::write(
@@ -1678,7 +1578,11 @@ fn unreal_style_ignore_recurses_into_excluded_directories() {
 
     let root_entries = list_directory(&repo, "").unwrap();
     let flag = |items: &[DirEntry], name: &str| {
-        items.iter().find(|entry| entry.name == name).unwrap().ignored
+        items
+            .iter()
+            .find(|entry| entry.name == name)
+            .unwrap()
+            .ignored
     };
     assert!(flag(&root_entries, ".vs"), "{root_entries:?}");
     assert!(!flag(&root_entries, "Engine"), "{root_entries:?}");

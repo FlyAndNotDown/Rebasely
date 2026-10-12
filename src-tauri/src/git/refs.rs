@@ -11,51 +11,44 @@ pub(super) fn branch_list(
     current: Option<String>,
     is_detached: bool,
 ) -> AppResult<BranchList> {
+    let stdout = run_git_stdout(
+        workdir(repo)?,
+        &[
+            "-c",
+            "core.quotePath=false",
+            "for-each-ref",
+            "--format=%(refname:short)%00%(upstream:short)%00%(HEAD)",
+            "refs/heads",
+        ],
+    )?;
     let mut local = Vec::new();
-    for item in repo.branches(Some(BranchType::Local))? {
-        let (branch, _) = item?;
-        let name = branch.name()?.unwrap_or_default().to_string();
-        let upstream = branch
-            .upstream()
-            .ok()
-            .and_then(|up| up.name().ok().flatten().map(|n| n.to_string()));
+    for line in String::from_utf8_lossy(&stdout).lines() {
+        let mut fields = line.split('\0');
+        let name = fields.next().unwrap_or("").trim();
+        if name.is_empty() {
+            continue;
+        }
+        let upstream = fields.next().unwrap_or("").trim();
+        let head = fields.next().unwrap_or("").trim();
         local.push(BranchInfo {
-            is_head: branch.is_head(),
+            is_head: head == "*",
             is_remote: false,
-            name,
-            upstream,
+            name: name.to_string(),
+            upstream: if upstream.is_empty() {
+                None
+            } else {
+                Some(upstream.to_string())
+            },
         });
     }
     local.sort_by_cached_key(|branch| branch.name.to_lowercase());
 
     let mut remote = Vec::new();
     if include_remote {
-        let remote_names = configured_remote_names(repo);
-        remote = match workdir(repo)
-            .ok()
-            .and_then(|root| remote_branches_from_git(root, &remote_names).ok())
-        {
-            Some(items) => items,
-            None => {
-                let mut items = Vec::new();
-                for item in repo.branches(Some(BranchType::Remote))? {
-                    let (branch, _) = item?;
-                    let full = branch.get().name().unwrap_or_default();
-                    let name = branch.name()?.unwrap_or_default();
-                    let Some(name) = remote_tracking_branch_name(full, name, &remote_names) else {
-                        continue;
-                    };
-                    items.push(BranchInfo {
-                        is_head: false,
-                        is_remote: true,
-                        name,
-                        upstream: None,
-                    });
-                }
-                items.sort_by_cached_key(|branch| branch.name.to_lowercase());
-                items
-            }
-        };
+        let names = configured_remote_names(repo);
+        let mut items = remote_branches_from_git(workdir(repo)?, &names)?;
+        items.sort_by_cached_key(|branch| branch.name.to_lowercase());
+        remote = items;
     }
 
     Ok(BranchList {
@@ -68,27 +61,31 @@ pub(super) fn branch_list(
 }
 
 pub(super) fn list_tags(repo: &Repository) -> AppResult<Vec<TagInfo>> {
+    let stdout = run_git_stdout(
+        workdir(repo)?,
+        &[
+            "-c",
+            "core.quotePath=false",
+            "for-each-ref",
+            "--format=%(refname:short)",
+            "refs/tags",
+        ],
+    )?;
     let mut tags = Vec::new();
-    repo.tag_foreach(|_oid, name| {
-        let name = String::from_utf8_lossy(name);
-        if let Some(short) = name.strip_prefix("refs/tags/") {
-            if !short.is_empty() {
-                tags.push(TagInfo {
-                    name: short.to_string(),
-                });
-            }
+    for line in String::from_utf8_lossy(&stdout).lines() {
+        let name = line.trim();
+        if !name.is_empty() {
+            tags.push(TagInfo {
+                name: name.to_string(),
+            });
         }
-        true
-    })?;
+    }
     tags.sort_by_cached_key(|tag| tag.name.to_lowercase());
     Ok(tags)
 }
 
 pub(super) fn configured_remote_names(repo: &Repository) -> Vec<String> {
-    repo.remotes()
-        .ok()
-        .map(|names| names.iter().flatten().map(str::to_string).collect())
-        .unwrap_or_default()
+    remote_names(repo).unwrap_or_default()
 }
 
 pub(super) fn is_remote_branch_name(name: &str, remotes: &[String]) -> bool {
@@ -172,17 +169,18 @@ fn switch(repo: &Repository, args: &[&str]) -> AppResult<()> {
 
 pub fn checkout_branch(repo: &Repository, name: &str) -> AppResult<()> {
     let name = name.trim();
-    if repo.find_branch(name, BranchType::Local).is_ok() {
+    if ref_exists(repo, &format!("refs/heads/{name}")) {
         return switch(repo, &[name]);
     }
 
     let tag_ref = format!("refs/tags/{name}");
-    if repo.find_reference(&tag_ref).is_ok() {
+    if ref_exists(repo, &tag_ref) {
         return switch(repo, &["--detach", &tag_ref]);
     }
 
-    repo.find_branch(name, BranchType::Remote)
-        .map_err(|_| AppError::msg(format!("Branch not found: {name}")))?;
+    if !ref_exists(repo, &format!("refs/remotes/{name}")) {
+        return Err(AppError::msg(format!("Branch not found: {name}")));
+    }
     let local_name = split_remote_branch(repo, name)
         .map(|(_, branch)| branch)
         .unwrap_or_else(|_| {
@@ -194,7 +192,7 @@ pub fn checkout_branch(repo: &Repository, name: &str) -> AppResult<()> {
     if local_name.is_empty() || local_name == "HEAD" {
         return Err(AppError::msg("Cannot check out that remote ref"));
     }
-    if repo.find_branch(&local_name, BranchType::Local).is_ok() {
+    if ref_exists(repo, &format!("refs/heads/{local_name}")) {
         return switch(repo, &[&local_name]);
     }
     let remote_ref = format!("refs/remotes/{name}");
@@ -212,20 +210,20 @@ pub fn create_tag(
         return Err(AppError::msg("Tag name cannot be empty"));
     }
     let target = if let Some(target) = target.map(str::trim).filter(|value| !value.is_empty()) {
-        peel_commit(repo, target)?
+        peel_commit(repo, target)?.id().to_string()
     } else {
-        repo.head()
-            .map_err(|_| AppError::msg("Cannot create a tag before the first commit"))?
-            .peel_to_commit()?
+        head_oid(repo)
+            .ok_or_else(|| AppError::msg("Cannot create a tag before the first commit"))?
     };
-    let target = target.id().to_string();
     let root = workdir(repo)?;
     // `git tag` validates the name and honours tag.gpgSign for annotated tags.
     match message.map(str::trim).filter(|value| !value.is_empty()) {
         Some(message) => {
-            repo.signature().map_err(|_| {
-                AppError::msg("Set user.name and user.email in Git config before tagging")
-            })?;
+            if !identity_configured(repo) {
+                return Err(AppError::msg(
+                    "Set user.name and user.email in Git config before tagging",
+                ));
+            }
             run_git_input(
                 root,
                 &["tag", "--annotate", "--file=-", name, &target],
@@ -244,7 +242,7 @@ pub fn delete_tag(repo: &Repository, name: &str) -> AppResult<()> {
     if name.is_empty() {
         return Err(AppError::msg("Tag name cannot be empty"));
     }
-    repo.tag_delete(name)?;
+    run_git_stdout(workdir(repo)?, &["tag", "-d", name])?;
     Ok(())
 }
 
@@ -278,18 +276,23 @@ pub fn create_branch(
     if name.is_empty() {
         return Err(AppError::msg("Branch name cannot be empty"));
     }
-    {
-        let commit = if let Some(start) = start.map(str::trim).filter(|value| !value.is_empty()) {
-            peel_commit(repo, start)?
-        } else {
-            repo.head()
-                .map_err(|_| AppError::msg("Cannot create a branch before the first commit"))?
-                .peel_to_commit()?
-        };
-        if repo.find_branch(name, BranchType::Local).is_ok() {
-            return Err(AppError::msg(format!("Branch `{name}` already exists")));
-        }
-        repo.branch(name, &commit, false)?;
+    let start = if let Some(start) = start.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(peel_commit(repo, start)?.id().to_string())
+    } else if head_oid(repo).is_none() {
+        return Err(AppError::msg(
+            "Cannot create a branch before the first commit",
+        ));
+    } else {
+        None
+    };
+    if ref_exists(repo, &format!("refs/heads/{name}")) {
+        return Err(AppError::msg(format!("Branch `{name}` already exists")));
+    }
+    let root = workdir(repo)?;
+    if let Some(start) = &start {
+        run_git_stdout(root, &["branch", name, start])?;
+    } else {
+        run_git_stdout(root, &["branch", name])?;
     }
     if switch {
         checkout_branch(repo, name)?;
@@ -298,9 +301,9 @@ pub fn create_branch(
 }
 
 pub(super) fn split_remote_branch(repo: &Repository, name: &str) -> AppResult<(String, String)> {
-    let remotes = repo.remotes()?;
+    let remotes = remote_names(repo)?;
     let mut best: Option<(String, String)> = None;
-    for remote in remotes.iter().flatten() {
+    for remote in &remotes {
         let prefix = format!("{remote}/");
         let Some(rest) = name.strip_prefix(&prefix) else {
             continue;
@@ -325,29 +328,22 @@ pub fn delete_branch(
     if name.is_empty() {
         return Err(AppError::msg("Branch name cannot be empty"));
     }
-    if repo.find_branch(name, BranchType::Local).is_ok() {
-        if repo
-            .head()
-            .ok()
-            .and_then(|head| head.shorthand().map(|current| current == name))
-            .unwrap_or(false)
-        {
+    if ref_exists(repo, &format!("refs/heads/{name}")) {
+        if symbolic_branch(repo).as_deref() == Some(name) {
             return Err(AppError::msg("Cannot delete the current branch"));
         }
         let flag = if force { "-D" } else { "-d" };
         run_git_stdout(workdir(repo)?, &["branch", flag, name])?;
         return snapshot(repo);
     }
-    if repo.find_branch(name, BranchType::Remote).is_ok() {
+    if ref_exists(repo, &format!("refs/remotes/{name}")) {
         let (remote, branch) = split_remote_branch(repo, name)?;
         run_git_ok_progress(
             workdir(repo)?,
             &["push", "--progress", &remote, "--delete", &branch],
             on_progress,
         )?;
-        if let Ok(mut tracking) = repo.find_branch(name, BranchType::Remote) {
-            let _ = tracking.delete();
-        }
+        let _ = run_git_stdout(workdir(repo)?, &["branch", "-dr", name]);
         return snapshot(repo);
     }
     Err(AppError::msg(format!("Branch not found: {name}")))

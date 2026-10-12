@@ -96,21 +96,8 @@ pub(super) fn image_side(path: &str, bytes: &[u8]) -> ImageSide {
     }
 }
 
-fn tree_blob(repo: &Repository, tree: Option<&git2::Tree<'_>>, path: &str) -> Option<Vec<u8>> {
-    let entry = tree?.get_path(Path::new(path)).ok()?;
-    let blob = entry.to_object(repo).ok()?.peel_to_blob().ok()?;
-    Some(blob.content().to_vec())
-}
-
-fn index_blob(repo: &Repository, path: &str) -> Option<Vec<u8>> {
-    let mut index = repo.index().ok()?;
-    index.read(false).ok()?;
-    let entry = index.get_path(Path::new(path), 0)?;
-    Some(repo.find_blob(entry.id).ok()?.content().to_vec())
-}
-
-fn head_tree(repo: &Repository) -> Option<git2::Tree<'_>> {
-    repo.head().ok()?.peel_to_tree().ok()
+fn blob_at(repo: &Repository, spec: &str) -> Option<Vec<u8>> {
+    cat_blob(repo, spec)
 }
 
 pub fn image_pair(repo: &Repository, source: &FileSource) -> AppResult<ImagePair> {
@@ -119,10 +106,9 @@ pub fn image_pair(repo: &Repository, source: &FileSource) -> AppResult<ImagePair
         FileSource::Workdir { path, staged } => {
             let rel = safe_repo_path(path)?;
             if *staged {
-                let head = head_tree(repo);
                 (
-                    side(&rel, tree_blob(repo, head.as_ref(), &rel)),
-                    side(&rel, index_blob(repo, &rel)),
+                    side(&rel, blob_at(repo, &format!("HEAD:{rel}"))),
+                    side(&rel, blob_at(repo, &format!(":0:{rel}"))),
                 )
             } else {
                 let full = ensure_inside_workdir(repo, &rel)?;
@@ -131,7 +117,10 @@ pub fn image_pair(repo: &Repository, source: &FileSource) -> AppResult<ImagePair
                 } else {
                     None
                 };
-                (side(&rel, index_blob(repo, &rel)), side(&rel, current))
+                (
+                    side(&rel, blob_at(repo, &format!(":0:{rel}"))),
+                    side(&rel, current),
+                )
             }
         }
         FileSource::Commit {
@@ -142,11 +131,13 @@ pub fn image_pair(repo: &Repository, source: &FileSource) -> AppResult<ImagePair
             let rel = safe_repo_path(path)?;
             let old = safe_repo_path(old_path.as_deref().unwrap_or(path))?;
             let commit = peel_commit(repo, oid)?;
-            let tree = commit.tree()?;
-            let parent = commit.parent(0).ok().and_then(|parent| parent.tree().ok());
+            let parent = commit.parents.first();
             (
-                side(&old, tree_blob(repo, parent.as_ref(), &old)),
-                side(&rel, tree_blob(repo, Some(&tree), &rel)),
+                side(
+                    &old,
+                    parent.and_then(|parent| blob_at(repo, &format!("{parent}:{old}"))),
+                ),
+                side(&rel, blob_at(repo, &format!("{}:{rel}", commit.id))),
             )
         }
         FileSource::Compare {
@@ -157,24 +148,30 @@ pub fn image_pair(repo: &Repository, source: &FileSource) -> AppResult<ImagePair
         } => {
             let rel = safe_repo_path(path)?;
             let old = safe_repo_path(old_path.as_deref().unwrap_or(path))?;
-            let base_tree = peel_commit(repo, base)?.tree()?;
-            let head_tree = peel_commit(repo, head)?.tree()?;
+            let base = peel_commit(repo, base)?.id().to_string();
+            let head = peel_commit(repo, head)?.id().to_string();
             (
-                side(&old, tree_blob(repo, Some(&base_tree), &old)),
-                side(&rel, tree_blob(repo, Some(&head_tree), &rel)),
+                side(&old, blob_at(repo, &format!("{base}:{old}"))),
+                side(&rel, blob_at(repo, &format!("{head}:{rel}"))),
             )
         }
         FileSource::Stash { oid, path } => {
             let rel = safe_repo_path(path)?;
             let stash = peel_commit(repo, oid)?;
-            let base = stash.parent(0).ok().and_then(|parent| parent.tree().ok());
-            let tree = stash.tree()?;
-            // Untracked files live in the stash's third parent.
-            let untracked = stash.parent(2).ok().and_then(|parent| parent.tree().ok());
-            let current = tree_blob(repo, Some(&tree), &rel)
-                .or_else(|| tree_blob(repo, untracked.as_ref(), &rel));
+            let current = blob_at(repo, &format!("{}:{rel}", stash.id)).or_else(|| {
+                stash
+                    .parents
+                    .get(2)
+                    .and_then(|parent| blob_at(repo, &format!("{parent}:{rel}")))
+            });
             (
-                side(&rel, tree_blob(repo, base.as_ref(), &rel)),
+                side(
+                    &rel,
+                    stash
+                        .parents
+                        .first()
+                        .and_then(|parent| blob_at(repo, &format!("{parent}:{rel}"))),
+                ),
                 side(&rel, current),
             )
         }

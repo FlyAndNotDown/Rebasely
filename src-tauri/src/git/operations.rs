@@ -24,9 +24,8 @@ pub fn reset_to_commit(
     mode: &str,
 ) -> AppResult<WorkspaceSnapshot> {
     let flag = reset_flag(mode)?;
-    let oid = peel_commit(repo, spec)?.id();
-    ensure_reset_target(repo, oid)?;
-    let oid = oid.to_string();
+    let oid = peel_commit(repo, spec)?.id().to_string();
+    ensure_reset_target(repo)?;
     run_git_stdout(workdir(repo)?, &["reset", flag, &oid])?;
     snapshot(repo)
 }
@@ -44,11 +43,11 @@ pub(super) fn reset_flag(mode: &str) -> AppResult<&'static str> {
     }
 }
 
-pub(super) fn ensure_reset_target(repo: &Repository, _target: Oid) -> AppResult<()> {
-    let head = repo
-        .head()
-        .map_err(|_| AppError::msg("Reset needs a checked-out branch"))?;
-    if !head.is_branch() {
+pub(super) fn ensure_reset_target(repo: &Repository) -> AppResult<()> {
+    if head_oid(repo).is_none() {
+        return Err(AppError::msg("Reset needs a checked-out branch"));
+    }
+    if symbolic_branch(repo).is_none() {
         return Err(AppError::msg(
             "Reset is only available on the current local branch",
         ));
@@ -204,10 +203,7 @@ pub(super) fn ensure_merge_ready(repo: &Repository) -> AppResult<()> {
     if git_operation(repo).is_some() {
         return Err(AppError::msg("Finish or abort the current operation first"));
     }
-    let head = repo
-        .head()
-        .map_err(|_| AppError::msg("Merge needs a checked-out branch"))?;
-    if !head.is_branch() {
+    if symbolic_branch(repo).is_none() || head_oid(repo).is_none() {
         return Err(AppError::msg("Merge needs a checked-out branch"));
     }
     ensure_clean_for_replay(repo)
@@ -245,7 +241,7 @@ pub(super) fn commits_to_replay(repo: &Repository, onto: &str) -> AppResult<Vec<
         let summary = commit.summary().unwrap_or("").trim().to_string();
         commits.push(RebaseCommit {
             id: commit.id().to_string(),
-            short_id: short_id(&commit.id().to_string()),
+            short_id: short_id(commit.id()),
             summary,
         });
     }
@@ -513,10 +509,7 @@ pub(super) fn ensure_rebase_ready(repo: &Repository) -> AppResult<()> {
     if git_operation(repo).is_some() {
         return Err(AppError::msg("Finish or abort the current operation first"));
     }
-    let head = repo
-        .head()
-        .map_err(|_| AppError::msg("Rebase needs a checked-out branch"))?;
-    if !head.is_branch() {
+    if symbolic_branch(repo).is_none() || head_oid(repo).is_none() {
         return Err(AppError::msg("Rebase needs a checked-out branch"));
     }
     ensure_clean_for_replay(repo)

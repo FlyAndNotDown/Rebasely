@@ -29,7 +29,7 @@ use session::AppSession;
 use terminal::TerminalOption;
 use watch::WatchState;
 
-fn with_repo<T>(path: &str, f: impl FnOnce(&mut git2::Repository) -> AppResult<T>) -> AppResult<T> {
+fn with_repo<T>(path: &str, f: impl FnOnce(&mut git::Repository) -> AppResult<T>) -> AppResult<T> {
     let path = git::strip_verbatim_prefix(path);
     let mut repo = git::open_at(Path::new(&path))?;
     f(&mut repo)
@@ -50,7 +50,7 @@ where
 async fn with_repo_async<T, F>(path: String, f: F) -> AppResult<T>
 where
     T: Send + 'static,
-    F: FnOnce(&mut git2::Repository) -> AppResult<T> + Send + 'static,
+    F: FnOnce(&mut git::Repository) -> AppResult<T> + Send + 'static,
 {
     blocking(move || with_repo(&path, f)).await
 }

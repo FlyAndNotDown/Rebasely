@@ -1,7 +1,7 @@
 use super::*;
 
 /// git's id for the empty tree, the "parent" of a root commit.
-const EMPTY_TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+pub(super) const EMPTY_TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 
 #[derive(Debug, Clone, Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -11,17 +11,10 @@ pub struct ToolConfig {
 }
 
 fn config_value(repo: Option<&Repository>, key: &str) -> Option<String> {
-    let mut config = match repo {
-        Some(repo) => repo.config().ok()?,
-        None => git2::Config::open_default().ok()?,
-    };
-    config
-        .snapshot()
-        .ok()?
-        .get_string(key)
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
+    match repo {
+        Some(repo) => config_get(repo, key),
+        None => config_get_global(key).or_else(|| config_get_system(key)),
+    }
 }
 
 /// The tools git would use, GUI variants first, as this repository sees them.
@@ -99,20 +92,19 @@ pub fn write_tool_config(config: &ToolConfig) -> AppResult<ToolConfig> {
     if !path.exists() {
         fs::write(&path, "")?;
     }
-    let mut cfg = git2::Config::open(&path)?;
-    assign_tool(&mut cfg, "diff", &config.diff_tool)?;
-    assign_tool(&mut cfg, "merge", &config.merge_tool)?;
+    assign_tool(&path, "diff", &config.diff_tool)?;
+    assign_tool(&path, "merge", &config.merge_tool)?;
     for (name, diff_cmd, merge_cmd) in EDITOR_TOOLS {
         if config.diff_tool.trim() == *name
-            && cfg.get_string(&format!("difftool.{name}.cmd")).is_err()
+            && config_get_file(&path, &format!("difftool.{name}.cmd")).is_none()
         {
-            cfg.set_str(&format!("difftool.{name}.cmd"), diff_cmd)?;
+            config_set_file(&path, &format!("difftool.{name}.cmd"), diff_cmd)?;
         }
         if config.merge_tool.trim() == *name
-            && cfg.get_string(&format!("mergetool.{name}.cmd")).is_err()
+            && config_get_file(&path, &format!("mergetool.{name}.cmd")).is_none()
         {
-            cfg.set_str(&format!("mergetool.{name}.cmd"), merge_cmd)?;
-            cfg.set_bool(&format!("mergetool.{name}.trustExitCode"), true)?;
+            config_set_file(&path, &format!("mergetool.{name}.cmd"), merge_cmd)?;
+            config_set_file(&path, &format!("mergetool.{name}.trustExitCode"), "true")?;
         }
     }
     Ok(read_tool_config(None))
@@ -120,15 +112,15 @@ pub fn write_tool_config(config: &ToolConfig) -> AppResult<ToolConfig> {
 
 /// Writes one tool. A filesystem path becomes a private tool name plus the command
 /// git needs to launch that executable; a bare name is stored as git expects it.
-fn assign_tool(cfg: &mut git2::Config, kind: &str, value: &str) -> AppResult<()> {
+fn assign_tool(path: &Path, kind: &str, value: &str) -> AppResult<()> {
     let value = value.trim().trim_matches('"');
     let key = format!("{kind}.tool");
     if value.is_empty() {
-        let _ = cfg.remove(&key);
+        config_unset_file(path, &key)?;
         return Ok(());
     }
     if !looks_like_path(value) {
-        cfg.set_str(&key, value)?;
+        config_set_file(path, &key, value)?;
         return Ok(());
     }
     let name = if kind == "diff" {
@@ -141,13 +133,14 @@ fn assign_tool(cfg: &mut git2::Config, kind: &str, value: &str) -> AppResult<()>
     } else {
         r#""$BASE" "$LOCAL" "$REMOTE" "$MERGED""#
     };
-    cfg.set_str(&key, name)?;
-    cfg.set_str(
+    config_set_file(path, &key, name)?;
+    config_set_file(
+        path,
         &format!("{kind}tool.{name}.cmd"),
         &format!("\"{value}\" {args}"),
     )?;
     if kind == "merge" {
-        cfg.set_bool(&format!("mergetool.{name}.trustExitCode"), true)?;
+        config_set_file(path, &format!("mergetool.{name}.trustExitCode"), "true")?;
     }
     Ok(())
 }
@@ -398,7 +391,7 @@ pub fn run_mergetool(repo: &mut Repository, path: &str) -> AppResult<WorkspaceSn
 
 #[cfg(test)]
 mod tests {
-    use super::{assign_tool, path_from_cmd, CUSTOM_DIFF};
+    use super::{assign_tool, config_get_file, path_from_cmd, CUSTOM_DIFF};
 
     #[test]
     fn reads_the_executable_out_of_a_tool_command() {
@@ -417,15 +410,19 @@ mod tests {
         let exe = std::env::current_exe().unwrap();
         let exe = exe.to_string_lossy().to_string();
         {
-            let mut cfg = git2::Config::open(&path).unwrap();
-            assign_tool(&mut cfg, "diff", &exe).unwrap();
-            assign_tool(&mut cfg, "merge", "kdiff3").unwrap();
-            assert_eq!(cfg.get_string("diff.tool").unwrap(), CUSTOM_DIFF);
-            assert!(cfg
-                .get_string("difftool.rebasely-diff.cmd")
+            assign_tool(&path, "diff", &exe).unwrap();
+            assign_tool(&path, "merge", "kdiff3").unwrap();
+            assert_eq!(
+                config_get_file(&path, "diff.tool").as_deref(),
+                Some(CUSTOM_DIFF)
+            );
+            assert!(config_get_file(&path, "difftool.rebasely-diff.cmd")
                 .unwrap()
                 .contains(&exe));
-            assert_eq!(cfg.get_string("merge.tool").unwrap(), "kdiff3");
+            assert_eq!(
+                config_get_file(&path, "merge.tool").as_deref(),
+                Some("kdiff3")
+            );
         }
         let _ = std::fs::remove_file(&path);
     }

@@ -31,28 +31,19 @@ fn quote_patch_path(path: &str) -> Vec<u8> {
 /// so the roles swap: unselected additions stay as context and unselected
 /// removals are left out. Either way the preimage matches the file exactly.
 pub(super) fn selected_patch(
-    diff: &git2::Diff<'_>,
+    diff: &ParsedDiff,
     rel: &str,
     lines: &[LineRef],
     reverse: bool,
 ) -> AppResult<Vec<u8>> {
-    let olds: HashSet<u32> = lines.iter().filter_map(|line| line.old).collect();
-    let news: HashSet<u32> = lines.iter().filter_map(|line| line.new).collect();
-    let index = diff
-        .deltas()
-        .position(|delta| {
-            delta
-                .new_file()
-                .path()
-                .or_else(|| delta.old_file().path())
-                .is_some_and(|path| path.to_string_lossy().replace('\\', "/") == rel)
-        })
-        .ok_or_else(|| AppError::msg("This file has no changes to apply"))?;
-    let patch = git2::Patch::from_diff(diff, index)?
-        .ok_or_else(|| AppError::msg("Binary files cannot be applied line by line"))?;
-    if patch.delta().flags().contains(git2::DiffFlags::BINARY) {
+    if diff.binary {
         return Err(AppError::msg("Binary files cannot be applied line by line"));
     }
+    if diff.hunks.is_empty() {
+        return Err(AppError::msg("This file has no changes to apply"));
+    }
+    let olds: HashSet<u32> = lines.iter().filter_map(|line| line.old).collect();
+    let news: HashSet<u32> = lines.iter().filter_map(|line| line.new).collect();
 
     let a = quote_patch_path(&format!("a/{rel}"));
     let b = quote_patch_path(&format!("b/{rel}"));
@@ -69,20 +60,14 @@ pub(super) fn selected_patch(
 
     let mut offset: i64 = 0;
     let mut emitted = 0;
-    for hunk_index in 0..patch.num_hunks() {
-        let (hunk, count) = patch.hunk(hunk_index)?;
+    for hunk in &diff.hunks {
         let mut body = Vec::new();
         let (mut old_count, mut new_count, mut changes) = (0i64, 0i64, 0);
-        for line_index in 0..count {
-            let line = patch.line_in_hunk(hunk_index, line_index)?;
-            let origin = line.origin();
+        for line in &hunk.lines {
+            let origin = line.origin as char;
             let selected = match origin {
-                '+' => line
-                    .new_lineno()
-                    .is_some_and(|number| news.contains(&number)),
-                '-' => line
-                    .old_lineno()
-                    .is_some_and(|number| olds.contains(&number)),
+                '+' => line.new_lineno.is_some_and(|number| news.contains(&number)),
+                '-' => line.old_lineno.is_some_and(|number| olds.contains(&number)),
                 _ => false,
             };
             let mark = match (origin, selected, reverse) {
@@ -104,7 +89,7 @@ pub(super) fn selected_patch(
                 new_count += 1;
             }
             body.push(mark);
-            let content = line.content();
+            let content = line.content.as_slice();
             body.extend_from_slice(content);
             if !content.ends_with(b"\n") {
                 body.extend_from_slice(b"\n\\ No newline at end of file\n");
@@ -114,7 +99,7 @@ pub(super) fn selected_patch(
             continue;
         }
         let (old_start, new_start) = if reverse {
-            let new_start = i64::from(hunk.new_start());
+            let new_start = i64::from(hunk.new_start);
             let mut old_start = new_start - offset;
             if new_count == 0 {
                 old_start += 1;
@@ -124,7 +109,7 @@ pub(super) fn selected_patch(
             }
             (old_start.max(0), new_start)
         } else {
-            let old_start = i64::from(hunk.old_start());
+            let old_start = i64::from(hunk.old_start);
             let mut new_start = old_start + offset;
             if old_count == 0 {
                 new_start += 1;
@@ -174,11 +159,7 @@ pub fn apply_lines(
     };
     let root = workdir_owned(repo)?;
     // A new file needs an index entry before part of it can be staged.
-    let intent_to_add = action == "stage"
-        && repo
-            .status_file(Path::new(&rel))
-            .ok()
-            .is_some_and(is_untracked);
+    let intent_to_add = action == "stage" && is_untracked(repo, &rel);
     if intent_to_add {
         run_git_pathspecs(
             &root,
