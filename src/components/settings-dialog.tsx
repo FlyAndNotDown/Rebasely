@@ -23,6 +23,7 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Label } from "@/components/ui/label";
 import { errorMessage, gitApi } from "@/lib/git";
 import { displayPath } from "@/lib/format";
@@ -71,6 +72,7 @@ function SettingsForm({ onOpenChange }: { onOpenChange: (open: boolean) => void 
   const [tools, setTools] = useState<ToolConfig>({ diffTool: "", mergeTool: "" });
   const [guiTools, setGuiTools] = useState<GuiTool[]>([]);
   const [guiToolsReady, setGuiToolsReady] = useState(false);
+  const [identityReady, setIdentityReady] = useState(false);
   const [autoFetch, setAutoFetch] = useState(String(prefs.autoFetchMinutes));
   const [prune, setPrune] = useState(prefs.fetchPrune);
   const [gitPath, setGitPath] = useState(prefs.gitPath);
@@ -99,6 +101,7 @@ function SettingsForm({ onOpenChange }: { onOpenChange: (open: boolean) => void 
         const visibleTerminals = options.filter((terminal) => terminal.available);
         setName(identity.name);
         setEmail(identity.email);
+        setIdentityReady(true);
         setTerminalId(
           visibleTerminals.some((terminal) => terminal.id === prefs.terminalId) ? prefs.terminalId : "auto",
         );
@@ -221,25 +224,40 @@ function SettingsForm({ onOpenChange }: { onOpenChange: (open: boolean) => void 
                   onAdd={() => void addGitExecutable()}
                 />
                 <FieldGroup title="Identity">
-                  <div className="grid gap-2">
-                    <Label htmlFor="git-name">User name</Label>
-                    <Input
-                      id="git-name"
-                      value={name}
-                      onChange={(event) => setName(event.target.value)}
-                      placeholder="Your name"
-                    />
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="git-email">Email</Label>
-                    <Input
-                      id="git-email"
-                      type="email"
-                      value={email}
-                      onChange={(event) => setEmail(event.target.value)}
-                      placeholder="you@example.com"
-                    />
-                  </div>
+                  {identityReady ? (
+                    <>
+                      <div className="grid gap-2">
+                        <Label htmlFor="git-name">User name</Label>
+                        <Input
+                          id="git-name"
+                          value={name}
+                          onChange={(event) => setName(event.target.value)}
+                          placeholder="Your name"
+                        />
+                      </div>
+                      <div className="grid gap-2">
+                        <Label htmlFor="git-email">Email</Label>
+                        <Input
+                          id="git-email"
+                          type="email"
+                          value={email}
+                          onChange={(event) => setEmail(event.target.value)}
+                          placeholder="you@example.com"
+                        />
+                      </div>
+                    </>
+                  ) : (
+                    <div role="status" aria-label="Loading Git identity" className="grid gap-4">
+                      <div className="grid gap-2">
+                        <Label>User name</Label>
+                        <Skeleton className="h-8 w-full" />
+                      </div>
+                      <div className="grid gap-2">
+                        <Label>Email</Label>
+                        <Skeleton className="h-8 w-full" />
+                      </div>
+                    </div>
+                  )}
                 </FieldGroup>
                 <FieldGroup title="Fetching">
                   <SelectField
@@ -334,7 +352,11 @@ function SettingsForm({ onOpenChange }: { onOpenChange: (open: boolean) => void 
         <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
           Cancel
         </Button>
-        <Button type="button" onClick={() => void save()} disabled={saving}>
+        <Button
+          type="button"
+          onClick={() => void save()}
+          disabled={saving || !executablesReady || !identityReady || !guiToolsReady}
+        >
           Save
         </Button>
       </DialogFooter>
@@ -449,6 +471,13 @@ function GitExecutableSection({
   const unusable = ready && !pathGit && gitPath === "";
   const selectedCustom = extras.find((path) => sameGitPath(path, gitPath));
   const selectedPath = selectedCustom ?? (pathGit && gitPath === "" ? pathGit : null);
+  if (!ready) {
+    return (
+      <FieldGroup title="Executable">
+        <Skeleton className="h-8 w-full" role="status" aria-label="Loading Git executable" />
+      </FieldGroup>
+    );
+  }
   return (
     <FieldGroup title="Executable">
       <DropdownMenu>
@@ -457,14 +486,12 @@ function GitExecutableSection({
             type="button"
             variant="outline"
             className="w-full justify-between font-normal"
-            disabled={!ready || busy}
+            disabled={busy}
           >
             {selectedPath ? (
               <GitExecutableLabel path={selectedPath} pathTag={!selectedCustom} />
             ) : (
-              <span className="truncate text-muted-foreground">
-                {ready ? "Not found" : "Looking for Git on PATH…"}
-              </span>
+              <span className="truncate text-muted-foreground">Not found</span>
             )}
             <ChevronDownIcon />
           </Button>
@@ -606,6 +633,18 @@ function ToolPicker({
   const selectedLabel = custom
     ? "Custom executable"
     : (tools.find((tool) => tool.id === value)?.name ?? (value ? value : "None"));
+
+  if (!ready) {
+    return (
+      <div className="grid gap-2" role="status" aria-label={`Loading ${label}`}>
+        <Label htmlFor={id}>{label}</Label>
+        <div className="flex items-center gap-2">
+          <Skeleton className="h-8 min-w-0 flex-1" />
+          <Skeleton className="size-8 shrink-0" />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="grid gap-2">
