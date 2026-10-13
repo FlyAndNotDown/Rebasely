@@ -32,7 +32,6 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ActivityMeter } from "@/components/activity-meter";
-import { AppMark } from "@/components/app-mark";
 import { AppMenu } from "@/components/app-menu";
 import { AppToolbar } from "@/components/app-toolbar";
 import { WindowControls } from "@/components/window-controls";
@@ -550,11 +549,8 @@ function TabButton({
             type="button"
             onClick={onSelect}
             onAuxClick={handleAuxClick}
-            className="flex min-w-0 flex-1 items-center gap-1.5 px-2"
+            className="flex min-w-0 flex-1 items-center px-2"
           >
-            {tab.kind === "welcome" ? (
-              <AppMark className="size-4" iconClassName="size-4" />
-            ) : null}
             <span className="truncate">{label}</span>
           </button>
           {closable ? (
