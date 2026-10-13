@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ClockIcon, DownloadIcon, FolderOpenIcon, LogOutIcon, MenuIcon, SettingsIcon } from "lucide-react";
 import { CloneRepositoryDialog } from "@/components/lazy-dialogs";
@@ -24,15 +24,39 @@ export function AppMenu() {
     "openPath",
     "setOpenPanel",
   ]);
-  const [open, setOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [tooltipOpen, setTooltipOpen] = useState(false);
   const [cloneOpen, setCloneOpen] = useState(false);
+  const hovering = useRef(false);
+  const menuOpenRef = useRef(false);
   const labels = useMemo(() => disambiguateRepoLabels(recents), [recents]);
 
   return (
     <div className="flex h-full shrink-0 items-center pl-1.5">
-      <DropdownMenu open={open} onOpenChange={setOpen}>
-        <Tooltip open={open ? false : undefined}>
-          <TooltipTrigger asChild>
+      <DropdownMenu
+        open={menuOpen}
+        onOpenChange={(next) => {
+          menuOpenRef.current = next;
+          setMenuOpen(next);
+          if (next || !hovering.current) setTooltipOpen(false);
+        }}
+      >
+        <Tooltip
+          open={menuOpen ? false : tooltipOpen}
+          onOpenChange={(next) => {
+            if (next && (menuOpenRef.current || !hovering.current)) return;
+            setTooltipOpen(next);
+          }}
+        >
+          <TooltipTrigger
+            asChild
+            onPointerEnter={() => {
+              hovering.current = true;
+            }}
+            onPointerLeave={() => {
+              hovering.current = false;
+            }}
+          >
             <DropdownMenuTrigger asChild>
               <Button
                 type="button"
