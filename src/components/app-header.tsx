@@ -255,7 +255,7 @@ export function AppHeader() {
 }
 
 function TabStrip({
-  tabs,
+  tabs: allTabs,
   activeTabId,
   setActiveTab,
   closeTab,
@@ -269,6 +269,10 @@ function TabStrip({
   reorderTabs: (fromId: string, toId: string, place: "before" | "after") => void;
   onOpenWelcome: () => void;
 }) {
+  const tabs = useMemo(
+    () => allTabs.filter((tab) => tab.kind === "repo"),
+    [allTabs],
+  );
   const containerRef = useRef<HTMLDivElement>(null);
   const measureRef = useRef<HTMLDivElement>(null);
   const stripRef = useRef<HTMLDivElement>(null);
@@ -483,13 +487,13 @@ function TabStrip({
               variant="ghost"
               size="icon-sm"
               className="size-8 shrink-0 text-muted-foreground"
-              aria-label="Open welcome tab"
+              aria-label="Welcome"
               onClick={onOpenWelcome}
             >
               <PlusIcon />
             </Button>
           </TooltipTrigger>
-          <TooltipContent>Open welcome tab</TooltipContent>
+          <TooltipContent>Welcome</TooltipContent>
         </Tooltip>
         <div
           className="h-full min-h-9 min-w-8 flex-1"

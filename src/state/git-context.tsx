@@ -23,7 +23,6 @@ import {
   defaultFetchRemote,
   emptySession,
   findRepoTab,
-  insertWelcomeTab,
   lookupHistoryRevs,
   lookupPathList,
   placeOpenedRepoTab,
@@ -266,6 +265,7 @@ function reportError(error: unknown) {
 const NO_COMMITS: CommitSummary[] = [];
 const NO_REVS: string[] = [];
 const NO_STASHES: StashInfo[] = [];
+const WELCOME_TAB: AppTab = { id: WELCOME_TAB_ID, kind: "welcome" };
 
 // The value never changes after mount; components subscribe to the store for
 // the fields they read, so an unrelated update does not re-render them.
@@ -276,7 +276,7 @@ const ActivityContext = createContext<Activity[]>([]);
 
 export function GitProvider({ children }: { children: ReactNode }) {
   const [recents, setRecents] = useState<RecentRepo[]>([]);
-  const [tabs, setTabs] = useState<AppTab[]>([{ id: WELCOME_TAB_ID, kind: "welcome" }]);
+  const [tabs, setTabs] = useState<AppTab[]>([]);
   const [activeTabId, setActiveTabId] = useState(WELCOME_TAB_ID);
   const [sessions, setSessions] = useState<Record<string, RepoSession>>({});
   const [loading, setLoading] = useState(true);
@@ -317,7 +317,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
     setActiveTabId(next);
   }, []);
 
-  const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? tabs[0];
+  const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? WELCOME_TAB;
   const session = activeTab.kind === "repo" ? sessions[activeTab.id] : undefined;
 
   const syncTabMeta = useCallback(
@@ -407,11 +407,8 @@ export function GitProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    // The welcome tab is only restored when it was focused, or when nothing else is open.
-    if (nextTabs.length === 0 || session.active === "welcome") {
-      nextTabs.push({ id: WELCOME_TAB_ID, kind: "welcome" });
-    }
-    if (session.active === "welcome" || nextTabs.every((tab) => tab.kind !== "repo")) {
+    // Welcome is the page behind the tabs, not a tab. Show it when it was focused, or when nothing is open.
+    if (session.active === "welcome" || nextTabs.length === 0) {
       activeId = WELCOME_TAB_ID;
     } else if (!activeId) {
       activeId = nextTabs.find((tab) => tab.kind === "repo")?.id ?? WELCOME_TAB_ID;
@@ -614,13 +611,10 @@ export function GitProvider({ children }: { children: ReactNode }) {
     void hydrateRepo(activeTabId);
   }, [activeTabId, hydrateRepo, loading]);
 
-  const openPath = useCallback(async (
-    path: string,
-    replaceWelcome = activeTabIdRef.current === WELCOME_TAB_ID,
-  ) => {
+  const openPath = useCallback(async (path: string) => {
     const existing = findRepoTab(tabsRef.current, path);
     if (existing) {
-      const next = placeOpenedRepoTab(tabsRef.current, existing, replaceWelcome);
+      const next = placeOpenedRepoTab(tabsRef.current, existing);
       if (next !== tabsRef.current) commitTabs(next);
       setActiveTab(existing.id);
       return;
@@ -647,7 +641,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
           snapshot,
         },
       });
-      const nextTabs = placeOpenedRepoTab(tabsRef.current, tab, replaceWelcome);
+      const nextTabs = placeOpenedRepoTab(tabsRef.current, tab);
       if (nextTabs !== tabsRef.current) commitTabs(nextTabs);
       commitActiveTabId(tab.id);
       setRecents(await gitApi.listRecents());
@@ -671,7 +665,6 @@ export function GitProvider({ children }: { children: ReactNode }) {
 
   const cloneRepository = useCallback(
     async (url: string, destination: string) => {
-      const replaceWelcome = activeTabIdRef.current === WELCOME_TAB_ID;
       try {
         const path = await runActivity(
           "Cloning repository",
@@ -679,7 +672,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
           (activityId) => gitApi.cloneRepository(url, destination, activityId),
           true,
         );
-        await openPath(path, replaceWelcome);
+        await openPath(path);
         return true;
       } catch (error) {
         if (isCancelled(error)) toast.info("Cancelled: Cloning repository");
@@ -707,24 +700,22 @@ export function GitProvider({ children }: { children: ReactNode }) {
   );
 
   const openWelcomeTab = useCallback(() => {
-    const next = insertWelcomeTab(tabsRef.current);
-    if (next !== tabsRef.current) commitTabs(next);
+    const next = tabsRef.current.filter((tab) => tab.kind !== "welcome");
+    if (next.length !== tabsRef.current.length) commitTabs(next);
     setActiveTab(WELCOME_TAB_ID);
   }, [commitTabs, setActiveTab]);
 
   const closeTab = useCallback(
     (id: string) => {
-      const current = tabsRef.current;
+      const current = tabsRef.current.filter((tab) => tab.kind !== "welcome");
       const closing = current.find((tab) => tab.id === id);
-      if (!closing) return;
-      if (closing.kind === "welcome" && current.length === 1) return;
+      if (!closing || closing.kind !== "repo") return;
       const index = current.findIndex((tab) => tab.id === id);
       const next = current.filter((tab) => tab.id !== id);
-      const fallback: AppTab[] = next.length > 0 ? next : [{ id: WELCOME_TAB_ID, kind: "welcome" }];
       if (activeTabIdRef.current === id) {
-        commitActiveTabId(fallback[Math.max(0, index - 1)]?.id ?? WELCOME_TAB_ID);
+        commitActiveTabId(next[Math.max(0, index - 1)]?.id ?? WELCOME_TAB_ID);
       }
-      commitTabs(fallback);
+      commitTabs(next);
       if (closing.kind === "repo") {
         const { [id]: _dropped, ...rest } = sessionsRef.current;
         commitSessions(rest);

@@ -64,8 +64,10 @@ export function CommandCenter() {
   const commands = useMemo(() => {
     const list: Command[] = [];
     const cycle = (step: number) => {
+      if (tabs.length === 0) return;
       const index = tabs.findIndex((tab) => tab.id === activeTabId);
-      const next = tabs[(index + step + tabs.length) % tabs.length];
+      const start = index < 0 ? (step > 0 ? -1 : 0) : index;
+      const next = tabs[(start + step + tabs.length) % tabs.length];
       if (next) git.setActiveTab(next.id);
     };
     if (repoOpen) {

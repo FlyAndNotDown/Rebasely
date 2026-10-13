@@ -4,7 +4,6 @@ import {
   WELCOME_TAB_ID,
   defaultFetchRemote,
   findRepoTab,
-  insertWelcomeTab,
   lookupPathList,
   placeOpenedRepoTab,
   primaryRemote,
@@ -85,39 +84,21 @@ describe("opening into tabs", () => {
   const repoA = tabFromPath("E:\\a");
   const repoB = tabFromPath("E:\\b");
 
-  it("turns the welcome tab into the opened repository, in place", () => {
-    expect(placeOpenedRepoTab([welcome, repoA], repoB, true).map((tab) => tab.id)).toEqual([
-      repoB.id,
-      repoA.id,
-    ]);
-    expect(placeOpenedRepoTab([repoA, welcome], repoB, true).map((tab) => tab.id)).toEqual([
+  it("appends a repository and drops the welcome page from the strip", () => {
+    expect(placeOpenedRepoTab([welcome, repoA], repoB).map((tab) => tab.id)).toEqual([
       repoA.id,
       repoB.id,
     ]);
+    expect(placeOpenedRepoTab([repoA], repoB).map((tab) => tab.id)).toEqual([repoA.id, repoB.id]);
   });
 
-  it("drops the welcome tab when that repository is already open", () => {
-    expect(placeOpenedRepoTab([repoA, welcome], repoA, true)).toEqual([repoA]);
-  });
-
-  it("appends when the welcome tab should stay open", () => {
-    expect(placeOpenedRepoTab([repoA, welcome], repoB, false).map((tab) => tab.id)).toEqual([
-      repoA.id,
-      WELCOME_TAB_ID,
-      repoB.id,
-    ]);
-    expect(placeOpenedRepoTab([repoA], repoB, true).map((tab) => tab.id)).toEqual([repoA.id, repoB.id]);
+  it("keeps an open repository where it is and drops the welcome page", () => {
+    expect(placeOpenedRepoTab([repoA, welcome], repoA)).toEqual([repoA]);
   });
 
   it("leaves an already open repository where it is", () => {
-    const open = [repoA, welcome];
-    expect(placeOpenedRepoTab(open, repoA, false)).toBe(open);
-  });
-
-  it("appends one welcome tab", () => {
-    expect(insertWelcomeTab([repoA]).map((tab) => tab.id)).toEqual([repoA.id, WELCOME_TAB_ID]);
-    const withWelcome = insertWelcomeTab([repoA]);
-    expect(insertWelcomeTab(withWelcome)).toBe(withWelcome);
+    const open = [repoA];
+    expect(placeOpenedRepoTab(open, repoA)).toBe(open);
   });
 });
 
