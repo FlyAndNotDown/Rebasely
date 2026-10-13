@@ -4,7 +4,9 @@ import {
   WELCOME_TAB_ID,
   defaultFetchRemote,
   findRepoTab,
+  insertWelcomeTab,
   lookupPathList,
+  placeOpenedRepoTab,
   primaryRemote,
   reorderAppTabs,
   tabFromPath,
@@ -75,6 +77,47 @@ describe("tabs", () => {
   it("finds a repo tab regardless of slash direction and case", () => {
     expect(findRepoTab(tabs, "e:/B/")?.id).toBe("repo:E:\\b");
     expect(tabFromPath("E:\\code\\rebasely").name).toBe("rebasely");
+  });
+});
+
+describe("opening into tabs", () => {
+  const welcome: AppTab = { id: WELCOME_TAB_ID, kind: "welcome" };
+  const repoA = tabFromPath("E:\\a");
+  const repoB = tabFromPath("E:\\b");
+
+  it("turns the welcome tab into the opened repository, in place", () => {
+    expect(placeOpenedRepoTab([welcome, repoA], repoB, true).map((tab) => tab.id)).toEqual([
+      repoB.id,
+      repoA.id,
+    ]);
+    expect(placeOpenedRepoTab([repoA, welcome], repoB, true).map((tab) => tab.id)).toEqual([
+      repoA.id,
+      repoB.id,
+    ]);
+  });
+
+  it("drops the welcome tab when that repository is already open", () => {
+    expect(placeOpenedRepoTab([repoA, welcome], repoA, true)).toEqual([repoA]);
+  });
+
+  it("appends when the welcome tab should stay open", () => {
+    expect(placeOpenedRepoTab([repoA, welcome], repoB, false).map((tab) => tab.id)).toEqual([
+      repoA.id,
+      WELCOME_TAB_ID,
+      repoB.id,
+    ]);
+    expect(placeOpenedRepoTab([repoA], repoB, true).map((tab) => tab.id)).toEqual([repoA.id, repoB.id]);
+  });
+
+  it("leaves an already open repository where it is", () => {
+    const open = [repoA, welcome];
+    expect(placeOpenedRepoTab(open, repoA, false)).toBe(open);
+  });
+
+  it("appends one welcome tab", () => {
+    expect(insertWelcomeTab([repoA]).map((tab) => tab.id)).toEqual([repoA.id, WELCOME_TAB_ID]);
+    const withWelcome = insertWelcomeTab([repoA]);
+    expect(insertWelcomeTab(withWelcome)).toBe(withWelcome);
   });
 });
 

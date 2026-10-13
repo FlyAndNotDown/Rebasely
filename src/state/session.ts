@@ -170,6 +170,33 @@ export function findRepoTab(tabs: AppTab[], path: string): RepoTab | undefined {
   );
 }
 
+/** Appends the welcome tab when it is closed. Returns the same array if it is already open. */
+export function insertWelcomeTab(tabs: AppTab[]): AppTab[] {
+  if (tabs.some((tab) => tab.kind === "welcome")) return tabs;
+  return [...tabs, { id: WELCOME_TAB_ID, kind: "welcome" }];
+}
+
+/**
+ * Puts an opened repository on the tab strip.
+ * When `replaceWelcome` is set, the welcome tab becomes that repository.
+ * A repository that is already open stays put; the welcome tab is removed instead of duplicated.
+ */
+export function placeOpenedRepoTab(tabs: AppTab[], tab: RepoTab, replaceWelcome: boolean): AppTab[] {
+  const welcomeIndex = tabs.findIndex((item) => item.kind === "welcome");
+  const existingIndex = tabs.findIndex((item) => item.id === tab.id);
+  if (replaceWelcome && welcomeIndex >= 0) {
+    if (existingIndex >= 0) {
+      const next = tabs.filter((item) => item.kind !== "welcome");
+      return next.length === tabs.length ? tabs : next;
+    }
+    const next = tabs.slice();
+    next[welcomeIndex] = tab;
+    return next;
+  }
+  if (existingIndex >= 0) return tabs;
+  return [...tabs, tab];
+}
+
 export function reorderAppTabs(
   tabs: AppTab[],
   fromId: string,

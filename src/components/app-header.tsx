@@ -33,6 +33,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ActivityMeter } from "@/components/activity-meter";
 import { AppMark } from "@/components/app-mark";
+import { AppMenu } from "@/components/app-menu";
 import { AppToolbar } from "@/components/app-toolbar";
 import { WindowControls } from "@/components/window-controls";
 import { CreateBranchDialog } from "@/components/create-ref-dialogs";
@@ -54,7 +55,7 @@ export function AppHeader() {
     closeTab,
     reorderTabs,
     revealRepo,
-    openFolder,
+    openWelcomeTab,
     openTerminal,
     openInEditor,
     ensureBranches,
@@ -69,7 +70,7 @@ export function AppHeader() {
     "closeTab",
     "reorderTabs",
     "revealRepo",
-    "openFolder",
+    "openWelcomeTab",
     "openTerminal",
     "openInEditor",
     "ensureBranches",
@@ -112,13 +113,14 @@ export function AppHeader() {
   return (
     <header className="shrink-0 bg-background">
       <div className="flex h-9 items-stretch">
+        <AppMenu />
         <TabStrip
           tabs={tabs}
           activeTabId={activeTabId}
           setActiveTab={setActiveTab}
           closeTab={closeTab}
           reorderTabs={reorderTabs}
-          onOpenRepository={() => void openFolder()}
+          onOpenWelcome={() => openWelcomeTab()}
         />
         <WindowControls />
       </div>
@@ -259,14 +261,14 @@ function TabStrip({
   setActiveTab,
   closeTab,
   reorderTabs,
-  onOpenRepository,
+  onOpenWelcome,
 }: {
   tabs: AppTab[];
   activeTabId: string;
   setActiveTab: (id: string) => void;
   closeTab: (id: string) => void;
   reorderTabs: (fromId: string, toId: string, place: "before" | "after") => void;
-  onOpenRepository: () => void;
+  onOpenWelcome: () => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const measureRef = useRef<HTMLDivElement>(null);
@@ -386,8 +388,12 @@ function TabStrip({
     [tabs],
   );
 
+  function canClose(tab: AppTab) {
+    return tab.kind === "repo" || tabs.length > 1;
+  }
+
   function tabLabel(tab: AppTab) {
-    if (tab.kind === "welcome") return "Rebasely";
+    if (tab.kind === "welcome") return "Welcome";
     return labels.get(tab.path) ?? tab.name;
   }
 
@@ -410,6 +416,7 @@ function TabStrip({
             tab={tab}
             label={tabLabel(tab)}
             active={tab.id === activeTabId}
+            closable={canClose(tab)}
             onSelect={() => undefined}
             onClose={() => undefined}
           />
@@ -417,7 +424,7 @@ function TabStrip({
       </div>
       <div
         ref={stripRef}
-        className={cn("flex h-full w-full min-w-0 items-center gap-1 pl-1.5", draggingId && "select-none")}
+        className={cn("flex h-full w-full min-w-0 items-center gap-1 pl-1", draggingId && "select-none")}
       >
         {visible.map((tab) => (
           <TabButton
@@ -425,6 +432,7 @@ function TabStrip({
             tab={tab}
             label={tabLabel(tab)}
             active={tab.id === activeTabId}
+            closable={canClose(tab)}
             dragging={tab.id === draggingId}
             onSelect={() => setActiveTab(tab.id)}
             onClose={() => closeTab(tab.id)}
@@ -449,7 +457,7 @@ function TabStrip({
                     onClick={() => setActiveTab(tab.id)}
                   >
                     <span className="min-w-0 flex-1 truncate">{label}</span>
-                    {tab.kind === "repo" ? (
+                    {canClose(tab) ? (
                       <button
                         type="button"
                         className="flex size-4 items-center justify-center rounded-sm hover:bg-muted"
@@ -476,13 +484,13 @@ function TabStrip({
               variant="ghost"
               size="icon-sm"
               className="size-8 shrink-0 text-muted-foreground"
-              aria-label="Open repository"
-              onClick={onOpenRepository}
+              aria-label="Open welcome tab"
+              onClick={onOpenWelcome}
             >
               <PlusIcon />
             </Button>
           </TooltipTrigger>
-          <TooltipContent>Open repository</TooltipContent>
+          <TooltipContent>Open welcome tab</TooltipContent>
         </Tooltip>
         <div
           className="h-full min-h-9 min-w-8 flex-1"
@@ -498,6 +506,7 @@ function TabButton({
   tab,
   label,
   active,
+  closable,
   dragging = false,
   onSelect,
   onClose,
@@ -506,13 +515,13 @@ function TabButton({
   tab: AppTab;
   label: string;
   active: boolean;
+  closable: boolean;
   dragging?: boolean;
   onSelect: () => void;
   onClose: () => void;
   onPointerDown?: (event: PointerEvent<HTMLDivElement>) => void;
 }) {
-  const closable = tab.kind === "repo";
-  const hint = tab.kind === "welcome" ? "Welcome" : tab.path;
+  const hint = tab.kind === "welcome" ? "Open or clone a repository" : tab.path;
   const interactive = Boolean(onPointerDown);
 
   function handleAuxClick(event: MouseEvent<HTMLButtonElement>) {
