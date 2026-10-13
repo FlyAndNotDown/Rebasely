@@ -18,7 +18,7 @@ function trailingSpace() {
   );
 }
 
-function lineEndingHighlightsFollowingText() {
+function lineEndingStaysOnItsOwnLine() {
   const spans = diffLineSpans([
     { kind: "delete", content: "line\r" },
     { kind: "add", content: "line" },
@@ -26,10 +26,7 @@ function lineEndingHighlightsFollowingText() {
   ]);
   assert(spans.every((row) => row.every((span) => !span.text.includes("\r"))), "CR is not drawn");
   assert(spans[0].every((span) => !span.changed), "text before a trailing CR stays plain");
-  assert(
-    spans[2].some((span) => span.changed && span.text === "next" && span.tone === "delete"),
-    "the line after a trailing CR is highlighted",
-  );
+  assert(spans[2].every((span) => !span.changed), "the following line is outside the change");
 }
 
 function returnInsideLineHighlightsTail() {
@@ -42,18 +39,32 @@ function returnInsideLineHighlightsTail() {
   assert(spans[0].every((span) => !span.text.includes("\r")), "an inner CR is not drawn");
 }
 
-function insertedReturnHighlightsFollowingCode() {
+function insertedBlankLineDoesNotMarkTheNextLine() {
   const spans = diffLineSpans([
-    { kind: "context", content: "\tif (!PythonFileDataSource)" },
-    { kind: "add", content: "\t" },
+    { kind: "add", content: "\tFSlateThrottleManager::Get().DisableThrottle(false);" },
+    { kind: "add", content: "" },
+    { kind: "context", content: "\tif (GEditor != nullptr)" },
     { kind: "context", content: "\t{" },
+    { kind: "add", content: "\tFSlateThrottleManager::Get().DisableThrottle(true);" },
+    { kind: "add", content: "" },
+    {
+      kind: "context",
+      content: '\tconst TSharedRef<FTabManager::FLayout> Layout = FTabManager::NewLayout("MagicSkyPatchEditor_Layout_v1.0")',
+    },
   ]);
-  assert(spans[1].every((span) => !span.changed), "an inserted blank line is not a tab block");
-  assert(
-    spans[2].some((span) => span.changed && span.text === "{" && span.tone === "add"),
-    "the code after an inserted line is highlighted",
-  );
-  assert(spans[2].some((span) => !span.changed && span.text === "\t"), "indent before that code stays plain");
+  assert(spans[0].every((span) => !span.changed), "added code is a whole line, not a character change");
+  assert(spans[2].every((span) => !span.changed), "the line after an inserted blank line stays plain");
+  assert(spans[3].every((span) => !span.changed), "later context stays plain");
+  assert(spans[6].every((span) => !span.changed), "the layout line after an inserted blank line stays plain");
+  const removed = diffLineSpans([
+    { kind: "delete", content: "" },
+    { kind: "context", content: "\tvirtual bool IsPrimaryEditor() const override;" },
+    { kind: "delete", content: "\t" },
+    { kind: "context", content: "\tnext" },
+  ]);
+  assert(removed[1].every((span) => !span.changed), "the line after a deleted blank line stays plain");
+  assert(removed[2].some((span) => span.changed && span.text === "\t"), "a deleted tab stays on its own line");
+  assert(removed[3].every((span) => !span.changed), "the line after a deleted tab stays plain");
 }
 
 function tabTypedOnALineStaysHighlighted() {
@@ -77,9 +88,9 @@ function sharedIndentStaysPlain() {
 
 describe("diffLineSpans", () => {
   it("highlights only a trailing space", trailingSpace);
-  it("highlights the text after a trailing CR", lineEndingHighlightsFollowingText);
+  it("keeps a trailing CR on its own line", lineEndingStaysOnItsOwnLine);
   it("highlights the tail after an inner CR", returnInsideLineHighlightsTail);
-  it("highlights code after an inserted line", insertedReturnHighlightsFollowingCode);
+  it("does not mark the line after an inserted blank line", insertedBlankLineDoesNotMarkTheNextLine);
   it("keeps a typed tab highlighted", tabTypedOnALineStaysHighlighted);
   it("keeps shared indent plain", sharedIndentStaysPlain);
 });

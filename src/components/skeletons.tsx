@@ -109,9 +109,8 @@ export function DiffSkeleton({
   const rows = widths.map((width, index) => (
     <div
       key={index}
-      className="grid h-5 w-full grid-cols-[3rem_3rem_1.25rem_minmax(0,1fr)] items-center px-2"
+      className="grid h-5 w-full grid-cols-[3rem_1.25rem_minmax(0,1fr)] items-center px-2"
     >
-      <Skeleton className="ml-auto h-2.5 w-4" />
       <Skeleton className="ml-auto h-2.5 w-4" />
       <span />
       <Skeleton className={cn("h-2.5", width)} />

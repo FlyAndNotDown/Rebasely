@@ -146,11 +146,6 @@ export function diffLineSpans(lines: { kind: string; content: string }[]): TextS
   const spans = lines.map((line) => emphasizeWhitespace(line));
   let index = 0;
   while (index < lines.length) {
-    if (lines[index].kind === "add") {
-      if (isBlank(lines[index].content)) highlightAfterBreak(lines, spans, index, "add");
-      index += 1;
-      continue;
-    }
     if (lines[index].kind !== "delete") {
       index += 1;
       continue;
@@ -168,20 +163,10 @@ export function diffLineSpans(lines: { kind: string; content: string }[]): TextS
       if (lineBreakOnly(removed, added)) {
         spans[index + pair] = unchanged(removed.replace(/\r/g, ""));
         spans[deleteEnd + pair] = unchanged(added.replace(/\r/g, ""));
-        const tone = added.includes("\r") && !removed.includes("\r") ? "add" : "delete";
-        highlightAfterBreak(lines, spans, deleteEnd + pair, tone);
       } else {
         spans[index + pair] = changedSpans(removed, added);
         spans[deleteEnd + pair] = changedSpans(added, removed);
       }
-    }
-    for (let extra = pairs; extra < deleteCount; extra += 1) {
-      const at = index + extra;
-      if (isBlank(lines[at].content)) highlightAfterBreak(lines, spans, at, "delete");
-    }
-    for (let extra = pairs; extra < addCount; extra += 1) {
-      const at = deleteEnd + extra;
-      if (isBlank(lines[at].content)) highlightAfterBreak(lines, spans, at, "add");
     }
     index = addEnd;
   }
@@ -225,34 +210,10 @@ function changedSpans(content: string, other: string): TextSpan[] {
   return parts;
 }
 
-function isBlank(content: string) {
-  return content.replace(/[ \t\r]/g, "").length === 0;
-}
-
 function lineBreakOnly(content: string, other: string) {
   if (content.replace(/\r/g, "") !== other.replace(/\r/g, "")) return false;
   const internal = (value: string) => value.replace(/\r+$/g, "").includes("\r");
   return !internal(content) && !internal(other);
-}
-
-function highlightAfterBreak(
-  lines: { kind: string; content: string }[],
-  spans: TextSpan[][],
-  breakIndex: number,
-  tone: "add" | "delete",
-) {
-  spans[breakIndex] = unchanged(lines[breakIndex].content.replace(/\r/g, ""));
-  const next = breakIndex + 1;
-  if (next >= lines.length || lines[next].kind === "hunk") return;
-  if (spans[next].some((span) => span.changed)) return;
-  const text = lines[next].content.replace(/\r/g, "");
-  const lead = text.match(/^[ \t]*/)?.[0].length ?? 0;
-  const body = text.slice(lead);
-  if (!body) return;
-  const marked: TextSpan[] = [];
-  if (lead > 0) marked.push({ text: text.slice(0, lead), changed: false });
-  marked.push({ text: body, changed: true, tone });
-  spans[next] = marked;
 }
 
 /** Approximate monospace width: tabs expand to the next stop of 4, wide CJK characters take two cells. */

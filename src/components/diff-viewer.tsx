@@ -62,7 +62,7 @@ function useSyntaxRanges(diff: FileDiff, spans: TextSpan[][]) {
 export type DiffSource = "changes" | "history" | "stash";
 
 const DIFF_ROW_HEIGHT = 20;
-const DIFF_GUTTER = "8.25rem";
+const DIFF_GUTTER = "5.25rem";
 /** File kinds whose diff lines can be staged one by one. */
 const LINE_KINDS = new Set(["modified", "added", "untracked"]);
 const NO_PICKS: ReadonlySet<number> = new Set();
@@ -506,17 +506,14 @@ export const DiffLines = memo(function DiffLines({
       <div
         key={index}
         className={cn(
-          "grid h-5 grid-cols-[3rem_3rem_1.25rem_minmax(0,1fr)] px-2",
+          "grid h-5 grid-cols-[3rem_1.25rem_minmax(0,1fr)] px-2",
           rowTone(line, highlighted),
           picked.has(index) && "shadow-[inset_3px_0_0_var(--diff-hunk)]",
         )}
       >
-        <span className={cn("col-span-3 grid grid-cols-[3rem_3rem_1.25rem]", gutterClass(index))} {...gutterProps(index)}>
+        <span className={cn("col-span-2 grid grid-cols-[3rem_1.25rem]", gutterClass(index))} {...gutterProps(index)}>
           <span className="pr-2 text-right text-muted-foreground/70 tabular-nums">
-            {line.kind === "hunk" ? "" : line.oldLineno ?? ""}
-          </span>
-          <span className="pr-2 text-right text-muted-foreground/70 tabular-nums">
-            {line.kind === "hunk" ? "" : line.newLineno ?? ""}
+            {line.kind === "hunk" ? "" : (line.newLineno ?? line.oldLineno ?? "")}
           </span>
           <span className={cn("text-center", markerTone(line))}>{marker(line)}</span>
         </span>
