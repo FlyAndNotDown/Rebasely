@@ -29,6 +29,9 @@ import type {
   WorktreeInfo,
   TerminalOption,
   ToolConfig,
+  SshKeyInfo,
+  SshKeyList,
+  SshKeyPreview,
   WorkspaceSnapshot,
 } from "@/types/git";
 
@@ -319,5 +322,12 @@ export const gitApi = {
   setPrefs: (prefs: AppPrefs) => call<AppPrefs>("set_prefs", { prefs }),
   gitExecutables: () => call<GitExecutables>("git_executables"),
   checkGitExecutable: (path: string) => call<void>("check_git_executable", { path }),
+  listSshKeys: () => call<SshKeyList>("list_ssh_keys"),
+  previewSshKey: (path: string) => call<SshKeyPreview>("preview_ssh_key", { path }),
+  generateSshKey: (name: string, algorithm: "ed25519" | "rsa", comment: string, passphrase: string) =>
+    call<SshKeyInfo>("generate_ssh_key", { name, algorithm, comment, passphrase }),
+  importSshKey: (path: string, passphrase: string) =>
+    call<SshKeyInfo>("import_ssh_key", { path, passphrase }),
+  deleteSshKey: (name: string) => call<void>("delete_ssh_key", { name }),
   syncWatches: (paths: string[]) => call<void>("sync_watches", { paths }),
 };

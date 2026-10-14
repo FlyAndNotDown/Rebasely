@@ -7,6 +7,7 @@ mod locate;
 mod prefs;
 mod recents;
 mod session;
+mod sshkeys;
 mod terminal;
 mod watch;
 mod window_state;
@@ -955,6 +956,36 @@ async fn check_git_executable(path: String) -> AppResult<()> {
 }
 
 #[tauri::command]
+async fn list_ssh_keys() -> AppResult<sshkeys::SshKeyList> {
+    blocking(sshkeys::list).await
+}
+
+#[tauri::command]
+async fn preview_ssh_key(path: String) -> AppResult<sshkeys::SshKeyPreview> {
+    blocking(move || sshkeys::preview(&path)).await
+}
+
+#[tauri::command]
+async fn generate_ssh_key(
+    name: String,
+    algorithm: String,
+    comment: String,
+    passphrase: String,
+) -> AppResult<sshkeys::SshKeyInfo> {
+    blocking(move || sshkeys::generate(&name, &algorithm, &comment, &passphrase)).await
+}
+
+#[tauri::command]
+async fn import_ssh_key(path: String, passphrase: String) -> AppResult<sshkeys::SshKeyInfo> {
+    blocking(move || sshkeys::import(&path, &passphrase)).await
+}
+
+#[tauri::command]
+async fn delete_ssh_key(name: String) -> AppResult<()> {
+    blocking(move || sshkeys::delete(&name)).await
+}
+
+#[tauri::command]
 async fn get_prefs(app: AppHandle) -> AppResult<AppPrefs> {
     blocking(move || prefs::load_prefs(&app)).await
 }
@@ -1204,6 +1235,11 @@ pub fn run() {
             run_mergetool,
             git_executables,
             check_git_executable,
+            list_ssh_keys,
+            preview_ssh_key,
+            generate_ssh_key,
+            import_ssh_key,
+            delete_ssh_key,
             get_prefs,
             set_prefs,
             open_in_terminal,

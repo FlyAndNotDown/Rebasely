@@ -1,6 +1,15 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { open as openFile } from "@tauri-apps/plugin-dialog";
-import { CheckIcon, ChevronDownIcon, CircleAlertIcon, ListIcon, PlusIcon, XIcon } from "lucide-react";
+import {
+  CheckIcon,
+  ChevronDownIcon,
+  CircleAlertIcon,
+  KeyRoundIcon,
+  ListIcon,
+  PlusIcon,
+  SlidersHorizontalIcon,
+  XIcon,
+} from "lucide-react";
 import { useTheme } from "next-themes";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -16,7 +25,6 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -25,14 +33,15 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Label } from "@/components/ui/label";
+import { SshKeysSettings } from "@/components/ssh-keys-settings";
 import { errorMessage, gitApi } from "@/lib/git";
 import { displayPath } from "@/lib/format";
 import { AUTO_FETCH_CHOICES, isGitFileName, normalizePrefs, sameGitPath } from "@/lib/prefs";
 import { cn } from "@/lib/utils";
 import { useGitPick } from "@/state/git-context";
-import type { TerminalOption, ToolConfig } from "@/types/git";
+import type { AppPrefs, TerminalOption, ToolConfig } from "@/types/git";
 
-type SettingsSection = "git" | "general";
+type SettingsSection = "git" | "ssh" | "general";
 type GuiTool = { id: string; name: string; installed: boolean };
 type ThemeChoice = "dark" | "light" | "system";
 
@@ -51,15 +60,15 @@ export function SettingsDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[min(44rem,calc(100vh-4rem))] w-[min(56rem,calc(100vw-4rem))] max-w-none flex-col gap-0 p-0 sm:max-w-none">
+      <DialogContent className="flex h-[min(40rem,calc(100vh-4rem))] w-[min(56rem,calc(100vw-4rem))] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none">
         {/* Mounted on each open, so the fields load fresh every time. */}
-        <SettingsForm onOpenChange={onOpenChange} />
+        <SettingsForm />
       </DialogContent>
     </Dialog>
   );
 }
 
-function SettingsForm({ onOpenChange }: { onOpenChange: (open: boolean) => void }) {
+function SettingsForm() {
   const { theme, setTheme } = useTheme();
   const { prefs, updatePrefs } = useGitPick(["prefs", "updatePrefs"]);
   const [section, setSection] = useState<SettingsSection>("git");
@@ -83,7 +92,17 @@ function SettingsForm({ onOpenChange }: { onOpenChange: (open: boolean) => void 
   const [themeChoice, setThemeChoice] = useState<ThemeChoice>(() =>
     theme === "light" || theme === "dark" || theme === "system" ? theme : "dark",
   );
-  const [saving, setSaving] = useState(false);
+  const prefsNow = useRef(prefs);
+  const prefsWrite = useRef(0);
+  const identityReadyRef = useRef(false);
+  const savedIdentity = useRef({ name: "", email: "" });
+  const nameRef = useRef(name);
+  const emailRef = useRef(email);
+  const toolsRef = useRef(tools);
+  const toolTimer = useRef<number | null>(null);
+  nameRef.current = name;
+  emailRef.current = email;
+  toolsRef.current = tools;
 
   useEffect(() => {
     void Promise.all([
@@ -101,6 +120,8 @@ function SettingsForm({ onOpenChange }: { onOpenChange: (open: boolean) => void 
         const visibleTerminals = options.filter((terminal) => terminal.available);
         setName(identity.name);
         setEmail(identity.email);
+        savedIdentity.current = { name: identity.name, email: identity.email };
+        identityReadyRef.current = true;
         setIdentityReady(true);
         setTerminalId(
           visibleTerminals.some((terminal) => terminal.id === prefs.terminalId) ? prefs.terminalId : "auto",
@@ -130,6 +151,70 @@ function SettingsForm({ onOpenChange }: { onOpenChange: (open: boolean) => void 
       .catch((error) => toast.error(errorMessage(error)));
   }, []);
 
+  useEffect(() => {
+    if (prefsWrite.current === 0) prefsNow.current = prefs;
+  }, [prefs]);
+
+  useEffect(() => {
+    return () => {
+      if (toolTimer.current !== null) {
+        window.clearTimeout(toolTimer.current);
+        toolTimer.current = null;
+        void gitApi.setToolConfig(toolsRef.current).catch((error: unknown) => toast.error(errorMessage(error)));
+      }
+      void commitIdentity();
+    };
+  }, []);
+
+  async function persistPrefs(patch: Partial<AppPrefs>) {
+    const generation = ++prefsWrite.current;
+    const next = { ...prefsNow.current, ...patch };
+    prefsNow.current = next;
+    try {
+      const saved = await updatePrefs(next);
+      if (prefsWrite.current === generation) {
+        prefsWrite.current = 0;
+        prefsNow.current = saved;
+      }
+    } catch (error) {
+      if (prefsWrite.current === generation) prefsWrite.current = 0;
+      toast.error(errorMessage(error));
+    }
+  }
+
+  async function commitIdentity() {
+    if (!identityReadyRef.current) return;
+    const nextName = nameRef.current.trim();
+    const nextEmail = emailRef.current.trim();
+    if (nextName === savedIdentity.current.name && nextEmail === savedIdentity.current.email) return;
+    try {
+      const saved = await gitApi.setGitIdentity({ name: nextName, email: nextEmail });
+      savedIdentity.current = { name: saved.name, email: saved.email };
+    } catch (error) {
+      toast.error(errorMessage(error));
+    }
+  }
+
+  function queueTools(next: ToolConfig, immediate: boolean) {
+    toolsRef.current = next;
+    setTools(next);
+    if (toolTimer.current !== null) window.clearTimeout(toolTimer.current);
+    const write = () => {
+      toolTimer.current = null;
+      void gitApi
+        .setToolConfig({ diffTool: toolsRef.current.diffTool.trim(), mergeTool: toolsRef.current.mergeTool.trim() })
+        .catch((error: unknown) => toast.error(errorMessage(error)));
+    };
+    if (immediate) write();
+    else toolTimer.current = window.setTimeout(write, 400);
+  }
+
+  function changeTool(key: "diffTool" | "mergeTool", value: string) {
+    const next = { ...toolsRef.current, [key]: value };
+    const known = value.trim() === "" || guiTools.some((tool) => tool.id === value);
+    queueTools(next, known);
+  }
+
   async function addGitExecutable() {
     const picked = await openFile({ multiple: false, title: "Git executable" });
     if (typeof picked !== "string") return;
@@ -143,15 +228,18 @@ function SettingsForm({ onOpenChange }: { onOpenChange: (open: boolean) => void 
     }
     if (pathGit && sameGitPath(picked, pathGit)) {
       setGitPath("");
+      void persistPrefs({ gitPath: "" });
       return;
     }
     setAddingGit(true);
     try {
       await gitApi.checkGitExecutable(picked);
-      setExtraGitPaths((current) =>
-        current.some((path) => sameGitPath(path, picked)) ? current : [...current, picked],
-      );
+      const extras = extraGitPaths.some((path) => sameGitPath(path, picked))
+        ? extraGitPaths
+        : [...extraGitPaths, picked];
+      setExtraGitPaths(extras);
       setGitPath(picked);
+      void persistPrefs({ gitPath: picked, extraGitPaths: extras });
     } catch (error) {
       toast.error(errorMessage(error));
     } finally {
@@ -160,44 +248,29 @@ function SettingsForm({ onOpenChange }: { onOpenChange: (open: boolean) => void 
   }
 
   function removeGitExecutable(path: string) {
-    setExtraGitPaths((current) => current.filter((item) => !sameGitPath(item, path)));
-    setGitPath((current) => (sameGitPath(current, path) ? "" : current));
+    const extras = extraGitPaths.filter((item) => !sameGitPath(item, path));
+    const nextPath = sameGitPath(gitPath, path) ? "" : gitPath;
+    setExtraGitPaths(extras);
+    setGitPath(nextPath);
+    void persistPrefs({ gitPath: nextPath, extraGitPaths: extras });
   }
 
-  async function save() {
-    setSaving(true);
-    try {
-      await updatePrefs({
-        ...prefs,
-        terminalId,
-        editorId,
-        autoFetchMinutes: Number(autoFetch),
-        fetchPrune: prune,
-        gitPath,
-        extraGitPaths,
-      });
-      await Promise.all([
-        gitApi.setGitIdentity({ name: name.trim(), email: email.trim() }),
-        gitApi.setToolConfig({ diffTool: tools.diffTool.trim(), mergeTool: tools.mergeTool.trim() }),
-      ]);
-      setTheme(themeChoice);
-      toast.success("Saved settings");
-      onOpenChange(false);
-    } catch (error) {
-      toast.error(errorMessage(error));
-    } finally {
-      setSaving(false);
-    }
+  function selectGitExecutable(path: string) {
+    setGitPath(path);
+    void persistPrefs({ gitPath: path, extraGitPaths });
   }
 
   return (
     <>
       <div className="flex min-h-0 flex-1">
         <aside className="flex w-44 shrink-0 flex-col gap-1 border-r p-4">
-          <NavButton active={section === "git"} onClick={() => setSection("git")}>
+          <NavButton active={section === "git"} icon={<GitLogo />} onClick={() => setSection("git")}>
             Git
           </NavButton>
-          <NavButton active={section === "general"} onClick={() => setSection("general")}>
+          <NavButton active={section === "ssh"} icon={<KeyRoundIcon />} onClick={() => setSection("ssh")}>
+            SSH
+          </NavButton>
+          <NavButton active={section === "general"} icon={<SlidersHorizontalIcon />} onClick={() => setSection("general")}>
             General
           </NavButton>
         </aside>
@@ -218,8 +291,8 @@ function SettingsForm({ onOpenChange }: { onOpenChange: (open: boolean) => void 
                   pathGit={pathGit}
                   gitPath={gitPath}
                   extras={extraGitPaths}
-                  busy={saving || addingGit}
-                  onSelect={setGitPath}
+                  busy={addingGit}
+                  onSelect={selectGitExecutable}
                   onRemove={removeGitExecutable}
                   onAdd={() => void addGitExecutable()}
                 />
@@ -232,6 +305,7 @@ function SettingsForm({ onOpenChange }: { onOpenChange: (open: boolean) => void 
                           id="git-name"
                           value={name}
                           onChange={(event) => setName(event.target.value)}
+                          onBlur={() => void commitIdentity()}
                           placeholder="Your name"
                         />
                       </div>
@@ -242,6 +316,7 @@ function SettingsForm({ onOpenChange }: { onOpenChange: (open: boolean) => void 
                           type="email"
                           value={email}
                           onChange={(event) => setEmail(event.target.value)}
+                          onBlur={() => void commitIdentity()}
                           placeholder="you@example.com"
                         />
                       </div>
@@ -268,13 +343,20 @@ function SettingsForm({ onOpenChange }: { onOpenChange: (open: boolean) => void 
                       id: String(minutes),
                       label: minutes === 0 ? "Never" : `Every ${minutes} minutes`,
                     }))}
-                    onChange={setAutoFetch}
+                    onChange={(value) => {
+                      setAutoFetch(value);
+                      void persistPrefs({ autoFetchMinutes: Number(value) });
+                    }}
                   />
                   <label className="flex items-start gap-2 text-sm">
                     <Checkbox
                       className="mt-0.5"
                       checked={prune}
-                      onCheckedChange={(checked) => setPrune(checked === true)}
+                      onCheckedChange={(checked) => {
+                        const fetchPrune = checked === true;
+                        setPrune(fetchPrune);
+                        void persistPrefs({ fetchPrune });
+                      }}
                     />
                     <span>
                       Prune when fetching
@@ -291,7 +373,7 @@ function SettingsForm({ onOpenChange }: { onOpenChange: (open: boolean) => void 
                     value={tools.diffTool}
                     tools={guiTools}
                     ready={guiToolsReady}
-                    onChange={(diffTool) => setTools((current) => ({ ...current, diffTool }))}
+                    onChange={(diffTool) => changeTool("diffTool", diffTool)}
                   />
                   <ToolPicker
                     id="merge-tool"
@@ -299,11 +381,13 @@ function SettingsForm({ onOpenChange }: { onOpenChange: (open: boolean) => void 
                     value={tools.mergeTool}
                     tools={guiTools}
                     ready={guiToolsReady}
-                    onChange={(mergeTool) => setTools((current) => ({ ...current, mergeTool }))}
+                    onChange={(mergeTool) => changeTool("mergeTool", mergeTool)}
                   />
                 </FieldGroup>
               </div>
             </>
+          ) : section === "ssh" ? (
+            <SshKeysSettings email={email} />
           ) : (
             <>
               <DialogHeader>
@@ -319,7 +403,10 @@ function SettingsForm({ onOpenChange }: { onOpenChange: (open: boolean) => void 
                     label="Theme"
                     value={themeChoice}
                     options={themeOptions}
-                    onChange={setThemeChoice}
+                    onChange={(value) => {
+                      setThemeChoice(value);
+                      setTheme(value);
+                    }}
                   />
                 </FieldGroup>
                 <FieldGroup title="External Editor">
@@ -329,7 +416,10 @@ function SettingsForm({ onOpenChange }: { onOpenChange: (open: boolean) => void 
                     catalog={editors.filter((editor) => editor.id !== "system")}
                     value={editorId}
                     fallback="System default app"
-                    onChange={setEditorId}
+                    onChange={(value) => {
+                      setEditorId(value);
+                      void persistPrefs({ editorId: value });
+                    }}
                   />
                 </FieldGroup>
                 <FieldGroup title="Terminal">
@@ -339,7 +429,10 @@ function SettingsForm({ onOpenChange }: { onOpenChange: (open: boolean) => void 
                     catalog={terminals.filter((terminal) => terminal.id !== "auto")}
                     value={terminalId}
                     fallback="System default"
-                    onChange={setTerminalId}
+                    onChange={(value) => {
+                      setTerminalId(value);
+                      void persistPrefs({ terminalId: value });
+                    }}
                   />
                 </FieldGroup>
               </div>
@@ -348,18 +441,6 @@ function SettingsForm({ onOpenChange }: { onOpenChange: (open: boolean) => void 
         </div>
         </ScrollArea>
       </div>
-      <DialogFooter className="mx-0 mb-0 rounded-none">
-        <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-          Cancel
-        </Button>
-        <Button
-          type="button"
-          onClick={() => void save()}
-          disabled={saving || !executablesReady || !identityReady || !guiToolsReady}
-        >
-          Save
-        </Button>
-      </DialogFooter>
     </>
   );
 }
@@ -758,12 +839,27 @@ function SelectField<T extends string>({
   );
 }
 
+/** Official Git mark from https://git-scm.com/images/logos/downloads/Git-Icon-1788C.svg */
+function GitLogo() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 78 78" aria-hidden="true">
+      <path
+        fill="currentColor"
+        transform="translate(10 10) rotate(-45 29 29)"
+        d="M5,58c-2.76142,0 -5,-2.23858 -5,-5v-48c0,-2.76142 2.23858,-5 5,-5h33v12.54404c-2.06553,0.94801 -3.5,3.03446 -3.5,5.45596c0,0.73514 0.13221,1.43941 0.37415,2.09031l-15.28384,15.28384c-0.6509,-0.24194 -1.35517,-0.37415 -2.09031,-0.37415c-3.31371,0 -6,2.68629 -6,6c0,3.31371 2.68629,6 6,6c3.31371,0 6,-2.68629 6,-6c0,-0.73514 -0.13221,-1.43941 -0.37415,-2.09031l14.87415,-14.87415l0,11.50851c-2.06553,0.94801 -3.5,3.03446 -3.5,5.45596c0,3.31371 2.68629,6 6,6c3.31371,0 6,-2.68629 6,-6c0,-2.42149 -1.43447,-4.50795 -3.5,-5.45596l0,-12.08808c2.06553,-0.94801 3.5,-3.03446 3.5,-5.45596c0,-2.42149 -1.43447,-4.50795 -3.5,-5.45596l0,-12.54404h10c2.76142,0 5,2.23858 5,5v48c0,2.76142 -2.23858,5 -5,5z"
+      />
+    </svg>
+  );
+}
+
 function NavButton({
   active,
+  icon,
   onClick,
   children,
 }: {
   active: boolean;
+  icon: ReactNode;
   onClick: () => void;
   children: string;
 }) {
@@ -771,11 +867,12 @@ function NavButton({
     <button
       type="button"
       className={cn(
-        "w-full rounded-md px-2.5 py-1.5 text-left text-sm",
+        "flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm [&_svg]:size-4 [&_svg]:shrink-0",
         active ? "bg-muted text-foreground" : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
       )}
       onClick={onClick}
     >
+      {icon}
       {children}
     </button>
   );

@@ -354,6 +354,36 @@ export interface AppSession {
   historyExpanded?: Record<string, string[]>;
 }
 
+export interface SshKeyInfo {
+  name: string;
+  /** `ed25519`, `rsa`, `ecdsa`, `dsa`, or empty when the public key is missing. */
+  algorithm: string;
+  bits: number | null;
+  /** `SHA256:…`, or empty when the public key is missing. */
+  fingerprint: string;
+  comment: string;
+  /** One-line OpenSSH public key. Empty when there is no `.pub` file. */
+  publicKey: string;
+  encrypted: boolean;
+  /** OpenSSH tries this file name without an entry in `~/.ssh/config`. */
+  defaultIdentity: boolean;
+}
+
+export interface SshKeyList {
+  directory: string;
+  directoryExists: boolean;
+  /** `ssh-keygen` can be run, so new keys can be created. */
+  keygenAvailable: boolean;
+  keys: SshKeyInfo[];
+}
+
+export interface SshKeyPreview {
+  fileName: string;
+  encrypted: boolean;
+  inSshFolder: boolean;
+  hasPublic: boolean;
+}
+
 export type Selection =
   | { type: "change"; path: string; staged: boolean }
   | { type: "commit"; id: string; path?: string };
