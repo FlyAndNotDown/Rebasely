@@ -19,6 +19,7 @@ export function useWindowedRows(
   countOrHeights: number | number[],
   rowHeightOrOverscan = 20,
   overscan = 16,
+  fallbackHeight = 1200,
 ): WindowedRows {
   const variable = Array.isArray(countOrHeights);
   const heights = variable ? countOrHeights : null;
@@ -49,7 +50,7 @@ export function useWindowedRows(
   }, [node]);
 
   // Before the first measurement, render roughly one screen instead of nothing.
-  const height = view.height || 1200;
+  const height = view.height || fallbackHeight;
   if (prefix) {
     const startIndex = lastAtOrBefore(prefix, view.top);
     const endIndex = firstAtOrAfter(prefix, view.top + height);

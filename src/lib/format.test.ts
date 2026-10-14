@@ -5,6 +5,7 @@ import {
   fileName,
   foldRepoPath,
   formatAbsoluteTime,
+  formatBlameWhen,
   formatRelativeTime,
   normalizeRepoPath,
   parentPath,
@@ -34,6 +35,13 @@ describe("formatRelativeTime", () => {
     expect(formatRelativeTime(ago(2 * 24 * 60 * 60_000))).toBe("2d ago");
     expect(formatRelativeTime(ago(7 * 24 * 60 * 60_000))).toBe("Oct 2");
     expect(formatRelativeTime(Math.floor(new Date(2025, 11, 1, 12).getTime() / 1000))).toBe("Dec 1, 2025");
+  });
+});
+
+describe("formatBlameWhen", () => {
+  it("prints a zero-padded calendar date", () => {
+    expect(formatBlameWhen(Math.floor(new Date(2014, 2, 16, 14, 22).getTime() / 1000))).toBe("2014-03-16");
+    expect(formatBlameWhen(Math.floor(new Date(2026, 0, 5, 9, 7).getTime() / 1000))).toBe("2026-01-05");
   });
 });
 

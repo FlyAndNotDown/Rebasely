@@ -1,7 +1,8 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChevronRightIcon, FileIcon, FolderIcon, FolderOpenIcon, SquarePenIcon, XIcon } from "lucide-react";
 import { toast } from "sonner";
 import { AuthorAvatar } from "@/components/author-avatar";
+import { avatarColor, avatarInitial, avatarSeed } from "@/lib/avatar";
 import { DiffLines } from "@/components/diff-viewer";
 import { ImageDiff, isImagePath } from "@/components/image-diff";
 import { DiffSkeleton } from "@/components/skeletons";
@@ -9,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { languageFor, styleSpans, textColumns, type TokenRange } from "@/lib/diff-text";
-import { formatAbsoluteTime } from "@/lib/format";
+import { formatAbsoluteTime, formatBlameWhen } from "@/lib/format";
 import { errorMessage, gitApi } from "@/lib/git";
 import { dirsToReload, touchesFile } from "@/lib/repo-paths";
 import { useWindowedRows } from "@/lib/use-windowed-rows";
@@ -469,48 +470,45 @@ function DirRows({
   );
 }
 
-const BLAME_COLORS = [
-  "#7dd3fc",
-  "#86efac",
-  "#fcd34d",
-  "#f9a8d4",
-  "#c4b5fd",
-  "#fdba74",
-  "#67e8f9",
-  "#bef264",
-  "#fda4af",
-  "#a5b4fc",
-];
-
-function blameColor(commitId: string) {
-  let hash = 0;
-  for (let index = 0; index < commitId.length; index += 1) {
-    hash = (hash * 33 + commitId.charCodeAt(index)) >>> 0;
-  }
-  return BLAME_COLORS[hash % BLAME_COLORS.length];
-}
-
-function blameWhen(timestamp: number) {
-  const date = new Date(timestamp * 1000);
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  if (date.getFullYear() === new Date().getFullYear()) return `${month}-${day}`;
-  return `${date.getFullYear()}-${month}-${day}`;
-}
-
 const FILE_ROW_HEIGHT = 20;
+const BLAME_GUTTER = "14rem";
+const BLAME_FILL = "color-mix(in oklch, var(--foreground) 5%, var(--background))";
+const BLAME_HOT = "color-mix(in oklch, var(--foreground) 16%, var(--background))";
+
+/** Recent commits stay solid. Years-old lines fade back, like a GitLens heatmap. */
+function blameHeat(timestamp: number): number {
+  const days = Math.max(0, (Date.now() - timestamp * 1000) / 86_400_000);
+  if (days <= 14) return 1;
+  if (days <= 90) return 0.78;
+  if (days <= 365) return 0.55;
+  if (days <= 365 * 4) return 0.4;
+  return 0.32;
+}
 
 interface BlameRow {
   text: string;
   hunk: BlameHunk | null;
-  head: boolean;
-  uncommitted: boolean;
+  /** First line of a commit, or the first line of an uncommitted run. */
+  label: boolean;
+  /** No commit covers this line. */
+  dirty: boolean;
+  /** One contiguous run of the same commit, or one uncommitted run. */
+  block: number;
+  /** Shared by every line of the block. 0 when the line has no commit. */
+  heat: number;
+  /** Shared by every line of the block. */
+  tip: string | undefined;
+  /** Set on the first line of a commit. */
+  when: string | null;
 }
 
-function blameRows(text: string, hunks: BlameHunk[] | null, blameLoading: boolean): BlameRow[] {
-  const lines = text.length === 0 ? [] : text.split("\n");
+function blameRows(lines: string[], hunks: BlameHunk[] | null, blameLoading: boolean): BlameRow[] {
   let hunkIndex = 0;
   let previousId: string | null | undefined;
+  let block = -1;
+  let heat = 0;
+  let tip: string | undefined;
+  let when: string | null = null;
   return lines.map((line, index) => {
     while (hunks && hunkIndex < hunks.length && hunks[hunkIndex].start + hunks[hunkIndex].count <= index) {
       hunkIndex += 1;
@@ -518,18 +516,36 @@ function blameRows(text: string, hunks: BlameHunk[] | null, blameLoading: boolea
     const hunk =
       hunks && hunkIndex < hunks.length && hunks[hunkIndex].start <= index ? hunks[hunkIndex] : null;
     const id = hunk?.commitId ?? null;
-    const uncommitted = !blameLoading && hunks != null && id == null && previousId !== null;
+    const starts = id !== previousId;
+    if (starts) block += 1;
+    const dirty = !blameLoading && hunks != null && hunk == null;
+    if (starts) {
+      if (hunk) {
+        heat = blameHeat(hunk.time);
+        when = formatBlameWhen(hunk.time);
+        tip = `${hunk.author}\n${formatAbsoluteTime(hunk.time)}\n${hunk.commitId.slice(0, 7)}`;
+      } else if (dirty) {
+        heat = 0;
+        when = null;
+        tip = "Not committed";
+      } else {
+        heat = 0;
+        when = null;
+        tip = undefined;
+      }
+    }
     previousId = id;
-    return { text: line, hunk, head: hunk != null && hunk.start === index, uncommitted };
+    return { text: line, hunk, label: starts && (hunk != null || dirty), dirty, block, heat, tip, when };
   });
 }
 
 type TextHighlighter = (lines: string[], language: string) => TokenRange[][] | null;
 let loadedTextHighlighter: TextHighlighter | null = null;
 
-function useFileSyntax(path: string, text: string | null, binary: boolean) {
-  const language = binary || text == null ? null : languageFor(path);
+function useFileSyntax(path: string, lines: string[] | null) {
+  const language = lines == null ? null : languageFor(path);
   const [highlighter, setHighlighter] = useState<TextHighlighter | null>(() => loadedTextHighlighter);
+  const [paint, setPaint] = useState<{ source: string[]; ranges: TokenRange[][] } | null>(null);
   useEffect(() => {
     if (!language || highlighter) return;
     let live = true;
@@ -541,11 +557,180 @@ function useFileSyntax(path: string, text: string | null, binary: boolean) {
       live = false;
     };
   }, [highlighter, language]);
-  return useMemo(() => {
-    if (!language || !highlighter || text == null) return null;
-    return highlighter(text.length === 0 ? [] : text.split("\n"), language);
-  }, [highlighter, language, text]);
+  // Color after the file and blame have painted. Prism on a long file is the
+  // slow part, and it used to run inside the same render that showed the text.
+  useEffect(() => {
+    if (!language || !highlighter || lines == null) return;
+    let cancelled = false;
+    const source = lines;
+    const run = () => {
+      if (cancelled) return;
+      const next = highlighter(source, language);
+      if (cancelled || !next) return;
+      startTransition(() => {
+        if (!cancelled) setPaint({ source, ranges: next });
+      });
+    };
+    const idle = window.requestIdleCallback?.(run, { timeout: 150 });
+    const timer = idle == null ? window.setTimeout(run, 1) : undefined;
+    return () => {
+      cancelled = true;
+      if (idle != null) window.cancelIdleCallback(idle);
+      if (timer != null) window.clearTimeout(timer);
+    };
+  }, [highlighter, language, lines]);
+  return paint && paint.source === lines ? paint.ranges : null;
 }
+
+function BlameAvatar({ name }: { name: string }) {
+  const seed = avatarSeed(name, "");
+  return (
+    <span
+      aria-hidden
+      className="flex size-3.5 shrink-0 items-center justify-center rounded-full text-[9px] leading-none font-medium text-white ring-1 ring-white/15"
+      style={{ backgroundColor: avatarColor(seed) }}
+    >
+      {avatarInitial(seed)}
+    </span>
+  );
+}
+
+function BlameMargin({
+  row,
+  divided,
+  hot,
+  onOpenCommit,
+}: {
+  row: BlameRow;
+  divided: boolean;
+  hot: boolean;
+  onOpenCommit: (commitId: string) => void;
+}) {
+  const { hunk, dirty, label } = row;
+  const spine = hunk || dirty;
+  const fill = hot ? BLAME_HOT : BLAME_FILL;
+  const body = (
+    <>
+      {spine ? (
+        <span
+          aria-hidden
+          className="absolute inset-y-0 left-0 w-[3px]"
+          style={{
+            backgroundColor: dirty ? "var(--diff-add)" : "var(--foreground)",
+            opacity: dirty ? 0.95 : hot ? Math.min(1, row.heat + 0.35) : row.heat,
+          }}
+        />
+      ) : null}
+      {label && hunk ? (
+        <>
+          <BlameAvatar name={hunk.author} />
+          <span className={cn("min-w-0 flex-1 truncate text-[11px]", hot ? "text-foreground" : "text-foreground/80")}>
+            {hunk.author}
+          </span>
+          <span className="w-[4.75rem] shrink-0 text-right font-mono text-[11px] tabular-nums whitespace-nowrap text-muted-foreground">
+            {row.when}
+          </span>
+        </>
+      ) : label && dirty ? (
+        <span className="truncate text-[11px] text-muted-foreground italic">Not committed</span>
+      ) : null}
+    </>
+  );
+  const className = cn(
+    "relative sticky left-0 z-20 flex h-5 w-full min-w-0 items-center gap-1.5 overflow-hidden border-r border-border pr-2 pl-2.5 font-sans leading-none select-none",
+    divided && "shadow-[inset_0_1px_0_0_var(--border)]",
+  );
+  if (!hunk) {
+    return (
+      <div className={className} style={{ background: fill }} title={dirty ? "Not committed" : undefined}>
+        {body}
+      </div>
+    );
+  }
+  const open = () => onOpenCommit(hunk.commitId);
+  if (!label) {
+    return (
+      <div
+        className={cn(className, "cursor-pointer")}
+        style={{ background: fill }}
+        title={row.tip}
+        onClick={open}
+      >
+        {body}
+      </div>
+    );
+  }
+  return (
+    <button
+      type="button"
+      title={row.tip}
+      aria-label={`${hunk.author}, ${row.when}`}
+      className={cn(
+        className,
+        "cursor-pointer text-left outline-none focus-visible:outline focus-visible:outline-1 focus-visible:-outline-offset-1 focus-visible:outline-ring",
+      )}
+      style={{ background: fill }}
+      onClick={open}
+    >
+      {body}
+    </button>
+  );
+}
+
+function blockFromEvent(event: { target: EventTarget | null }): number | null {
+  const target = event.target;
+  if (!(target instanceof Element)) return null;
+  const value = target.closest("[data-block]")?.getAttribute("data-block");
+  if (value == null) return null;
+  const block = Number(value);
+  return Number.isNaN(block) ? null : block;
+}
+
+const FILE_COLUMNS = `${BLAME_GUTTER} 2.75rem minmax(0,1fr)`;
+
+const FileLine = memo(function FileLine({
+  row,
+  index,
+  hot,
+  ranges,
+  blameLoading,
+  onOpenCommit,
+}: {
+  row: BlameRow;
+  index: number;
+  hot: boolean;
+  ranges: TokenRange[] | undefined;
+  blameLoading: boolean;
+  onOpenCommit: (commitId: string) => void;
+}) {
+  return (
+    <div
+      data-block={row.hunk || row.dirty ? row.block : undefined}
+      className="grid h-5"
+      style={{ gridTemplateColumns: FILE_COLUMNS, background: hot ? BLAME_HOT : undefined }}
+    >
+      {blameLoading ? (
+        <span
+          className="sticky left-0 z-20 flex h-5 items-center border-r border-border pr-2 pl-2.5"
+          style={{ background: BLAME_FILL }}
+        >
+          <span className={cn("h-3 flex-1 rounded-sm bg-foreground/10", index < 12 && "animate-pulse")} />
+        </span>
+      ) : (
+        <BlameMargin row={row} divided={index > 0 && row.label} hot={hot} onOpenCommit={onOpenCommit} />
+      )}
+      <span
+        className="sticky z-10 pr-2 text-right text-muted-foreground/70 tabular-nums select-none"
+        style={{ left: BLAME_GUTTER, background: hot ? BLAME_HOT : "var(--background)" }}
+      >
+        {index + 1}
+      </span>
+      <span className="whitespace-pre pr-4">
+        <HighlightedLine text={row.text} ranges={ranges} />
+      </span>
+    </div>
+  );
+});
 
 const FileBrowse = memo(function FileBrowse({
   path,
@@ -564,61 +749,55 @@ const FileBrowse = memo(function FileBrowse({
   hunks: BlameHunk[] | null;
   onOpenCommit: (commitId: string) => void;
 }) {
-  const rows = useMemo(() => blameRows(text ?? "", hunks, blameLoading), [blameLoading, hunks, text]);
-  const syntax = useFileSyntax(path, binary ? null : text, binary);
-  const gutter = useMemo(
-    () =>
-      (hunks ?? []).reduce(
-        (widest, hunk) => Math.max(widest, `${blameWhen(hunk.time)} ${hunk.author}`.length),
-        14,
-      ),
-    [hunks],
-  );
-  const widest = useMemo(
-    () => rows.reduce((max, row) => Math.max(max, textColumns(row.text)), 0),
-    [rows],
-  );
-  const visibleRows = useWindowedRows(rows.length, FILE_ROW_HEIGHT);
+  const lines = useMemo(() => (text == null || text.length === 0 ? [] : text.split("\n")), [text]);
+  const rows = useMemo(() => blameRows(lines, hunks, blameLoading), [blameLoading, hunks, lines]);
+  const syntax = useFileSyntax(path, binary || text == null ? null : lines);
+  const widest = useMemo(() => lines.reduce((max, line) => Math.max(max, textColumns(line)), 0), [lines]);
+  const visibleRows = useWindowedRows(rows.length, FILE_ROW_HEIGHT, 12, 640);
+  const [activeBlock, setActiveBlock] = useState<number | null>(null);
+  const [paintedHunks, setPaintedHunks] = useState(hunks);
+  if (paintedHunks !== hunks) {
+    setPaintedHunks(hunks);
+    setActiveBlock(null);
+  }
+
+  useEffect(() => {
+    const node = visibleRows.viewport;
+    if (!node) return;
+    const clear = () => setActiveBlock(null);
+    node.addEventListener("scroll", clear, { passive: true });
+    return () => node.removeEventListener("scroll", clear);
+  }, [visibleRows.viewport]);
 
   if (textLoading || text === null) return <DiffSkeleton label="Loading file" />;
   if (binary) {
     return <div className="p-4 text-sm text-muted-foreground">Binary file</div>;
   }
-  const columns = `${gutter + 2}ch 2.75rem minmax(0,1fr)`;
   return (
     <ScrollArea className="min-h-0 flex-1" viewportRef={visibleRows.viewportRef}>
       <div
         className="font-mono text-[12px] leading-5 [tab-size:4]"
-        style={{ minWidth: `calc(${gutter + 2}ch + 3.75rem + ${widest}ch)` }}
+        style={{ minWidth: `calc(${BLAME_GUTTER} + 3.75rem + ${widest}ch)` }}
+        onMouseOver={(event) => {
+          const next = blockFromEvent(event);
+          setActiveBlock((current) => (current === next ? current : next));
+        }}
+        onMouseLeave={() => setActiveBlock(null)}
       >
         <div style={{ height: visibleRows.before }} />
         {rows.slice(visibleRows.start, visibleRows.end).map((row, offset) => {
           const index = visibleRows.start + offset;
-          const { hunk, head } = row;
+          const hot = activeBlock === row.block && (row.hunk != null || row.dirty);
           return (
-            <div key={index} className="grid h-5" style={{ gridTemplateColumns: columns }}>
-              {blameLoading ? (
-                <span className={cn("mx-2 my-1 h-3 rounded-sm bg-muted/60", index < 12 && "animate-pulse")} />
-              ) : (
-                <button
-                  type="button"
-                  disabled={!hunk}
-                  tabIndex={head ? 0 : -1}
-                  title={hunk ? `${hunk.author} · ${formatAbsoluteTime(hunk.time)}` : "Not committed"}
-                  className={cn("whitespace-nowrap px-2 text-left text-[11px]", !hunk && "text-muted-foreground italic")}
-                  style={head && hunk ? { color: blameColor(hunk.commitId) } : undefined}
-                  onClick={() => {
-                    if (hunk) onOpenCommit(hunk.commitId);
-                  }}
-                >
-                  {head && hunk ? `${blameWhen(hunk.time)} ${hunk.author}` : row.uncommitted ? "Not committed" : ""}
-                </button>
-              )}
-              <span className="pr-2 text-right text-muted-foreground/70 tabular-nums">{index + 1}</span>
-              <span className="whitespace-pre pr-4">
-                <HighlightedLine text={row.text} ranges={syntax?.[index]} />
-              </span>
-            </div>
+            <FileLine
+              key={index}
+              row={row}
+              index={index}
+              hot={hot}
+              ranges={syntax?.[index]}
+              blameLoading={blameLoading}
+              onOpenCommit={onOpenCommit}
+            />
           );
         })}
         <div style={{ height: visibleRows.after }} />
