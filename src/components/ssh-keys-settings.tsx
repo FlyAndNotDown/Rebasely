@@ -1,10 +1,23 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
 import { open as openFile } from "@tauri-apps/plugin-dialog";
-import { CircleAlertIcon, FolderOpenIcon } from "lucide-react";
+import { CheckIcon, ChevronDownIcon, CircleAlertIcon, FolderOpenIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -213,9 +226,6 @@ export function SshKeysSettings({ email }: { email: string }) {
     }
   }
 
-  const nameInvalid = draft !== null && draft.name.trim() !== "" && !keyFileNameOk(draft.name);
-  const passphraseMismatch = draft !== null && draft.passphrase !== draft.confirm;
-
   return (
     <>
       <DialogHeader>
@@ -269,144 +279,14 @@ export function SshKeysSettings({ email }: { email: string }) {
           </Button>
         </div>
 
-        {draft ? (
-          <div className="grid gap-4 rounded-lg border p-4">
-            <div className="grid gap-2">
-              <Label>Key type</Label>
-              <div className="grid grid-cols-2 gap-2">
-                <Button
-                  type="button"
-                  variant={draft.algorithm === "ed25519" ? "secondary" : "outline"}
-                  disabled={busy}
-                  onClick={() =>
-                    setDraft((current) =>
-                      current
-                        ? {
-                            ...current,
-                            algorithm: "ed25519",
-                            name: current.nameEdited ? current.name : suggestedName("ed25519", list?.keys ?? []),
-                          }
-                        : current,
-                    )
-                  }
-                >
-                  Ed25519
-                </Button>
-                <Button
-                  type="button"
-                  variant={draft.algorithm === "rsa" ? "secondary" : "outline"}
-                  disabled={busy}
-                  onClick={() =>
-                    setDraft((current) =>
-                      current
-                        ? {
-                            ...current,
-                            algorithm: "rsa",
-                            name: current.nameEdited ? current.name : suggestedName("rsa", list?.keys ?? []),
-                          }
-                        : current,
-                    )
-                  }
-                >
-                  RSA 4096
-                </Button>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                {draft.algorithm === "ed25519"
-                  ? "Ed25519 is the type Git hosts expect for a new key."
-                  : "RSA 4096 remains the type some older hosts require."}
-              </p>
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="ssh-key-name">File name</Label>
-              <Input
-                id="ssh-key-name"
-                value={draft.name}
-                spellCheck={false}
-                autoCapitalize="off"
-                autoCorrect="off"
-                disabled={busy}
-                onChange={(event) =>
-                  setDraft((current) =>
-                    current ? { ...current, name: event.target.value, nameEdited: true } : current,
-                  )
-                }
-              />
-              {nameInvalid ? (
-                <p className="text-xs text-destructive">
-                  Use letters, numbers, dots, hyphens, and underscores.
-                </p>
-              ) : (
-                <p className="text-xs text-muted-foreground">
-                  OpenSSH tries id_ed25519, id_ecdsa, and id_rsa on its own.
-                </p>
-              )}
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="ssh-key-comment">Comment</Label>
-              <Input
-                id="ssh-key-comment"
-                value={draft.comment}
-                placeholder="you@example.com"
-                spellCheck={false}
-                disabled={busy}
-                onChange={(event) =>
-                  setDraft((current) => (current ? { ...current, comment: event.target.value } : current))
-                }
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="ssh-key-passphrase">Passphrase</Label>
-              <Input
-                id="ssh-key-passphrase"
-                type="password"
-                autoComplete="new-password"
-                value={draft.passphrase}
-                disabled={busy}
-                onChange={(event) =>
-                  setDraft((current) => (current ? { ...current, passphrase: event.target.value } : current))
-                }
-              />
-              <p className="text-xs text-muted-foreground">
-                Leave this empty to use the key without a prompt. A passphrase protects the file if it is copied.
-              </p>
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="ssh-key-passphrase-confirm">Confirm passphrase</Label>
-              <Input
-                id="ssh-key-passphrase-confirm"
-                type="password"
-                autoComplete="new-password"
-                value={draft.confirm}
-                disabled={busy}
-                onChange={(event) =>
-                  setDraft((current) => (current ? { ...current, confirm: event.target.value } : current))
-                }
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    event.preventDefault();
-                    void createKey();
-                  }
-                }}
-              />
-              {passphraseMismatch && draft.confirm.length > 0 ? (
-                <p className="text-xs text-destructive">Passphrases do not match.</p>
-              ) : null}
-            </div>
-            <div className="flex gap-2">
-              <Button
-                type="button"
-                disabled={busy || !keyFileNameOk(draft.name) || passphraseMismatch}
-                onClick={() => void createKey()}
-              >
-                Create key
-              </Button>
-              <Button type="button" variant="outline" disabled={busy} onClick={() => setDraft(null)}>
-                Cancel
-              </Button>
-            </div>
-          </div>
-        ) : null}
+        <GenerateKeyDialog
+          draft={draft}
+          keys={list?.keys ?? []}
+          busy={busy}
+          onDraft={setDraft}
+          onClose={() => setDraft(null)}
+          onCreate={() => void createKey()}
+        />
 
         {importing ? (
           <div className="grid gap-4 rounded-lg border p-4">
@@ -572,5 +452,181 @@ export function SshKeysSettings({ email }: { email: string }) {
         ) : null}
       </div>
     </>
+  );
+}
+
+function GenerateKeyDialog({
+  draft,
+  keys,
+  busy,
+  onDraft,
+  onClose,
+  onCreate,
+}: {
+  draft: Draft | null;
+  keys: SshKeyInfo[];
+  busy: boolean;
+  onDraft: Dispatch<SetStateAction<Draft | null>>;
+  onClose: () => void;
+  onCreate: () => void;
+}) {
+  const nameInvalid = draft !== null && draft.name.trim() !== "" && !keyFileNameOk(draft.name);
+  const passphraseMismatch = draft !== null && draft.passphrase !== draft.confirm;
+
+  function selectAlgorithm(algorithm: Algorithm) {
+    onDraft((current) =>
+      current
+        ? {
+            ...current,
+            algorithm,
+            name: current.nameEdited ? current.name : suggestedName(algorithm, keys),
+          }
+        : current,
+    );
+  }
+
+  return (
+    <Dialog
+      open={draft !== null}
+      onOpenChange={(open) => {
+        if (!open && !busy) onClose();
+      }}
+    >
+      <DialogContent
+        className="sm:max-w-md"
+        overlayClassName="bg-black/40! supports-backdrop-filter:backdrop-blur-md!"
+      >
+        {draft ? (
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (busy || !keyFileNameOk(draft.name) || draft.passphrase !== draft.confirm) return;
+              onCreate();
+            }}
+          >
+            <DialogHeader>
+              <DialogTitle>Generate key</DialogTitle>
+              <DialogDescription>Creates an OpenSSH key in your .ssh folder.</DialogDescription>
+            </DialogHeader>
+            <div className="mt-4 grid gap-4">
+              <div className="grid gap-2">
+                <Label htmlFor="ssh-key-type">Key type</Label>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      id="ssh-key-type"
+                      type="button"
+                      variant="outline"
+                      className="w-full justify-between font-normal"
+                      disabled={busy}
+                    >
+                      <span>{draft.algorithm === "rsa" ? "RSA 4096" : "Ed25519"}</span>
+                      <ChevronDownIcon />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="w-(--radix-dropdown-menu-trigger-width)">
+                    <DropdownMenuItem onClick={() => selectAlgorithm("ed25519")}>
+                      <span className="min-w-4">
+                        {draft.algorithm === "ed25519" ? <CheckIcon className="size-3.5" /> : null}
+                      </span>
+                      Ed25519
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => selectAlgorithm("rsa")}>
+                      <span className="min-w-4">
+                        {draft.algorithm === "rsa" ? <CheckIcon className="size-3.5" /> : null}
+                      </span>
+                      RSA 4096
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <p className="text-xs text-muted-foreground">
+                  {draft.algorithm === "ed25519"
+                    ? "Ed25519 is the type Git hosts expect for a new key."
+                    : "RSA 4096 remains the type some older hosts require."}
+                </p>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="ssh-key-name">File name</Label>
+                <Input
+                  id="ssh-key-name"
+                  value={draft.name}
+                  spellCheck={false}
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  autoComplete="off"
+                  disabled={busy}
+                  onChange={(event) =>
+                    onDraft((current) =>
+                      current ? { ...current, name: event.target.value, nameEdited: true } : current,
+                    )
+                  }
+                />
+                {nameInvalid ? (
+                  <p className="text-xs text-destructive">Use letters, numbers, dots, hyphens, and underscores.</p>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    OpenSSH tries id_ed25519, id_ecdsa, and id_rsa on its own.
+                  </p>
+                )}
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="ssh-key-comment">Comment</Label>
+                <Input
+                  id="ssh-key-comment"
+                  value={draft.comment}
+                  placeholder="you@example.com"
+                  spellCheck={false}
+                  autoComplete="off"
+                  disabled={busy}
+                  onChange={(event) =>
+                    onDraft((current) => (current ? { ...current, comment: event.target.value } : current))
+                  }
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="ssh-key-passphrase">Passphrase</Label>
+                <Input
+                  id="ssh-key-passphrase"
+                  type="password"
+                  autoComplete="off"
+                  value={draft.passphrase}
+                  disabled={busy}
+                  onChange={(event) =>
+                    onDraft((current) => (current ? { ...current, passphrase: event.target.value } : current))
+                  }
+                />
+                <p className="text-xs text-muted-foreground">
+                  Leave this empty to use the key without a prompt. A passphrase protects the file if it is copied.
+                </p>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="ssh-key-passphrase-confirm">Confirm passphrase</Label>
+                <Input
+                  id="ssh-key-passphrase-confirm"
+                  type="password"
+                  autoComplete="off"
+                  value={draft.confirm}
+                  disabled={busy}
+                  onChange={(event) =>
+                    onDraft((current) => (current ? { ...current, confirm: event.target.value } : current))
+                  }
+                />
+                {passphraseMismatch && draft.confirm.length > 0 ? (
+                  <p className="text-xs text-destructive">Passphrases do not match.</p>
+                ) : null}
+              </div>
+            </div>
+            <DialogFooter className="mt-4">
+              <Button type="button" variant="outline" disabled={busy} onClick={onClose}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={busy || !keyFileNameOk(draft.name) || passphraseMismatch}>
+                Create key
+              </Button>
+            </DialogFooter>
+          </form>
+        ) : null}
+      </DialogContent>
+    </Dialog>
   );
 }

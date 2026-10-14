@@ -12,12 +12,15 @@ function ScrollArea({
   viewportClassName,
   gutter = true,
   type = "scroll",
+  scrollbars = "both",
   ...props
 }: React.ComponentProps<typeof ScrollAreaPrimitive.Root> & {
   onScroll?: React.UIEventHandler<HTMLDivElement>
   viewportRef?: React.Ref<HTMLDivElement>
   viewportClassName?: string
   gutter?: boolean
+  /** `vertical` leaves horizontal overflow to a child. Both axes on one viewport relayout forever once the pane overflows. */
+  scrollbars?: "both" | "vertical"
 }) {
   return (
     <ScrollAreaPrimitive.Root
@@ -39,7 +42,7 @@ function ScrollArea({
         {children}
       </ScrollAreaPrimitive.Viewport>
       <ScrollBar />
-      <ScrollBar orientation="horizontal" />
+      {scrollbars === "both" ? <ScrollBar orientation="horizontal" /> : null}
       <ScrollAreaPrimitive.Corner />
     </ScrollAreaPrimitive.Root>
   )

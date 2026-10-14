@@ -274,7 +274,7 @@ function SettingsForm() {
             General
           </NavButton>
         </aside>
-        <ScrollArea className="min-w-0 flex-1">
+        <ScrollArea className="min-w-0 flex-1" scrollbars="vertical">
         <div className="p-6">
           {section === "git" ? (
             <>
