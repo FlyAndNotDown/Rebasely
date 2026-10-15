@@ -852,6 +852,11 @@ async fn open_in_file_manager(path: String) -> AppResult<()> {
 }
 
 #[tauri::command]
+async fn open_mailto(email: String) -> AppResult<()> {
+    blocking(move || editor::open_mailto(&email)).await
+}
+
+#[tauri::command]
 async fn reveal_in_file_manager(path: String) -> AppResult<()> {
     blocking(move || git::reveal_in_file_manager(&path)).await
 }
@@ -1222,6 +1227,7 @@ pub fn run() {
             get_local_git_identity,
             set_local_git_identity,
             open_in_file_manager,
+            open_mailto,
             reveal_in_file_manager,
             ignore_patterns,
             list_terminals,

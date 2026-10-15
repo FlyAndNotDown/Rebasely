@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { ClockIcon, DownloadIcon, FolderOpenIcon, LogOutIcon, MenuIcon, SettingsIcon } from "lucide-react";
+import { ClockIcon, DownloadIcon, FolderOpenIcon, InfoIcon, LogOutIcon, MenuIcon, SettingsIcon } from "lucide-react";
+import { AboutDialog } from "@/components/about-dialog";
 import { CloneRepositoryDialog } from "@/components/lazy-dialogs";
 import { Button } from "@/components/ui/button";
 import {
@@ -27,6 +28,7 @@ export function AppMenu() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [tooltipOpen, setTooltipOpen] = useState(false);
   const [cloneOpen, setCloneOpen] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
   const hovering = useRef(false);
   const menuOpenRef = useRef(false);
   const labels = useMemo(() => disambiguateRepoLabels(recents), [recents]);
@@ -117,6 +119,10 @@ export function AppMenu() {
             <SettingsIcon />
             Settings
           </DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => setAboutOpen(true)}>
+            <InfoIcon />
+            About
+          </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={() => void getCurrentWindow().close()}>
             <LogOutIcon />
@@ -125,6 +131,7 @@ export function AppMenu() {
         </DropdownMenuContent>
       </DropdownMenu>
       <CloneRepositoryDialog open={cloneOpen} onOpenChange={setCloneOpen} />
+      <AboutDialog open={aboutOpen} onOpenChange={setAboutOpen} />
     </div>
   );
 }

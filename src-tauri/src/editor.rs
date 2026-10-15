@@ -207,6 +207,61 @@ pub fn list_editors() -> Vec<EditorOption> {
     items
 }
 
+pub fn open_mailto(email: &str) -> AppResult<()> {
+    if !is_mail_address(email) {
+        return Err(AppError::msg("Email address is invalid"));
+    }
+    let url = format!("mailto:{email}");
+    #[cfg(windows)]
+    {
+        let file = wide(&url);
+        let operation = wide("open");
+        let code = unsafe {
+            ShellExecuteW(
+                std::ptr::null_mut(),
+                operation.as_ptr(),
+                file.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                1,
+            )
+        };
+        if code <= 32 {
+            return Err(AppError::msg("Could not open a mail app"));
+        }
+        Ok(())
+    }
+    #[cfg(not(windows))]
+    {
+        let mut command = if cfg!(target_os = "macos") {
+            let mut command = crate::locate::command("open");
+            command.arg(&url);
+            command
+        } else {
+            let mut command = crate::locate::command("xdg-open");
+            command.arg(&url);
+            command
+        };
+        command
+            .spawn()
+            .map_err(|_| AppError::msg("Could not open a mail app"))?;
+        Ok(())
+    }
+}
+
+fn is_mail_address(email: &str) -> bool {
+    let Some((name, domain)) = email.split_once('@') else {
+        return false;
+    };
+    !name.is_empty()
+        && domain.contains('.')
+        && !domain.starts_with('.')
+        && !domain.ends_with('.')
+        && email.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'+' | b'-' | b'@')
+        })
+}
+
 fn open_with_system(path: &str) -> AppResult<()> {
     #[cfg(windows)]
     {
@@ -329,7 +384,17 @@ pub fn open_in_editor(path: &str, line: Option<u32>, editor_id: &str) -> AppResu
 
 #[cfg(test)]
 mod tests {
+    use super::is_mail_address;
     use crate::locate::expand_env;
+
+    #[test]
+    fn accepts_only_a_plain_email_address() {
+        assert!(is_mail_address("alice@example.com"));
+        assert!(!is_mail_address("not an email"));
+        assert!(!is_mail_address("mailto:alice@example.com"));
+        assert!(!is_mail_address("a@b"));
+        assert!(!is_mail_address(""));
+    }
 
     #[test]
     fn expands_environment_variables_in_install_paths() {

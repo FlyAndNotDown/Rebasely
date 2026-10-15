@@ -303,6 +303,7 @@ export const gitApi = {
   setLocalGitIdentity: (repoPath: string, identity: GitIdentity) =>
     call<GitIdentity>("set_local_git_identity", { repoPath, identity }),
   openInFileManager: (path: string) => call<void>("open_in_file_manager", { path }),
+  openMailto: (email: string) => call<void>("open_mailto", { email }),
   revealInFileManager: (path: string) => call<void>("reveal_in_file_manager", { path }),
   ignorePatterns: (repoPath: string, patterns: string[]) =>
     call<WorkspaceSnapshot>("ignore_patterns", { repoPath, patterns }),
