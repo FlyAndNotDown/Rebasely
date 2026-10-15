@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { formatRelativeTime } from "@/lib/format";
-import { changeSummary, depotBase } from "@/lib/p4";
+import { changeSummary, depotBase, p4ActionClass, p4ActionLetter } from "@/lib/p4";
 import { cn } from "@/lib/utils";
 import { useP4 } from "@/state/p4-context";
 
@@ -111,19 +111,22 @@ export function P4Submitted() {
                   </p>
                 ) : null}
               </div>
-              <div className="min-h-0 flex-1 overflow-auto">
+              <div className="min-h-0 flex-1 overflow-auto px-1 py-1">
                 {p4.submittedDetail?.files.map((item) => (
                   <button
                     key={item.depotPath}
                     type="button"
+                    title={item.action}
                     className={cn(
-                      "flex w-full items-center gap-2 border-b px-3 py-1.5 text-left",
-                      file === item.depotPath ? "bg-muted" : "hover:bg-muted/50",
+                      "flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-xs hover:bg-muted/70",
+                      file === item.depotPath && "bg-muted",
                     )}
                     onClick={() => setPicked(item.depotPath)}
                   >
-                    <span className="w-16 shrink-0 font-mono text-[11px] text-muted-foreground">{item.action}</span>
-                    <span className="min-w-0 flex-1 truncate font-mono text-xs" title={item.depotPath}>
+                    <span className={cn("w-3 shrink-0 text-center font-mono text-[11px] font-medium", p4ActionClass(item.action))}>
+                      {p4ActionLetter(item.action)}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate font-mono" title={item.depotPath}>
                       {depotBase(item.depotPath)}
                     </span>
                   </button>

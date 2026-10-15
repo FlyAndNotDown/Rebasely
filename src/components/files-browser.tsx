@@ -1,9 +1,10 @@
 import { memo, startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ChevronRightIcon, FileIcon, FolderIcon, FolderOpenIcon, SquarePenIcon, XIcon } from "lucide-react";
+import { SquarePenIcon, XIcon } from "lucide-react";
 import { toast } from "sonner";
 import { AuthorAvatar } from "@/components/author-avatar";
 import { avatarColor, avatarInitial, avatarSeed } from "@/lib/avatar";
 import { DiffLines } from "@/components/diff-viewer";
+import { FileTree } from "@/components/file-tree";
 import { ImageDiff, isImagePath } from "@/components/image-diff";
 import { DiffSkeleton } from "@/components/skeletons";
 import { Button } from "@/components/ui/button";
@@ -120,7 +121,7 @@ export function FilesBrowser() {
         <div className="flex h-full min-h-0 flex-col">
           <div className="flex h-10 shrink-0 items-center border-b px-3 text-sm font-medium">Files</div>
           <ScrollArea className="min-h-0 flex-1">
-            <DirRows
+            <FileTree
               dir=""
               depth={0}
               entries={entries}
@@ -401,72 +402,6 @@ function FileHistoryPane({ repoPath, path, pin }: { repoPath: string; path: stri
         <FileCommitDiff diff={diff} commitId={selectedId} loading={Boolean(selectedId) && !diff} />
       </ResizablePanel>
     </ResizablePanelGroup>
-  );
-}
-
-function DirRows({
-  dir,
-  depth,
-  entries,
-  open,
-  selected,
-  onToggle,
-  onOpenFile,
-}: {
-  dir: string;
-  depth: number;
-  entries: Record<string, DirEntry[]>;
-  open: Set<string>;
-  selected: string | null;
-  onToggle: (dir: string) => void;
-  onOpenFile: (path: string) => void;
-}) {
-  const items = entries[dir];
-  if (!items) return null;
-  return (
-    <>
-      {items.map((item) => {
-        const expanded = item.dir && open.has(item.path);
-        return (
-          <div key={item.path}>
-            <button
-              type="button"
-              title={item.ignored ? "Ignored" : undefined}
-              className={cn(
-                "flex h-7 w-full items-center gap-1 pr-2 text-left text-xs hover:bg-muted/70",
-                selected === item.path && "bg-muted",
-                item.ignored && "text-muted-foreground",
-              )}
-              style={{ paddingLeft: 8 + depth * 12 }}
-              onClick={() => (item.dir ? onToggle(item.path) : onOpenFile(item.path))}
-            >
-              {item.dir ? (
-                <ChevronRightIcon className={cn("size-3.5 shrink-0 transition-transform", expanded && "rotate-90")} />
-              ) : (
-                <span className="size-3.5 shrink-0" />
-              )}
-              {item.dir ? (
-                expanded ? <FolderOpenIcon className="size-3.5 shrink-0" /> : <FolderIcon className="size-3.5 shrink-0" />
-              ) : (
-                <FileIcon className="size-3.5 shrink-0 text-muted-foreground" />
-              )}
-              <span className="min-w-0 flex-1 truncate font-mono">{item.name}</span>
-            </button>
-            {expanded ? (
-              <DirRows
-                dir={item.path}
-                depth={depth + 1}
-                entries={entries}
-                open={open}
-                selected={selected}
-                onToggle={onToggle}
-                onOpenFile={onOpenFile}
-              />
-            ) : null}
-          </div>
-        );
-      })}
-    </>
   );
 }
 

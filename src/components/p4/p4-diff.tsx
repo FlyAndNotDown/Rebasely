@@ -54,14 +54,14 @@ export function P4Diff({
         <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
           Binary file
         </div>
-      ) : diff.lines.length === 0 ? (
+      ) : diff.lines.every((line) => line.kind === "hunk") ? (
         <div className="flex flex-1 items-center justify-center p-6 text-center text-sm text-muted-foreground">
           No differences against the have revision
         </div>
       ) : prefs.diffSplit ? (
-        <SplitDiff lines={diff.lines} />
+        <SplitDiff lines={diff.lines.filter((line) => line.kind !== "hunk")} />
       ) : (
-        <InlineDiff lines={diff.lines} />
+        <InlineDiff lines={diff.lines.filter((line) => line.kind !== "hunk")} />
       )}
       {diff.truncated ? (
         <div className="shrink-0 border-t px-3 py-1.5 text-[11px] text-muted-foreground">
@@ -87,13 +87,7 @@ function SplitDiff({ lines }: { lines: DiffLine[] }) {
   return (
     <div className="min-h-0 flex-1 overflow-auto font-mono text-[12px] leading-5">
       {pairs.map((row, index) => {
-        if (row.kind === "hunk") {
-          return (
-            <div key={index} className="bg-diff-hunk/15 px-3 text-diff-hunk">
-              {lines[row.index]?.content}
-            </div>
-          );
-        }
+        if (row.kind === "hunk") return null;
         const left = row.left === null ? undefined : lines[row.left];
         const right = row.right === null ? undefined : lines[row.right];
         return (

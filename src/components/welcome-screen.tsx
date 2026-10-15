@@ -27,7 +27,7 @@ export function WelcomeScreen() {
           <div>
             <h1 className="text-2xl font-medium tracking-tight">Rebasely</h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              Open a Git repository or a Perforce workspace. Clone a Git remote, or create a Perforce workspace, to review changes and history.
+              Open a local repository, or open a remote one, to review changes and history.
             </p>
           </div>
         </div>
@@ -35,11 +35,11 @@ export function WelcomeScreen() {
         <div className="flex shrink-0 flex-col gap-4">
           <Button onClick={() => void openFolder()} className="w-full">
             <FolderOpenIcon data-icon="inline-start" />
-            Open repository
+            Open local repository
           </Button>
           <Button variant="outline" className="w-full" onClick={() => setCloneOpen(true)}>
             <DownloadIcon data-icon="inline-start" />
-            Clone repository
+            Open remote repository
           </Button>
         </div>
 
@@ -51,7 +51,7 @@ export function WelcomeScreen() {
             <ScrollArea className="min-h-0 flex-1 rounded-lg border">
             <ul className="divide-y divide-border">
               {recents.map((repo) => (
-                <li key={repo.path} className="flex items-center gap-2 pr-1">
+                <li key={`${asVcs(repo.vcs)}:${repo.path}`} className="flex items-center gap-2 pr-1">
                   <button
                     type="button"
                     className="flex min-w-0 flex-1 items-center gap-2 px-3 py-2.5 text-left hover:bg-muted/60"
@@ -60,7 +60,7 @@ export function WelcomeScreen() {
                     <VcsIcon vcs={asVcs(repo.vcs)} className="size-3.5 shrink-0 text-muted-foreground" />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-medium">
-                        {labels.get(repo.path) ?? repo.name}
+                        {asVcs(repo.vcs) === "perforce" ? repo.name : (labels.get(repo.path) ?? repo.name)}
                       </span>
                       <span className="block truncate font-mono text-[11px] text-muted-foreground">
                         {displayPath(repo.path)}

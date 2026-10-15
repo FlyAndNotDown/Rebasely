@@ -53,17 +53,6 @@ const themeOptions: { id: ThemeChoice; label: string }[] = [
   { id: "system", label: "System" },
 ];
 
-const p4Charsets = [
-  { id: "", label: "Server default" },
-  { id: "utf8", label: "utf8" },
-  { id: "utf8-bom", label: "utf8-bom" },
-  { id: "utf16", label: "utf16" },
-  { id: "utf16le", label: "utf16le" },
-  { id: "utf16be", label: "utf16be" },
-  { id: "utf32le", label: "utf32le" },
-  { id: "utf32be", label: "utf32be" },
-];
-
 export function SettingsDialog({
   open,
   onOpenChange,
@@ -107,7 +96,6 @@ function SettingsForm() {
   const [pathP4, setPathP4] = useState<string | null>(null);
   const [p4Ready, setP4Ready] = useState(false);
   const [addingP4, setAddingP4] = useState(false);
-  const [p4Charset, setP4Charset] = useState(prefs.p4Charset);
   const [themeChoice, setThemeChoice] = useState<ThemeChoice>(() =>
     theme === "light" || theme === "dark" || theme === "system" ? theme : "dark",
   );
@@ -177,7 +165,6 @@ function SettingsForm() {
             ? [selectedP4, ...p4Extras]
             : p4Extras,
         );
-        setP4Charset(prefs.p4Charset);
         setP4Ready(true);
       })
       .catch((error) => toast.error(errorMessage(error)));
@@ -470,9 +457,7 @@ function SettingsForm() {
             <>
               <DialogHeader>
                 <DialogTitle>Perforce</DialogTitle>
-                <DialogDescription>
-                  The p4 executable Rebasely runs, and the charset used for a new workspace.
-                </DialogDescription>
+                <DialogDescription>The p4 executable Rebasely runs.</DialogDescription>
               </DialogHeader>
               <div className="mt-6 grid gap-8">
                 <P4ExecutableSection
@@ -485,18 +470,6 @@ function SettingsForm() {
                   onRemove={removeP4Executable}
                   onAdd={() => void addP4Executable()}
                 />
-                <FieldGroup title="New workspace">
-                  <SelectField
-                    id="p4-charset"
-                    label="Charset"
-                    value={p4Charset}
-                    options={p4Charsets}
-                    onChange={(value) => {
-                      setP4Charset(value);
-                      void persistPrefs({ p4Charset: value });
-                    }}
-                  />
-                </FieldGroup>
               </div>
             </>
           ) : section === "ssh" ? (

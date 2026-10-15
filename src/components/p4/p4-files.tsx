@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { ChevronRightIcon } from "lucide-react";
+import { FileTree } from "@/components/file-tree";
 import { P4Diff } from "@/components/p4/p4-diff";
 import { Button } from "@/components/ui/button";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { formatRelativeTime } from "@/lib/format";
-import { changeSummary, relativeToRoot } from "@/lib/p4";
+import { changeSummary, p4ActionClass, p4ActionLetter, relativeToRoot } from "@/lib/p4";
 import { cn } from "@/lib/utils";
 import { useP4 } from "@/state/p4-context";
 import type { FileDiff } from "@/types/git";
@@ -54,9 +54,7 @@ export function P4Files() {
     <ResizablePanelGroup orientation="horizontal" className="min-h-0 min-w-0 flex-1">
       <ResizablePanel id="p4-tree" defaultSize="28%" minSize="18%" maxSize="46%">
         <div className="flex h-full min-h-0 flex-col">
-          <div className="flex h-10 shrink-0 items-center border-b px-3 text-xs font-medium text-muted-foreground">
-            Workspace
-          </div>
+          <div className="flex h-10 shrink-0 items-center border-b px-3 text-sm font-medium">Workspace</div>
           <div className="min-h-0 flex-1 overflow-auto py-1">
             {root ? (
               <WorkspaceTree key={root} selected={selected} opened={opened} onSelect={choose} />
@@ -183,7 +181,8 @@ function WorkspaceTree({
   opened: Map<string, OpenedFile>;
   onSelect: (path: string) => void;
 }) {
-  const { listDir } = useP4();
+  const { connection, listDir } = useP4();
+  const root = connection?.root ?? "";
   const [entries, setEntries] = useState<Record<string, P4DirEntry[]>>({});
   const [open, setOpen] = useState<Set<string>>(() => new Set());
   const [failed, setFailed] = useState(false);
@@ -202,73 +201,49 @@ function WorkspaceTree({
     };
   }, [listDir]);
 
-  async function toggle(relative: string) {
-    if (open.has(relative)) {
+  async function toggle(path: string) {
+    if (open.has(path)) {
       setOpen((current) => {
         const next = new Set(current);
-        next.delete(relative);
+        next.delete(path);
         return next;
       });
       return;
     }
-    if (!entries[relative]) {
+    if (!entries[path]) {
       try {
-        const next = await listDir(relative);
-        setEntries((current) => ({ ...current, [relative]: next }));
+        const next = await listDir(relativeToRoot(root, path));
+        setEntries((current) => ({ ...current, [path]: next }));
       } catch {
         return;
       }
     }
-    setOpen((current) => new Set(current).add(relative));
-  }
-
-  function rows(relative: string, depth: number) {
-    const list = entries[relative];
-    if (!list) return null;
-    return list.map((entry) => {
-      const child = relative ? `${relative}/${entry.name}` : entry.name;
-      if (entry.dir) {
-        const expanded = open.has(child);
-        return (
-          <div key={entry.path}>
-            <button
-              type="button"
-              className="flex w-full items-center gap-1 py-1 pr-2 text-left text-xs hover:bg-muted/50"
-              style={{ paddingLeft: 8 + depth * 12 }}
-              onClick={() => void toggle(child)}
-            >
-              <ChevronRightIcon className={cn("size-3 shrink-0 transition-transform", expanded && "rotate-90")} />
-              <span className="min-w-0 flex-1 truncate">{entry.name}</span>
-            </button>
-            {expanded ? rows(child, depth + 1) : null}
-          </div>
-        );
-      }
-      const action = opened.get(normalize(entry.path))?.action;
-      const active = selected !== null && normalize(selected) === normalize(entry.path);
-      return (
-        <button
-          key={entry.path}
-          type="button"
-          className={cn(
-            "flex w-full items-center gap-1 py-1 pr-2 text-left text-xs",
-            active ? "bg-muted" : "hover:bg-muted/50",
-          )}
-          style={{ paddingLeft: 8 + depth * 12 }}
-          onClick={() => onSelect(entry.path)}
-        >
-          <span className="w-3 shrink-0" />
-          <span className="min-w-0 flex-1 truncate font-mono">{entry.name}</span>
-          {action ? <span className="shrink-0 font-mono text-[10px] text-diff-hunk">{action}</span> : null}
-        </button>
-      );
-    });
+    setOpen((current) => new Set(current).add(path));
   }
 
   if (failed) {
     return <p className="px-3 py-2 text-xs text-muted-foreground">Could not read the workspace folder.</p>;
   }
-  return <>{rows("", 0)}</>;
+  return (
+    <FileTree
+      dir=""
+      depth={0}
+      entries={entries}
+      open={open}
+      selected={selected}
+      onToggle={(path) => void toggle(path)}
+      onOpenFile={onSelect}
+      trailing={(entry) => {
+        const action = opened.get(normalize(entry.path))?.action;
+        if (!action) return null;
+        return (
+          <span className={cn("w-3 shrink-0 text-center font-mono text-[11px] font-medium", p4ActionClass(action))} title={action}>
+            {p4ActionLetter(action)}
+          </span>
+        );
+      }}
+    />
+  );
 }
 
 interface OpenedFile {

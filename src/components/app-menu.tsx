@@ -78,7 +78,7 @@ export function AppMenu() {
         <DropdownMenuContent align="start" className="w-56">
           <DropdownMenuItem onSelect={() => void openFolder()}>
             <FolderOpenIcon />
-            Open repository
+            Open local repository
           </DropdownMenuItem>
           <DropdownMenuSub>
             <DropdownMenuSubTrigger>
@@ -91,11 +91,11 @@ export function AppMenu() {
                   <DropdownMenuItem disabled>No recent repositories</DropdownMenuItem>
                 ) : (
                   recents.map((repo) => {
-                    const label = labels.get(repo.path) ?? repo.name;
+                    const label = asVcs(repo.vcs) === "perforce" ? repo.name : (labels.get(repo.path) ?? repo.name);
                     const path = displayPath(repo.path);
                     return (
                       <DropdownMenuItem
-                        key={repo.path}
+                        key={`${asVcs(repo.vcs)}:${repo.path}`}
                         title={path}
                         onSelect={() => void openPath(repo.path, repo.vcs ? asVcs(repo.vcs) : undefined)}
                       >
@@ -117,7 +117,7 @@ export function AppMenu() {
           </DropdownMenuSub>
           <DropdownMenuItem onSelect={() => setCloneOpen(true)}>
             <DownloadIcon />
-            Clone repository
+            Open remote repository
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={() => setOpenPanel("settings")}>

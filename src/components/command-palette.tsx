@@ -147,7 +147,7 @@ export function CommandCenter() {
       );
     }
     list.push(
-      { id: "open", label: "Open repository…", group: "Repository", shortcut: "openRepository", run: () => void git.openFolder() },
+      { id: "open", label: "Open local repository…", group: "Repository", shortcut: "openRepository", run: () => void git.openFolder() },
       { id: "next-tab", label: "Next tab", group: "Navigate", shortcut: "nextTab", run: () => cycle(1) },
       { id: "previous-tab", label: "Previous tab", group: "Navigate", shortcut: "previousTab", run: () => cycle(-1) },
       { id: "settings", label: "Settings", group: "App", shortcut: "settings", run: () => setOpenPanel("settings") },

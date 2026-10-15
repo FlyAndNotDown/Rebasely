@@ -18,14 +18,17 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Textarea } from "@/components/ui/textarea";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
-import { changeSummary, depotBase } from "@/lib/p4";
+import { changeSummary, depotBase, p4ActionClass, p4ActionLetter } from "@/lib/p4";
 import { cn } from "@/lib/utils";
 import { useP4 } from "@/state/p4-context";
 
 export function P4Pending() {
   const p4 = useP4();
   const selected = p4.pending.find((change) => change.id === p4.selectedChange) ?? null;
+  const opened = selected?.files.filter((file) => !file.shelved) ?? [];
+  const shelved = selected?.files.filter((file) => file.shelved) ?? [];
   const [creating, setCreating] = useState(false);
+  const [groups, setGroups] = useState({ changes: true, shelved: true });
   const [revertPaths, setRevertPaths] = useState<string[] | null>(null);
   const numbered = p4.selectedChange !== "default";
 
@@ -35,38 +38,44 @@ export function P4Pending() {
         <ResizablePanel id="p4-changes" defaultSize="24%" minSize="16%" maxSize="40%">
           <div className="flex h-full min-h-0 flex-col">
             <div className="flex h-10 shrink-0 items-center justify-between border-b px-3">
-              <span className="text-xs font-medium text-muted-foreground">Pending</span>
+              <span className="text-sm font-medium">Pending</span>
               <Button type="button" size="xs" variant="ghost" onClick={() => setCreating(true)}>
                 <PlusIcon />
                 New
               </Button>
             </div>
-            <div className="min-h-0 flex-1 overflow-auto">
+            <div className="min-h-0 flex-1 overflow-auto px-1 py-1">
               {p4.pending.map((change) => {
                 const active = change.id === p4.selectedChange;
                 const summary = changeSummary(change.description);
+                const openedCount = change.files.filter((file) => !file.shelved).length;
+                const shelvedCount = change.files.filter((file) => file.shelved).length;
                 return (
                   <button
                     key={change.id}
                     type="button"
                     className={cn(
-                      "block w-full border-b px-3 py-2 text-left",
-                      active ? "bg-muted" : "hover:bg-muted/50",
+                      "flex w-full items-baseline gap-2 rounded-md px-2 py-1.5 text-left hover:bg-muted/70",
+                      active && "bg-muted",
                     )}
                     onClick={() => p4.selectChange(change.id)}
                   >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="font-mono text-sm">
-                        {change.id === "default" ? "default" : `#${change.id}`}
-                      </span>
-                      <span className="text-[11px] text-muted-foreground">{change.files.length}</span>
-                    </div>
-                    <div className="truncate text-xs text-muted-foreground">
-                      {summary || "No description"}
-                    </div>
-                    {change.shelved ? (
-                      <div className="mt-1 text-[10px] tracking-wide text-diff-hunk uppercase">Shelved</div>
-                    ) : null}
+                    <span className="w-16 shrink-0 truncate font-mono text-[11px] text-muted-foreground">
+                      {change.id === "default" ? "default" : `#${change.id}`}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-xs">{summary || "No description"}</span>
+                    <span className="w-8 shrink-0 text-right text-[11px] tabular-nums text-muted-foreground" title="Changes">
+                      {openedCount}
+                    </span>
+                    <span
+                      className={cn(
+                        "w-8 shrink-0 text-right text-[11px] tabular-nums",
+                        shelvedCount > 0 ? "text-diff-hunk" : "text-muted-foreground",
+                      )}
+                      title="Shelved"
+                    >
+                      {shelvedCount}
+                    </span>
                   </button>
                 );
               })}
@@ -78,34 +87,30 @@ export function P4Pending() {
           <ResizablePanelGroup orientation="horizontal" className="min-h-0 min-w-0">
             <ResizablePanel id="p4-files" defaultSize="38%" minSize="24%" maxSize="55%">
               <div className="flex h-full min-h-0 flex-col">
-                <div className="min-h-0 flex-1 overflow-auto">
-                  {selected && selected.files.length === 0 ? (
+                <div className="min-h-0 flex-1 overflow-auto px-1 py-1">
+                  <FileGroup
+                    title="Changes"
+                    open={groups.changes}
+                    files={opened}
+                    selectedPath={p4.selectedFile}
+                    selectedShelved={p4.selectedShelved}
+                    onToggle={() => setGroups((current) => ({ ...current, changes: !current.changes }))}
+                    onSelect={(path) => p4.selectFile(path, false)}
+                  />
+                  <FileGroup
+                    title="Shelved"
+                    open={groups.shelved}
+                    files={shelved}
+                    selectedPath={p4.selectedFile}
+                    selectedShelved={p4.selectedShelved}
+                    onToggle={() => setGroups((current) => ({ ...current, shelved: !current.shelved }))}
+                    onSelect={(path) => p4.selectFile(path, true)}
+                  />
+                  {opened.length === 0 && shelved.length === 0 ? (
                     <p className="p-4 text-sm text-muted-foreground">
                       No open files. Check out a file from Workspace, or reconcile offline work.
                     </p>
-                  ) : (
-                    selected?.files.map((file) => {
-                      const active = file.depotPath === p4.selectedFile;
-                      return (
-                        <button
-                          key={`${file.depotPath}:${file.action}`}
-                          type="button"
-                          className={cn(
-                            "flex w-full items-center gap-2 border-b px-3 py-1.5 text-left",
-                            active ? "bg-muted" : "hover:bg-muted/50",
-                          )}
-                          onClick={() => p4.selectFile(file.depotPath)}
-                        >
-                          <span className={cn("w-16 shrink-0 font-mono text-[11px]", actionClass(file.action))}>
-                            {file.action}
-                          </span>
-                          <span className="min-w-0 flex-1 truncate font-mono text-xs" title={file.depotPath}>
-                            {depotBase(file.depotPath)}
-                          </span>
-                        </button>
-                      );
-                    })
-                  )}
+                  ) : null}
                 </div>
                 <div className="shrink-0 border-t p-3">
                   <Textarea
@@ -118,7 +123,7 @@ export function P4Pending() {
                     <Button
                       type="button"
                       size="sm"
-                      disabled={!p4.description.trim() || !selected || selected.files.length === 0}
+                      disabled={!p4.description.trim() || opened.length === 0}
                       onClick={() => void p4.submitSelected()}
                     >
                       Submit
@@ -137,8 +142,8 @@ export function P4Pending() {
                       type="button"
                       size="sm"
                       variant="outline"
-                      disabled={!selected || selected.files.length === 0}
-                      onClick={() => setRevertPaths(selected?.files.map((file) => file.depotPath) ?? [])}
+                      disabled={opened.length === 0}
+                      onClick={() => setRevertPaths(opened.map((file) => file.depotPath))}
                     >
                       Revert
                     </Button>
@@ -176,7 +181,7 @@ export function P4Pending() {
                           .map((change) => (
                             <DropdownMenuItem
                               key={change.id}
-                              disabled={!p4.selectedFile}
+                              disabled={!p4.selectedFile || p4.selectedShelved}
                               onClick={() =>
                                 p4.selectedFile && void p4.moveFiles([p4.selectedFile], change.id)
                               }
@@ -219,10 +224,61 @@ export function P4Pending() {
   );
 }
 
-function actionClass(action: string) {
-  if (action.includes("add") || action === "branch") return "text-diff-add";
-  if (action.includes("delete")) return "text-diff-del";
-  return "text-diff-hunk";
+function FileGroup({
+  title,
+  open,
+  files,
+  selectedPath,
+  selectedShelved,
+  onToggle,
+  onSelect,
+}: {
+  title: string;
+  open: boolean;
+  files: { depotPath: string; action: string; shelved: boolean }[];
+  selectedPath: string | null;
+  selectedShelved: boolean;
+  onToggle: () => void;
+  onSelect: (path: string) => void;
+}) {
+  return (
+    <div>
+      <button
+        type="button"
+        className="flex h-7 w-full items-center gap-1.5 rounded-md px-2 text-left hover:bg-muted/70"
+        onClick={onToggle}
+        aria-expanded={open}
+      >
+        <ChevronDownIcon className={cn("size-3.5 text-muted-foreground transition-transform", !open && "-rotate-90")} />
+        <span className="text-xs font-medium">{title}</span>
+        <span className="tabular-nums text-xs text-muted-foreground">{files.length}</span>
+      </button>
+      {open
+        ? files.map((file) => {
+            const active = file.depotPath === selectedPath && file.shelved === selectedShelved;
+            return (
+              <button
+                key={`${file.depotPath}:${file.shelved ? "shelf" : "open"}`}
+                type="button"
+                title={file.action}
+                className={cn(
+                  "flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-xs hover:bg-muted/70",
+                  active && "bg-muted",
+                )}
+                onClick={() => onSelect(file.depotPath)}
+              >
+                <span className={cn("w-3 shrink-0 text-center font-mono text-[11px] font-medium", p4ActionClass(file.action))}>
+                  {p4ActionLetter(file.action)}
+                </span>
+                <span className="min-w-0 flex-1 truncate font-mono" title={file.depotPath}>
+                  {depotBase(file.depotPath)}
+                </span>
+              </button>
+            );
+          })
+        : null}
+    </div>
+  );
 }
 
 function NewChangeDialog({

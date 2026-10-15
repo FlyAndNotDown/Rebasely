@@ -1015,6 +1015,15 @@ async fn p4_opened_diff(connection: p4::P4Connection, path: String) -> AppResult
 }
 
 #[tauri::command]
+async fn p4_shelf_diff(
+    connection: p4::P4Connection,
+    depot_path: String,
+    change_id: String,
+) -> AppResult<git::FileDiff> {
+    blocking(move || p4::shelf_diff(&connection, &depot_path, &change_id)).await
+}
+
+#[tauri::command]
 async fn p4_revision_diff(
     connection: p4::P4Connection,
     depot_path: String,
@@ -1131,6 +1140,26 @@ async fn p4_file_action(
 #[tauri::command]
 async fn p4_login(connection: p4::P4Connection, password: String) -> AppResult<()> {
     blocking(move || p4::login(&connection, &password)).await
+}
+
+#[tauri::command]
+async fn p4_check_connection(auth: p4::P4Auth) -> AppResult<p4::P4CheckedConnection> {
+    blocking(move || p4::check_connection(&auth)).await
+}
+
+#[tauri::command]
+async fn p4_list_streams(auth: p4::P4Auth) -> AppResult<Vec<p4::P4StreamOption>> {
+    blocking(move || p4::list_streams(&auth)).await
+}
+
+#[tauri::command]
+async fn p4_list_depot_dirs(auth: p4::P4Auth, path: String) -> AppResult<Vec<p4::P4DepotEntry>> {
+    blocking(move || p4::list_depot_dirs(&auth, &path)).await
+}
+
+#[tauri::command]
+async fn p4_prepare_client(auth: p4::P4Auth, client: String) -> AppResult<String> {
+    blocking(move || p4::prepare_client(&auth, &client)).await
 }
 
 #[tauri::command]
@@ -1463,6 +1492,7 @@ pub fn run() {
             p4_submitted,
             p4_describe,
             p4_opened_diff,
+            p4_shelf_diff,
             p4_revision_diff,
             p4_filelog,
             p4_list_dir,
@@ -1479,6 +1509,10 @@ pub fn run() {
             p4_reconcile,
             p4_file_action,
             p4_login,
+            p4_check_connection,
+            p4_list_streams,
+            p4_list_depot_dirs,
+            p4_prepare_client,
             p4_create_workspace,
             p4_executables,
             check_p4_executable,

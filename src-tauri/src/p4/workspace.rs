@@ -20,6 +20,45 @@ use crate::p4::parse::{
     set_spec_field, valid_client_name, valid_depot_path, view_depots, ZtagRecord,
 };
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct P4Auth {
+    pub port: String,
+    pub user: String,
+    pub password: String,
+    pub charset: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct P4ClientOption {
+    pub name: String,
+    pub root: String,
+    pub stream: String,
+    pub description: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct P4StreamOption {
+    pub path: String,
+    pub kind: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct P4DepotEntry {
+    pub path: String,
+    pub dir: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct P4CheckedConnection {
+    pub server: String,
+    pub clients: Vec<P4ClientOption>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct P4Connection {
@@ -252,6 +291,22 @@ pub fn opened_diff(connection: &P4Connection, path: &str) -> AppResult<FileDiff>
     let env = env_for(connection);
     let text = cli::run_p4_diff(&env, &["diff", "-du", path])?;
     Ok(parse_single_diff(&text, path))
+}
+
+pub fn shelf_diff(
+    connection: &P4Connection,
+    depot_path: &str,
+    change_id: &str,
+) -> AppResult<FileDiff> {
+    let id = require_numbered(change_id)?;
+    if !depot_path.starts_with("//") {
+        return Err(AppError::msg("Shelf diff needs a depot path."));
+    }
+    let env = env_for(connection);
+    let have = format!("{depot_path}#have");
+    let shelf = format!("{depot_path}@={id}");
+    let text = cli::run_p4_diff(&env, &["diff2", "-du", &have, &shelf])?;
+    Ok(parse_single_diff(&text, depot_path))
 }
 
 pub fn revision_diff(connection: &P4Connection, path: &str, rev: &str) -> AppResult<FileDiff> {
@@ -540,6 +595,170 @@ pub fn create_workspace(
     Ok(connection)
 }
 
+pub fn check_connection(auth: &P4Auth) -> AppResult<P4CheckedConnection> {
+    let env = prepare_auth(auth)?;
+    let info = run_ok(&env, &["-ztag", "info"], None)?;
+    let record = parse_ztag(&info).into_iter().next().unwrap_or_default();
+    let server = record
+        .get("serverAddress")
+        .filter(|value| known_p4_value(value))
+        .cloned()
+        .unwrap_or_else(|| env.port.clone());
+    Ok(P4CheckedConnection {
+        server,
+        clients: list_clients(&env)?,
+    })
+}
+
+pub fn list_streams(auth: &P4Auth) -> AppResult<Vec<P4StreamOption>> {
+    let env = prepare_auth(auth)?;
+    let stdout = run_ok(&env, &["-ztag", "streams", "-m", "2000"], None)?;
+    let mut streams = Vec::new();
+    for record in parse_ztag(&stdout) {
+        let path = field(&record, "Stream");
+        if !valid_depot_path(&path) {
+            continue;
+        }
+        streams.push(P4StreamOption {
+            path,
+            kind: field(&record, "Type"),
+        });
+    }
+    streams.sort_by_key(|item| item.path.to_lowercase());
+    Ok(streams)
+}
+
+pub fn list_depot_dirs(auth: &P4Auth, path: &str) -> AppResult<Vec<P4DepotEntry>> {
+    let env = prepare_auth(auth)?;
+    let path = path.trim().trim_end_matches('/');
+    if path.is_empty() || path == "//" {
+        let stdout = run_ok(&env, &["-ztag", "depots"], None)?;
+        let mut entries = Vec::new();
+        for record in parse_ztag(&stdout) {
+            let name = field(&record, "name");
+            if name.is_empty() || name.contains([' ', '*', '?', '#', '@']) {
+                continue;
+            }
+            entries.push(P4DepotEntry {
+                path: format!("//{name}"),
+                dir: true,
+            });
+        }
+        entries.sort_by_key(|item| item.path.to_lowercase());
+        return Ok(entries);
+    }
+    if !valid_depot_path(path) {
+        return Err(AppError::msg(
+            "Depot path should look like //depot/project.",
+        ));
+    }
+    let spec = format!("{path}/*");
+    let stdout = run_ok(&env, &["-ztag", "dirs", &spec], None)?;
+    let mut entries = Vec::new();
+    for record in parse_ztag(&stdout) {
+        let dir = field(&record, "dir");
+        if !valid_depot_path(&dir) {
+            continue;
+        }
+        entries.push(P4DepotEntry {
+            path: dir,
+            dir: true,
+        });
+    }
+    entries.sort_by_key(|item| item.path.to_lowercase());
+    Ok(entries)
+}
+
+/// Point a local client root at this server user and client, then return that root.
+pub fn prepare_client(auth: &P4Auth, name: &str) -> AppResult<String> {
+    let name = name.trim();
+    if !valid_client_name(name) {
+        return Err(AppError::msg(
+            "Client name can use letters, numbers, dots, hyphens, and underscores.",
+        ));
+    }
+    let mut env = prepare_auth(auth)?;
+    env.client = name.to_string();
+    let stdout = run_ok(&env, &["-ztag", "info"], None)?;
+    let record = parse_ztag(&stdout).into_iter().next().unwrap_or_default();
+    let root_text = record
+        .get("clientRoot")
+        .filter(|value| known_p4_value(value))
+        .cloned()
+        .unwrap_or_default();
+    if root_text.is_empty() {
+        return Err(AppError::msg("That client has no local root."));
+    }
+    let root = PathBuf::from(strip_verbatim_prefix(&root_text));
+    if !root.is_dir() {
+        return Err(AppError::msg(format!(
+            "Client root is not on this machine: {}",
+            root.display()
+        )));
+    }
+    update_config_file(&root, &env)?;
+    Ok(root.to_string_lossy().into_owned())
+}
+
+fn prepare_auth(auth: &P4Auth) -> AppResult<P4Env> {
+    let port = auth.port.trim().to_string();
+    let user = auth.user.trim().to_string();
+    if port.is_empty() || port.contains(char::is_whitespace) {
+        return Err(AppError::msg(
+            "Enter a server address, for example ssl:perforce.example.com:1666.",
+        ));
+    }
+    if user.is_empty() || user.contains(char::is_whitespace) {
+        return Err(AppError::msg("Enter a Perforce user."));
+    }
+    let env = P4Env {
+        cwd: PathBuf::new(),
+        port,
+        user,
+        client: String::new(),
+        charset: normalize_charset(&auth.charset),
+    };
+    if !auth.password.trim().is_empty() {
+        cli::login(&env, auth.password.trim())?;
+    }
+    Ok(env)
+}
+
+fn list_clients(env: &P4Env) -> AppResult<Vec<P4ClientOption>> {
+    let stdout = run_ok(env, &["-ztag", "clients", "-u", &env.user], None)?;
+    let mut clients = Vec::new();
+    for record in parse_ztag(&stdout) {
+        let name = field(&record, "client");
+        if !valid_client_name(&name) {
+            continue;
+        }
+        let stream = record
+            .get("Stream")
+            .cloned()
+            .filter(|value| known_p4_value(value))
+            .unwrap_or_default();
+        let description = record
+            .get("Description")
+            .map(|value| {
+                value
+                    .lines()
+                    .find(|line| !line.trim().is_empty())
+                    .unwrap_or("")
+                    .trim()
+                    .to_string()
+            })
+            .unwrap_or_default();
+        clients.push(P4ClientOption {
+            name,
+            root: record.get("Root").cloned().unwrap_or_default(),
+            stream,
+            description,
+        });
+    }
+    clients.sort_by_key(|item| item.name.to_lowercase());
+    Ok(clients)
+}
+
 fn connection_after_create(env: &P4Env, root: &Path, stream: &str) -> AppResult<P4Connection> {
     let stdout = run_ok(env, &["-ztag", "info"], None).unwrap_or_default();
     let record = parse_ztag(&stdout).into_iter().next().unwrap_or_default();
@@ -630,17 +849,8 @@ fn load_pending(connection: &P4Connection) -> AppResult<Vec<P4Changelist>> {
             continue;
         };
         let record = parse_ztag(&text).into_iter().next().unwrap_or_default();
-        let mut extra = files_from_groups(connection, &indexed_groups(&record), true);
-        let slot = by_change.entry(id.clone()).or_default();
-        extra.retain(|file| {
-            !slot
-                .iter()
-                .any(|existing| existing.depot_path == file.depot_path)
-        });
-        slot.extend(extra);
-        for file in slot.iter_mut() {
-            file.shelved = true;
-        }
+        let extra = files_from_groups(connection, &indexed_groups(&record), true);
+        by_change.entry(id.clone()).or_default().extend(extra);
     }
     let default_description = run_ok(&env, &["change", "-o"], None)
         .map(|spec| read_description(&spec))
@@ -1007,14 +1217,44 @@ fn client_exists(env: &P4Env, name: &str) -> AppResult<bool> {
 }
 
 fn write_config(root: &Path, env: &P4Env) -> AppResult<()> {
-    let mut text = format!(
-        "P4PORT={}\nP4USER={}\nP4CLIENT={}\n",
-        env.port, env.user, env.client
-    );
-    if !env.charset.is_empty() {
-        text.push_str(&format!("P4CHARSET={}\n", env.charset));
+    update_config_file(root, env)
+}
+
+fn update_config_file(root: &Path, env: &P4Env) -> AppResult<()> {
+    let names = config_names();
+    let path = names
+        .iter()
+        .map(|name| root.join(name))
+        .find(|path| path.is_file())
+        .unwrap_or_else(|| {
+            root.join(
+                names
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| ".p4config".to_string()),
+            )
+        });
+    let mut values = if path.is_file() {
+        read_config(&path).unwrap_or_default()
+    } else {
+        BTreeMap::new()
+    };
+    values.insert("P4PORT".to_string(), env.port.clone());
+    values.insert("P4USER".to_string(), env.user.clone());
+    values.insert("P4CLIENT".to_string(), env.client.clone());
+    if env.charset.is_empty() {
+        values.remove("P4CHARSET");
+    } else {
+        values.insert("P4CHARSET".to_string(), env.charset.clone());
     }
-    fs::write(root.join(".p4config"), text)?;
+    let mut text = String::new();
+    for (key, value) in &values {
+        text.push_str(key);
+        text.push('=');
+        text.push_str(value);
+        text.push('\n');
+    }
+    fs::write(path, text)?;
     Ok(())
 }
 

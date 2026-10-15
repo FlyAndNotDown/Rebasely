@@ -54,6 +54,35 @@ export interface P4DirEntry {
   dir: boolean;
 }
 
+export interface P4Auth {
+  port: string;
+  user: string;
+  password: string;
+  charset: string;
+}
+
+export interface P4ClientOption {
+  name: string;
+  root: string;
+  stream: string;
+  description: string;
+}
+
+export interface P4StreamOption {
+  path: string;
+  kind: string;
+}
+
+export interface P4DepotEntry {
+  path: string;
+  dir: boolean;
+}
+
+export interface P4CheckedConnection {
+  server: string;
+  clients: P4ClientOption[];
+}
+
 export interface P4CreateRequest {
   port: string;
   user: string;

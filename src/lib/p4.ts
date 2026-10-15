@@ -1,9 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  P4Auth,
   P4ChangePage,
   P4Changelist,
+  P4CheckedConnection,
   P4Connection,
   P4CreateRequest,
+  P4DepotEntry,
+  P4StreamOption,
   P4Describe,
   P4DirEntry,
   P4Executables,
@@ -34,6 +38,8 @@ export const p4Api = {
     call<P4Describe>("p4_describe", { connection, changeId }),
   openedDiff: (connection: P4Connection, path: string) =>
     call<FileDiff>("p4_opened_diff", { connection, path }),
+  shelfDiff: (connection: P4Connection, depotPath: string, changeId: string) =>
+    call<FileDiff>("p4_shelf_diff", { connection, depotPath, changeId }),
   revisionDiff: (connection: P4Connection, depotPath: string, rev: string) =>
     call<FileDiff>("p4_revision_diff", { connection, depotPath, rev }),
   filelog: (connection: P4Connection, path: string) =>
@@ -64,6 +70,12 @@ export const p4Api = {
     call<void>("p4_file_action", { connection, action, paths }),
   login: (connection: P4Connection, password: string) =>
     call<void>("p4_login", { connection, password }),
+  checkConnection: (auth: P4Auth) => call<P4CheckedConnection>("p4_check_connection", { auth }),
+  listStreams: (auth: P4Auth) => call<P4StreamOption[]>("p4_list_streams", { auth }),
+  listDepotDirs: (auth: P4Auth, path: string) =>
+    call<P4DepotEntry[]>("p4_list_depot_dirs", { auth, path }),
+  prepareClient: (auth: P4Auth, client: string) =>
+    call<string>("p4_prepare_client", { auth, client }),
   createWorkspace: (request: P4CreateRequest, activityId?: string) =>
     call<P4Connection>("p4_create_workspace", { request, activityId: activityId ?? null }),
   executables: () => call<P4Executables>("p4_executables"),
@@ -75,6 +87,25 @@ export function changeSummary(description: string): string {
     .split("\n")
     .map((line) => line.trim())
     .find((line) => line.length > 0) ?? "";
+}
+
+export function p4ActionLetter(action: string): string {
+  const value = action.toLowerCase();
+  if (value.includes("add")) return "A";
+  if (value.includes("delete")) return "D";
+  if (value.includes("edit")) return "E";
+  if (value.includes("move") || value.includes("rename")) return "R";
+  if (value.includes("branch")) return "B";
+  if (value.includes("integrate")) return "I";
+  return (value.slice(0, 1) || "?").toUpperCase();
+}
+
+export function p4ActionClass(action: string): string {
+  const value = action.toLowerCase();
+  if (value.includes("add") || value.includes("branch")) return "text-diff-add";
+  if (value.includes("delete")) return "text-diff-del";
+  if (value.includes("integrate") || value.includes("move") || value.includes("rename")) return "text-diff-hunk";
+  return "text-amber-600 dark:text-amber-400";
 }
 
 export function depotBase(path: string): string {

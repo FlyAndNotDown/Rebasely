@@ -114,7 +114,6 @@ export function AppHeader() {
     : (repo?.currentBranch ?? "unknown");
   const perforce = activeTab.kind === "repo" && activeTab.vcs === "perforce";
   const repoOpen = activeTab.kind === "repo";
-
   return (
     <header className="shrink-0 bg-background">
       <div className="flex h-9 items-stretch">
@@ -405,6 +404,7 @@ function TabStrip({
 
   function tabLabel(tab: AppTab) {
     if (tab.kind === "welcome") return "Welcome";
+    if (tab.kind === "repo" && tab.vcs === "perforce") return tab.name;
     return labels.get(tab.path) ?? tab.name;
   }
 

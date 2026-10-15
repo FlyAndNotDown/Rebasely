@@ -159,6 +159,7 @@ interface GitContextValue {
   setHistoryRevs: (revs: string[]) => void;
   setHistoryExpanded: (ids: string[]) => void;
   forgetRecent: (path: string) => Promise<void>;
+  refreshRecents: () => Promise<void>;
   closeRepo: () => void;
   selectChange: (path: string, staged: boolean) => Promise<void>;
   selectCommit: (id: string) => Promise<void>;
@@ -794,7 +795,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
     const selected = await open({
       directory: true,
       multiple: false,
-      title: "Open repository",
+      title: "Open local repository",
     });
     if (typeof selected === "string") {
       await openPath(selected);
@@ -824,6 +825,14 @@ export function GitProvider({ children }: { children: ReactNode }) {
   const forgetRecent = useCallback(async (path: string) => {
     try {
       setRecents(await gitApi.forgetRecent(path));
+    } catch (error) {
+      reportError(error);
+    }
+  }, []);
+
+  const refreshRecents = useCallback(async () => {
+    try {
+      setRecents(await gitApi.listRecents());
     } catch (error) {
       reportError(error);
     }
@@ -2732,6 +2741,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       setHistoryRevs,
       setHistoryExpanded,
       forgetRecent,
+      refreshRecents,
       closeRepo,
       selectChange,
       selectCommit,
@@ -2822,6 +2832,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       setHistoryRevs,
       setHistoryExpanded,
       forgetRecent,
+      refreshRecents,
       closeRepo,
       selectChange,
       selectCommit,

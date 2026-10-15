@@ -1,45 +1,67 @@
-import { DownloadIcon, FolderSyncIcon, RefreshCwIcon } from "lucide-react";
+import type { ReactNode } from "react";
+import { CableIcon, DownloadIcon, FolderSyncIcon, RefreshCwIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 import { useP4 } from "@/state/p4-context";
 
+const actionClass =
+  "h-[calc(1.75rem-2px)]! w-[calc(1.75rem-2px)]! rounded-[6px] text-foreground hover:bg-background dark:hover:bg-background";
+
 export function P4Header() {
-  const { connection, sync, reconcile, refresh } = useP4();
-  const where = connection?.stream || connection?.user || "";
+  const { connection, refresh, sync, reconcile, setConnectionOpen } = useP4();
+  const client = connection?.client ?? "";
 
   return (
-    <div className="flex min-w-0 items-center gap-1.5">
-      <div className="flex min-w-0 items-baseline gap-2 px-1">
-        <span className="max-w-40 truncate font-mono text-sm">{connection?.client || "Perforce"}</span>
-        {where ? <span className="max-w-36 truncate text-xs text-muted-foreground">{where}</span> : null}
-        {connection?.port ? (
-          <span className="max-w-36 truncate font-mono text-[11px] text-muted-foreground">{connection.port}</span>
-        ) : null}
+    <div className="flex min-w-0 items-center gap-2">
+      {client ? (
+        <span className="max-w-56 truncate font-mono text-sm" title={client}>
+          {client}
+        </span>
+      ) : null}
+      <div className="flex h-7 shrink-0 items-center gap-1.5 rounded-[min(var(--radius-md),12px)] border border-input bg-secondary px-0.5">
+        <HeaderButton label="Refresh" onClick={() => void refresh()}>
+          <RefreshCwIcon />
+        </HeaderButton>
+        <HeaderButton label="Get latest" onClick={() => void sync()}>
+          <DownloadIcon />
+        </HeaderButton>
+        <HeaderButton label="Reconcile" onClick={() => void reconcile()}>
+          <FolderSyncIcon />
+        </HeaderButton>
+        <span className="h-3.5 w-px self-center bg-foreground/20" />
+        <HeaderButton label="Edit connection" onClick={() => setConnectionOpen(true)}>
+          <CableIcon />
+        </HeaderButton>
       </div>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button type="button" variant="ghost" size="icon-sm" aria-label="Get latest" onClick={() => void sync()}>
-            <DownloadIcon />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>Get latest</TooltipContent>
-      </Tooltip>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button type="button" variant="ghost" size="icon-sm" aria-label="Reconcile" onClick={() => void reconcile()}>
-            <FolderSyncIcon />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>Reconcile</TooltipContent>
-      </Tooltip>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button type="button" variant="ghost" size="icon-sm" aria-label="Refresh" onClick={() => void refresh()}>
-            <RefreshCwIcon />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>Refresh</TooltipContent>
-      </Tooltip>
     </div>
+  );
+}
+
+function HeaderButton({
+  label,
+  onClick,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-xs"
+          className={cn(actionClass)}
+          aria-label={label}
+          onClick={onClick}
+        >
+          {children}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
   );
 }

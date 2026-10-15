@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import { toast } from "sonner";
+import { P4ConnectionDialog } from "@/components/p4/p4-connection-dialog";
 import { P4LoginDialog } from "@/components/p4/p4-login-dialog";
 import { errorMessage } from "@/lib/git";
 import { P4_LOGIN, P4_MISSING, p4Api } from "@/lib/p4";
@@ -17,7 +18,7 @@ import { sameRepoPath } from "@/lib/format";
 import { useGitPick } from "@/state/git-context";
 import { repoTabId, type RepoTab } from "@/state/session";
 import type { FileDiff } from "@/types/git";
-import type { P4Changelist, P4Connection, P4DirEntry, P4Revision } from "@/types/p4";
+import type { P4Auth, P4Changelist, P4Connection, P4DirEntry, P4File, P4Revision } from "@/types/p4";
 
 export type P4View = "pending" | "submitted" | "workspace";
 
@@ -35,6 +36,7 @@ interface Session {
   pending: P4Changelist[];
   selectedChange: string;
   selectedFile: string | null;
+  selectedShelved: boolean;
   description: string;
   diff: FileDiff | null;
   diffFor: string;
@@ -55,6 +57,7 @@ interface P4ContextValue {
   error: string | null;
   selectedChange: string;
   selectedFile: string | null;
+  selectedShelved: boolean;
   description: string;
   setDescription: (value: string) => void;
   diff: FileDiff | null;
@@ -67,7 +70,7 @@ interface P4ContextValue {
   submittedDiffs: FileDiff[];
   refresh: () => Promise<void>;
   selectChange: (id: string) => void;
-  selectFile: (depotPath: string | null) => void;
+  selectFile: (depotPath: string | null, shelved?: boolean) => void;
   submitSelected: () => Promise<void>;
   saveSelected: () => Promise<void>;
   createChange: (description: string) => Promise<void>;
@@ -86,23 +89,28 @@ interface P4ContextValue {
   filelog: (path: string) => Promise<P4Revision[]>;
   revisionDiff: (depotPath: string, rev: string) => Promise<FileDiff | null>;
   reconnect: () => void;
+  connectionOpen: boolean;
+  setConnectionOpen: (open: boolean) => void;
+  saveConnection: (edit: P4Auth & { client: string }) => Promise<void>;
 }
 
 const P4Context = createContext<P4ContextValue | null>(null);
 
 export function P4Provider({ children }: { children: ReactNode }) {
-  const { activeTab, beginActivity, endActivity, setTabMeta, retargetRepoTab } = useGitPick([
+  const { activeTab, beginActivity, endActivity, setTabMeta, retargetRepoTab, refreshRecents } = useGitPick([
     "activeTab",
     "beginActivity",
     "endActivity",
     "setTabMeta",
     "retargetRepoTab",
+    "refreshRecents",
   ]);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submittedLoading, setSubmittedLoading] = useState(false);
   const [loginOpen, setLoginOpen] = useState(false);
+  const [connectionOpen, setConnectionOpen] = useState(false);
   const cache = useRef(new Map<string, Session>());
   const generation = useRef(0);
   const diffToken = useRef(0);
@@ -182,20 +190,23 @@ export function P4Provider({ children }: { children: ReactNode }) {
   const requestDiff = useCallback((current: Session) => {
     const file = current.selectedFile;
     if (!file) return;
-    const key = `${current.selectedChange}\n${file}`;
+    const key = fileKey(current.selectedChange, file, current.selectedShelved);
     if (current.diffFor === key) return;
     const token = ++diffToken.current;
-    void guard(current.connection, () => p4Api.openedDiff(current.connection, file))
+    const load = current.selectedShelved
+      ? p4Api.shelfDiff(current.connection, file, current.selectedChange)
+      : p4Api.openedDiff(current.connection, file);
+    void guard(current.connection, () => load)
       .then((diff) => {
         if (token !== diffToken.current) return;
         const latest = sessionRef.current;
-        if (!latest || `${latest.selectedChange}\n${latest.selectedFile}` !== key) return;
+        if (!latest || fileKey(latest.selectedChange, latest.selectedFile, latest.selectedShelved) !== key) return;
         patch({ diff, diffFor: key });
       })
       .catch((caught) => {
         if (token !== diffToken.current) return;
         const latest = sessionRef.current;
-        if (!latest || `${latest.selectedChange}\n${latest.selectedFile}` !== key) return;
+        if (!latest || fileKey(latest.selectedChange, latest.selectedFile, latest.selectedShelved) !== key) return;
         patch({ diff: null, diffFor: key });
         report(caught);
       });
@@ -250,12 +261,14 @@ export function P4Provider({ children }: { children: ReactNode }) {
             ? previous.selectedChange
             : defaultChange(pending);
         const selected = pending.find((change) => change.id === selectedChange);
+        const shown = shownFile(selected?.files ?? []);
         const next: Session = {
           tabId,
           connection: opened.connection,
           pending,
           selectedChange,
-          selectedFile: selected?.files[0]?.depotPath ?? null,
+          selectedFile: shown.path,
+          selectedShelved: shown.shelved,
           description: selected?.description ?? "",
           diff: null,
           diffFor: "",
@@ -270,6 +283,7 @@ export function P4Provider({ children }: { children: ReactNode }) {
         if (generation.current !== current) return;
         remember(next);
         requestDiff(next);
+        void refreshRecents();
         setError(null);
       } catch (caught) {
         if (generation.current !== current) return;
@@ -279,12 +293,13 @@ export function P4Provider({ children }: { children: ReactNode }) {
         if (generation.current === current) setLoading(false);
       }
     }
-  }, [activePerforceId, attempt, askPassword, remember, report, requestDiff, retargetRepoTab, setTabMeta]);
+  }, [activePerforceId, attempt, askPassword, refreshRecents, remember, report, requestDiff, retargetRepoTab, setTabMeta]);
 
   const connection = session?.connection ?? null;
   const selectedFile = session?.selectedFile ?? null;
+  const selectedShelved = session?.selectedShelved ?? false;
   const selectedChange = session?.selectedChange ?? "default";
-  const diffKey = connection && selectedFile ? `${selectedChange}\n${selectedFile}` : "";
+  const diffKey = connection && selectedFile ? fileKey(selectedChange, selectedFile, selectedShelved) : "";
   const diffLoading = diffKey !== "" && session?.diffFor !== diffKey;
 
   const refresh = useCallback(async () => {
@@ -297,16 +312,19 @@ export function P4Provider({ children }: { children: ReactNode }) {
         ? current.selectedChange
         : defaultChange(pending);
       const change = pending.find((item) => item.id === selected);
-      const file = change?.files.some((item) => item.depotPath === current.selectedFile)
-        ? current.selectedFile
-        : (change?.files[0]?.depotPath ?? null);
+      const shown = shownFile(change?.files ?? [], {
+        path: current.selectedFile,
+        shelved: current.selectedShelved,
+      });
+      const sameFile = shown.path === current.selectedFile && shown.shelved === current.selectedShelved && selected === current.selectedChange;
       patch({
         pending,
         selectedChange: selected,
-        selectedFile: file,
+        selectedFile: shown.path,
+        selectedShelved: shown.shelved,
         description: change?.description ?? "",
-        diff: file === current.selectedFile && selected === current.selectedChange ? current.diff : null,
-        diffFor: file === current.selectedFile && selected === current.selectedChange ? current.diffFor : "",
+        diff: sameFile ? current.diff : null,
+        diffFor: sameFile ? current.diffFor : "",
       });
       const latest = sessionRef.current;
       if (latest) requestDiff(latest);
@@ -321,9 +339,11 @@ export function P4Provider({ children }: { children: ReactNode }) {
     const current = sessionRef.current;
     if (!current || current.selectedChange === id) return;
     const change = current.pending.find((item) => item.id === id);
+    const shown = shownFile(change?.files ?? []);
     patch({
       selectedChange: id,
-      selectedFile: change?.files[0]?.depotPath ?? null,
+      selectedFile: shown.path,
+      selectedShelved: shown.shelved,
       description: change?.description ?? "",
       diff: null,
       diffFor: "",
@@ -332,10 +352,10 @@ export function P4Provider({ children }: { children: ReactNode }) {
     if (latest) requestDiff(latest);
   }, [patch, requestDiff]);
 
-  const selectFile = useCallback((depotPath: string | null) => {
+  const selectFile = useCallback((depotPath: string | null, shelved = false) => {
     const current = sessionRef.current;
-    if (!current || current.selectedFile === depotPath) return;
-    patch({ selectedFile: depotPath, diff: null, diffFor: "" });
+    if (!current || (current.selectedFile === depotPath && current.selectedShelved === shelved)) return;
+    patch({ selectedFile: depotPath, selectedShelved: shelved, diff: null, diffFor: "" });
     const latest = sessionRef.current;
     if (latest) requestDiff(latest);
   }, [patch, requestDiff]);
@@ -359,12 +379,19 @@ export function P4Provider({ children }: { children: ReactNode }) {
           ? current.selectedChange
           : defaultChange(pending);
       const change = pending.find((item) => item.id === selected);
-      const nextFile = change?.files[0]?.depotPath ?? null;
-      const sameSelection = selected === current.selectedChange && nextFile === current.selectedFile;
+      const shown = shownFile(change?.files ?? [], {
+        path: current.selectedFile,
+        shelved: current.selectedShelved,
+      });
+      const sameSelection =
+        selected === current.selectedChange &&
+        shown.path === current.selectedFile &&
+        shown.shelved === current.selectedShelved;
       patch({
         pending,
         selectedChange: selected,
-        selectedFile: nextFile,
+        selectedFile: shown.path,
+        selectedShelved: shown.shelved,
         description: change?.description ?? current.description,
         diff: sameSelection ? current.diff : null,
         diffFor: sameSelection ? current.diffFor : "",
@@ -636,6 +663,30 @@ export function P4Provider({ children }: { children: ReactNode }) {
     [guard],
   );
 
+  const saveConnection = useCallback(
+    async (edit: P4Auth & { client: string }) => {
+      const current = sessionRef.current;
+      const tab = activeTabRef.current;
+      if (!current || tab.kind !== "repo") return;
+      const id = beginActivity("Saving connection", edit.client);
+      try {
+        const root = await p4Api.prepareClient(edit, edit.client);
+        if (!sameRepoPath(current.connection.root, root)) {
+          retargetRepoTab(tab.id, root, edit.client);
+        } else {
+          setTabMeta(tab.id, edit.client);
+          reconnect();
+        }
+      } catch (caught) {
+        report(caught);
+        throw caught;
+      } finally {
+        endActivity(id);
+      }
+    },
+    [beginActivity, endActivity, reconnect, report, retargetRepoTab, setTabMeta],
+  );
+
   const value = useMemo<P4ContextValue>(
     () => ({
       view: session?.view ?? "pending",
@@ -646,6 +697,7 @@ export function P4Provider({ children }: { children: ReactNode }) {
       error,
       selectedChange,
       selectedFile,
+      selectedShelved,
       description: session?.description ?? "",
       setDescription,
       diff: session?.diff ?? null,
@@ -677,6 +729,9 @@ export function P4Provider({ children }: { children: ReactNode }) {
       filelog,
       revisionDiff,
       reconnect,
+      connectionOpen,
+      setConnectionOpen,
+      saveConnection,
     }),
     [
       connection,
@@ -693,6 +748,8 @@ export function P4Provider({ children }: { children: ReactNode }) {
       reconcile,
       reconnect,
       refresh,
+      connectionOpen,
+      saveConnection,
       revertPaths,
       revertUnchanged,
       revisionDiff,
@@ -702,6 +759,7 @@ export function P4Provider({ children }: { children: ReactNode }) {
       selectSubmitted,
       selectedChange,
       selectedFile,
+      selectedShelved,
       session,
       setDescription,
       setView,
@@ -716,6 +774,7 @@ export function P4Provider({ children }: { children: ReactNode }) {
   return (
     <P4Context.Provider value={value}>
       {children}
+      <P4ConnectionDialog />
       <P4LoginDialog
         open={loginOpen}
         client={loginTarget.client}
@@ -731,6 +790,24 @@ export function useP4() {
   const value = useContext(P4Context);
   if (!value) throw new Error("useP4 must be used within P4Provider");
   return value;
+}
+
+function fileKey(change: string, file: string | null, shelved: boolean) {
+  return `${change}\n${file ?? ""}\n${shelved ? "shelf" : "open"}`;
+}
+
+function shownFile(files: P4File[], preferred?: { path: string | null; shelved: boolean }) {
+  if (
+    preferred?.path &&
+    files.some((file) => file.depotPath === preferred.path && file.shelved === preferred.shelved)
+  ) {
+    return { path: preferred.path, shelved: preferred.shelved };
+  }
+  const opened = files.find((file) => !file.shelved);
+  if (opened) return { path: opened.depotPath, shelved: false };
+  const shelf = files.find((file) => file.shelved);
+  if (shelf) return { path: shelf.depotPath, shelved: true };
+  return { path: null, shelved: false };
 }
 
 function defaultChange(pending: P4Changelist[]) {
