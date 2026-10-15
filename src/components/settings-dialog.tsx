@@ -71,7 +71,7 @@ export function SettingsDialog({
 function SettingsForm() {
   const { theme, setTheme } = useTheme();
   const { prefs, updatePrefs } = useGitPick(["prefs", "updatePrefs"]);
-  const [section, setSection] = useState<SettingsSection>("git");
+  const [section, setSection] = useState<SettingsSection>("general");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [terminalId, setTerminalId] = useState("auto");
@@ -264,14 +264,14 @@ function SettingsForm() {
     <>
       <div className="flex min-h-0 flex-1">
         <aside className="flex w-44 shrink-0 flex-col gap-1 border-r p-4">
+          <NavButton active={section === "general"} icon={<SlidersHorizontalIcon />} onClick={() => setSection("general")}>
+            General
+          </NavButton>
           <NavButton active={section === "git"} icon={<GitLogo />} onClick={() => setSection("git")}>
             Git
           </NavButton>
           <NavButton active={section === "ssh"} icon={<KeyRoundIcon />} onClick={() => setSection("ssh")}>
             SSH
-          </NavButton>
-          <NavButton active={section === "general"} icon={<SlidersHorizontalIcon />} onClick={() => setSection("general")}>
-            General
           </NavButton>
         </aside>
         <ScrollArea className="min-w-0 flex-1" scrollbars="vertical">
