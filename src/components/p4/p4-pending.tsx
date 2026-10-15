@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { ChevronDownIcon, PlusIcon } from "lucide-react";
+import { ChangeBadge } from "@/components/p4/change-badge";
 import { P4Diff } from "@/components/p4/p4-diff";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -59,9 +59,7 @@ export function P4Pending() {
                     )}
                     onClick={() => p4.selectChange(change.id)}
                   >
-                    <Badge variant="outline" className="h-5 px-1.5 font-mono text-[11px] tabular-nums">
-                      {change.id === "default" ? "default" : `#${change.id}`}
-                    </Badge>
+                    <ChangeBadge id={change.id} />
                     <span className="min-w-0 flex-1 truncate text-xs">{summary || "No description"}</span>
                   </button>
                 );
@@ -93,11 +91,6 @@ export function P4Pending() {
                     onToggle={() => setGroups((current) => ({ ...current, shelved: !current.shelved }))}
                     onSelect={(path) => p4.selectFile(path, true)}
                   />
-                  {opened.length === 0 && shelved.length === 0 ? (
-                    <p className="p-4 text-sm text-muted-foreground">
-                      No open files. Check out a file from Workspace, or reconcile offline work.
-                    </p>
-                  ) : null}
                 </div>
                 <div className="shrink-0 border-t p-3">
                   <Textarea

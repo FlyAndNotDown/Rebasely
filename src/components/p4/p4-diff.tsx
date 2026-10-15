@@ -102,12 +102,14 @@ function SplitDiff({ lines }: { lines: DiffLine[] }) {
 }
 
 function SplitCell({ line, side }: { line: DiffLine | undefined; side: "left" | "right" }) {
-  if (!line || line.kind === "hunk" || (side === "left" && line.kind === "add") || (side === "right" && line.kind === "delete")) {
-    return <div className="border-r border-border/60 px-2 text-transparent">.</div>;
-  }
+  const blank = !line || line.kind === "hunk" || (side === "left" && line.kind === "add") || (side === "right" && line.kind === "delete");
+  const lineno = blank || !line ? "" : side === "left" ? line.oldLineno : line.newLineno;
   return (
-    <div className={cn("truncate border-r border-border/60 px-2", lineClass(line.kind))}>
-      {line.content || " "}
+    <div className={cn("flex min-w-0 border-r border-border/60", !blank && line && lineClass(line.kind))}>
+      <span className="w-10 shrink-0 select-none px-2 text-right text-muted-foreground/80 tabular-nums">
+        {lineno ?? ""}
+      </span>
+      <span className="min-w-0 flex-1 truncate px-2">{blank ? " " : line.content || " "}</span>
     </div>
   );
 }

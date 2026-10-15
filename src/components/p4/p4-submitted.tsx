@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { CheckIcon, ChevronDownIcon } from "lucide-react";
+import { ChangeBadge } from "@/components/p4/change-badge";
 import { P4Diff } from "@/components/p4/p4-diff";
 import { Button } from "@/components/ui/button";
 import {
@@ -109,7 +110,7 @@ export function P4Submitted() {
               className="h-8"
             />
           </div>
-          <div className="min-h-0 flex-1 overflow-auto">
+          <div className="min-h-0 flex-1 overflow-auto px-1 py-1">
             {changes.length === 0 && !p4.submittedLoading ? (
               <p className="p-4 text-sm text-muted-foreground">No submitted changelists.</p>
             ) : (
@@ -120,19 +121,21 @@ export function P4Submitted() {
                     key={change.id}
                     type="button"
                     className={cn(
-                      "block w-full border-b px-3 py-2 text-left",
-                      active ? "bg-muted" : "hover:bg-muted/50",
+                      "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-muted/70",
+                      active && "bg-muted",
                     )}
                     onClick={() => void p4.selectSubmitted(change.id)}
                   >
-                    <div className="flex items-baseline justify-between gap-2">
-                      <span className="font-mono text-sm">#{change.id}</span>
-                      <span className="shrink-0 text-[11px] text-muted-foreground">
-                        {change.time ? formatRelativeTime(change.time) : ""}
+                    <ChangeBadge id={change.id} />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-xs">
+                        {changeSummary(change.description) || "No description"}
                       </span>
-                    </div>
-                    <div className="truncate text-xs">{changeSummary(change.description) || "No description"}</div>
-                    <div className="truncate text-[11px] text-muted-foreground">{change.user}</div>
+                      <span className="block truncate text-[11px] text-muted-foreground">{change.user}</span>
+                    </span>
+                    <span className="shrink-0 text-[11px] text-muted-foreground">
+                      {change.time ? formatRelativeTime(change.time) : ""}
+                    </span>
                   </button>
                 );
               })
