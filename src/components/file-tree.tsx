@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { ChevronRightIcon, FileIcon, FolderIcon, FolderOpenIcon } from "lucide-react";
+import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { cn } from "@/lib/utils";
 
 export interface FileTreeEntry {
@@ -18,6 +19,7 @@ export function FileTree({
   onToggle,
   onOpenFile,
   trailing,
+  menu,
 }: {
   dir: string;
   depth: number;
@@ -27,6 +29,7 @@ export function FileTree({
   onToggle: (dir: string) => void;
   onOpenFile: (path: string) => void;
   trailing?: (entry: FileTreeEntry) => ReactNode;
+  menu?: (entry: FileTreeEntry) => ReactNode;
 }) {
   const items = entries[dir];
   if (!items) return null;
@@ -34,8 +37,7 @@ export function FileTree({
     <>
       {items.map((item) => {
         const expanded = item.dir && open.has(item.path);
-        return (
-          <div key={item.path}>
+        const row = (
             <button
               type="button"
               title={item.ignored ? "Ignored" : item.name}
@@ -46,6 +48,9 @@ export function FileTree({
               )}
               style={{ paddingLeft: 8 + depth * 12 }}
               onClick={() => (item.dir ? onToggle(item.path) : onOpenFile(item.path))}
+              onContextMenu={() => {
+                if (!item.dir) onOpenFile(item.path);
+              }}
             >
               {item.dir ? (
                 <ChevronRightIcon className={cn("size-3.5 shrink-0 transition-transform", expanded && "rotate-90")} />
@@ -64,6 +69,17 @@ export function FileTree({
               <span className="min-w-0 flex-1 truncate font-mono">{item.name}</span>
               {trailing ? trailing(item) : null}
             </button>
+        );
+        return (
+          <div key={item.path}>
+            {menu && !item.dir ? (
+              <ContextMenu>
+                <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
+                {menu(item)}
+              </ContextMenu>
+            ) : (
+              row
+            )}
             {expanded ? (
               <FileTree
                 dir={item.path}
@@ -74,6 +90,7 @@ export function FileTree({
                 onToggle={onToggle}
                 onOpenFile={onOpenFile}
                 trailing={trailing}
+                menu={menu}
               />
             ) : null}
           </div>

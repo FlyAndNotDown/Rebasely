@@ -45,6 +45,8 @@ interface Session {
   selectedSubmitted: string | null;
   submittedDetail: P4Changelist | null;
   submittedDiffs: FileDiff[];
+  submittedUser: string;
+  submittedClient: string;
   view: P4View;
 }
 
@@ -68,7 +70,7 @@ interface P4ContextValue {
   selectedSubmitted: string | null;
   submittedDetail: P4Changelist | null;
   submittedDiffs: FileDiff[];
-  refresh: () => Promise<void>;
+  refresh: (quiet?: boolean) => Promise<void>;
   selectChange: (id: string) => void;
   selectFile: (depotPath: string | null, shelved?: boolean) => void;
   submitSelected: () => Promise<void>;
@@ -84,6 +86,11 @@ interface P4ContextValue {
   reconcile: () => Promise<void>;
   fileAction: (action: "edit" | "add" | "delete", paths: string[]) => Promise<void>;
   loadSubmitted: (more?: boolean) => Promise<void>;
+  submittedUser: string;
+  submittedClient: string;
+  setSubmittedFilter: (user: string, client: string) => void;
+  listUsers: () => Promise<string[]>;
+  listClients: (user: string) => Promise<string[]>;
   selectSubmitted: (id: string) => void;
   listDir: (relative: string) => Promise<P4DirEntry[]>;
   filelog: (path: string) => Promise<P4Revision[]>;
@@ -97,13 +104,14 @@ interface P4ContextValue {
 const P4Context = createContext<P4ContextValue | null>(null);
 
 export function P4Provider({ children }: { children: ReactNode }) {
-  const { activeTab, beginActivity, endActivity, setTabMeta, retargetRepoTab, refreshRecents } = useGitPick([
+  const { activeTab, beginActivity, endActivity, setTabMeta, retargetRepoTab, refreshRecents, prefs } = useGitPick([
     "activeTab",
     "beginActivity",
     "endActivity",
     "setTabMeta",
     "retargetRepoTab",
     "refreshRecents",
+    "prefs",
   ]);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(false);
@@ -114,6 +122,7 @@ export function P4Provider({ children }: { children: ReactNode }) {
   const cache = useRef(new Map<string, Session>());
   const generation = useRef(0);
   const diffToken = useRef(0);
+  const refreshing = useRef(false);
   const sessionRef = useRef(session);
   const loginRef = useRef<{ resolve: (value: string | null) => void } | null>(null);
   const activeTabRef = useRef(activeTab);
@@ -277,6 +286,8 @@ export function P4Provider({ children }: { children: ReactNode }) {
           selectedSubmitted: previous?.selectedSubmitted ?? null,
           submittedDetail: previous?.submittedDetail ?? null,
           submittedDiffs: previous?.submittedDiffs ?? [],
+          submittedUser: previous?.submittedUser ?? opened.connection.user,
+          submittedClient: previous?.submittedClient ?? opened.connection.client,
           view: previous?.view ?? "pending",
         };
         cache.current.set(tabId, next);
@@ -302,9 +313,10 @@ export function P4Provider({ children }: { children: ReactNode }) {
   const diffKey = connection && selectedFile ? fileKey(selectedChange, selectedFile, selectedShelved) : "";
   const diffLoading = diffKey !== "" && session?.diffFor !== diffKey;
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (quiet = false) => {
     const current = sessionRef.current;
-    if (!current) return;
+    if (!current || refreshing.current) return;
+    refreshing.current = true;
     const id = beginActivity("Refreshing workspace", current.connection.client);
     try {
       const pending = await guard(current.connection, () => p4Api.refreshPending(current.connection));
@@ -329,11 +341,28 @@ export function P4Provider({ children }: { children: ReactNode }) {
       const latest = sessionRef.current;
       if (latest) requestDiff(latest);
     } catch (caught) {
-      report(caught);
+      if (!quiet) report(caught);
     } finally {
+      refreshing.current = false;
       endActivity(id);
     }
   }, [beginActivity, endActivity, guard, patch, report, requestDiff]);
+
+  useEffect(() => {
+    const minutes = prefs.p4RefreshMinutes;
+    if (!minutes) return;
+    const interval = minutes * 60_000;
+    let last = Date.now() - interval + 30_000;
+    const timer = window.setInterval(() => {
+      const tab = activeTabRef.current;
+      if (tab.kind !== "repo" || tab.vcs !== "perforce" || !sessionRef.current) return;
+      const now = Date.now();
+      if (now - last < interval) return;
+      last = now;
+      void refresh(true);
+    }, 15_000);
+    return () => window.clearInterval(timer);
+  }, [prefs.p4RefreshMinutes, refresh]);
 
   const selectChange = useCallback((id: string) => {
     const current = sessionRef.current;
@@ -601,9 +630,23 @@ export function P4Provider({ children }: { children: ReactNode }) {
       try {
         const oldest = more ? oldestChange(current.submitted) : null;
         const page = await guard(current.connection, () =>
-          p4Api.submitted(current.connection, 50, oldest),
+          p4Api.submitted(
+            current.connection,
+            current.submittedUser,
+            current.submittedClient,
+            50,
+            oldest,
+          ),
         );
-        const submitted = more ? mergeChanges(current.submitted, page.changes) : page.changes;
+        const latest = sessionRef.current;
+        if (
+          !latest ||
+          latest.submittedUser !== current.submittedUser ||
+          latest.submittedClient !== current.submittedClient
+        ) {
+          return;
+        }
+        const submitted = more ? mergeChanges(latest.submitted, page.changes) : page.changes;
         patch({ submitted, submittedHasMore: page.hasMore });
       } catch (caught) {
         report(caught);
@@ -613,6 +656,36 @@ export function P4Provider({ children }: { children: ReactNode }) {
     },
     [guard, patch, report],
   );
+
+  const setSubmittedFilter = useCallback(
+    (user: string, client: string) => {
+      const current = sessionRef.current;
+      if (!current || (current.submittedUser === user && current.submittedClient === client)) return;
+      patch({
+        submittedUser: user,
+        submittedClient: client,
+        submitted: [],
+        submittedHasMore: true,
+        selectedSubmitted: null,
+        submittedDetail: null,
+        submittedDiffs: [],
+      });
+      void loadSubmitted(false);
+    },
+    [loadSubmitted, patch],
+  );
+
+  const listUsers = useCallback(async () => {
+    const current = sessionRef.current;
+    if (!current) return [];
+    return guard(current.connection, () => p4Api.listUsers(current.connection));
+  }, [guard]);
+
+  const listClients = useCallback(async (user: string) => {
+    const current = sessionRef.current;
+    if (!current || !user.trim()) return [];
+    return guard(current.connection, () => p4Api.listClients(current.connection, user));
+  }, [guard]);
 
   const selectSubmitted = useCallback(
     async (id: string) => {
@@ -724,6 +797,11 @@ export function P4Provider({ children }: { children: ReactNode }) {
       reconcile,
       fileAction,
       loadSubmitted,
+      submittedUser: session?.submittedUser ?? connection?.user ?? "",
+      submittedClient: session?.submittedClient ?? connection?.client ?? "",
+      setSubmittedFilter,
+      listUsers,
+      listClients,
       selectSubmitted,
       listDir,
       filelog,
@@ -741,7 +819,9 @@ export function P4Provider({ children }: { children: ReactNode }) {
       error,
       fileAction,
       filelog,
+      listClients,
       listDir,
+      listUsers,
       loadSubmitted,
       loading,
       moveFiles,
@@ -762,6 +842,7 @@ export function P4Provider({ children }: { children: ReactNode }) {
       selectedShelved,
       session,
       setDescription,
+      setSubmittedFilter,
       setView,
       shelveSelected,
       submitSelected,

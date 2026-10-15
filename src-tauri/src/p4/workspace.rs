@@ -243,12 +243,15 @@ pub fn refresh_pending(connection: &P4Connection) -> AppResult<Vec<P4Changelist>
 
 pub fn submitted(
     connection: &P4Connection,
+    user: &str,
+    client: &str,
     limit: usize,
     before: Option<i64>,
 ) -> AppResult<P4ChangePage> {
     let env = env_for(connection);
     let limit = limit.clamp(1, 200);
-    let specs = history_specs(&env, connection)?;
+    let user = optional_name(user)?;
+    let client = optional_name(client)?;
     let mut args = vec![
         "-ztag".to_string(),
         "changes".into(),
@@ -258,11 +261,25 @@ pub fn submitted(
         limit.to_string(),
         "-L".into(),
     ];
-    for spec in specs {
-        args.push(match before {
-            Some(change) if change > 1 => format!("{spec}@1,@{}", change - 1),
-            _ => spec,
-        });
+    if let Some(user) = &user {
+        args.push("-u".into());
+        args.push(user.clone());
+    }
+    if let Some(client) = &client {
+        args.push("-c".into());
+        args.push(client.clone());
+    }
+    // A user or workspace already scopes the query. A depot path on top of that
+    // hides this client's own submits when the stream view does not match them.
+    if user.is_none() && client.is_none() {
+        for spec in history_specs(&env, connection)? {
+            args.push(match before {
+                Some(change) if change > 1 => format!("{spec}@1,@{}", change - 1),
+                _ => spec,
+            });
+        }
+    } else if let Some(change) = before.filter(|change| *change > 1) {
+        args.push(format!("@1,@{}", change - 1));
     }
     let stdout = run_owned(&env, &args, None)?;
     let mut changes = Vec::new();
@@ -722,6 +739,35 @@ fn prepare_auth(auth: &P4Auth) -> AppResult<P4Env> {
         cli::login(&env, auth.password.trim())?;
     }
     Ok(env)
+}
+
+pub fn list_users(connection: &P4Connection) -> AppResult<Vec<String>> {
+    let env = env_for(connection);
+    let stdout = run_ok(&env, &["-ztag", "users", "-m", "2000"], None)?;
+    let mut users = Vec::new();
+    for record in parse_ztag(&stdout) {
+        let name = field(&record, "User");
+        if valid_client_name(&name) && !users.contains(&name) {
+            users.push(name);
+        }
+    }
+    users.sort_by_key(|item| item.to_lowercase());
+    Ok(users)
+}
+
+pub fn list_user_clients(connection: &P4Connection, user: &str) -> AppResult<Vec<String>> {
+    let user = require_name(user)?;
+    let env = env_for(connection);
+    let stdout = run_ok(&env, &["-ztag", "clients", "-u", &user], None)?;
+    let mut clients = Vec::new();
+    for record in parse_ztag(&stdout) {
+        let name = field(&record, "client");
+        if valid_client_name(&name) && !clients.contains(&name) {
+            clients.push(name);
+        }
+    }
+    clients.sort_by_key(|item| item.to_lowercase());
+    Ok(clients)
 }
 
 fn list_clients(env: &P4Env) -> AppResult<Vec<P4ClientOption>> {
@@ -1324,6 +1370,24 @@ fn require_description(description: &str) -> AppResult<()> {
     } else {
         Ok(())
     }
+}
+
+fn optional_name(value: &str) -> AppResult<Option<String>> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(require_name(value)?))
+}
+
+fn require_name(value: &str) -> AppResult<String> {
+    let value = value.trim();
+    if !valid_client_name(value) {
+        return Err(AppError::msg(
+            "That name is not a Perforce user or workspace.",
+        ));
+    }
+    Ok(value.to_string())
 }
 
 fn require_numbered(change_id: &str) -> AppResult<String> {

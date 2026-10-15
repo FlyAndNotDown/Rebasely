@@ -998,10 +998,31 @@ async fn p4_refresh_pending(connection: p4::P4Connection) -> AppResult<Vec<p4::P
 #[tauri::command]
 async fn p4_submitted(
     connection: p4::P4Connection,
+    user: Option<String>,
+    client: Option<String>,
     limit: Option<usize>,
     before: Option<i64>,
 ) -> AppResult<p4::P4ChangePage> {
-    blocking(move || p4::submitted(&connection, limit.unwrap_or(50), before)).await
+    blocking(move || {
+        p4::submitted(
+            &connection,
+            user.as_deref().unwrap_or(""),
+            client.as_deref().unwrap_or(""),
+            limit.unwrap_or(50),
+            before,
+        )
+    })
+    .await
+}
+
+#[tauri::command]
+async fn p4_list_users(connection: p4::P4Connection) -> AppResult<Vec<String>> {
+    blocking(move || p4::list_users(&connection)).await
+}
+
+#[tauri::command]
+async fn p4_list_clients(connection: p4::P4Connection, user: String) -> AppResult<Vec<String>> {
+    blocking(move || p4::list_user_clients(&connection, &user)).await
 }
 
 #[tauri::command]
@@ -1490,6 +1511,8 @@ pub fn run() {
             p4_open,
             p4_refresh_pending,
             p4_submitted,
+            p4_list_users,
+            p4_list_clients,
             p4_describe,
             p4_opened_diff,
             p4_shelf_diff,

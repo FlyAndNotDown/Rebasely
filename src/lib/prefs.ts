@@ -32,6 +32,7 @@ export const defaultPrefs: AppPrefs = {
   p4Port: "",
   p4User: "",
   p4Charset: "",
+  p4RefreshMinutes: 60,
 };
 
 export const AUTO_FETCH_CHOICES = [0, 5, 15, 30, 60] as const;
@@ -203,5 +204,9 @@ export function normalizePrefs(prefs: Partial<AppPrefs> | null | undefined): App
     p4Port: normalizeSetting(prefs?.p4Port),
     p4User: normalizeSetting(prefs?.p4User),
     p4Charset: normalizeCharset(prefs?.p4Charset),
+    p4RefreshMinutes:
+      typeof prefs?.p4RefreshMinutes === "number" && prefs.p4RefreshMinutes >= 0
+        ? Math.round(prefs.p4RefreshMinutes)
+        : defaultPrefs.p4RefreshMinutes,
   };
 }

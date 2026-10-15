@@ -143,5 +143,8 @@ describe("normalizePrefs", () => {
       autoFetchMinutes: defaultPrefs.autoFetchMinutes,
     });
     expect(normalizePrefs({ autoFetchMinutes: 0 }).autoFetchMinutes).toBe(0);
+    expect(normalizePrefs(null).p4RefreshMinutes).toBe(60);
+    expect(normalizePrefs({ p4RefreshMinutes: 0 }).p4RefreshMinutes).toBe(0);
+    expect(normalizePrefs({ p4RefreshMinutes: -5 }).p4RefreshMinutes).toBe(60);
   });
 });

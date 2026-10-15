@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ChevronDownIcon, PlusIcon } from "lucide-react";
 import { P4Diff } from "@/components/p4/p4-diff";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -28,7 +29,7 @@ export function P4Pending() {
   const opened = selected?.files.filter((file) => !file.shelved) ?? [];
   const shelved = selected?.files.filter((file) => file.shelved) ?? [];
   const [creating, setCreating] = useState(false);
-  const [groups, setGroups] = useState({ changes: true, shelved: true });
+  const [groups, setGroups] = useState({ changes: true, shelved: false });
   const [revertPaths, setRevertPaths] = useState<string[] | null>(null);
   const numbered = p4.selectedChange !== "default";
 
@@ -48,34 +49,20 @@ export function P4Pending() {
               {p4.pending.map((change) => {
                 const active = change.id === p4.selectedChange;
                 const summary = changeSummary(change.description);
-                const openedCount = change.files.filter((file) => !file.shelved).length;
-                const shelvedCount = change.files.filter((file) => file.shelved).length;
                 return (
                   <button
                     key={change.id}
                     type="button"
                     className={cn(
-                      "flex w-full items-baseline gap-2 rounded-md px-2 py-1.5 text-left hover:bg-muted/70",
+                      "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-muted/70",
                       active && "bg-muted",
                     )}
                     onClick={() => p4.selectChange(change.id)}
                   >
-                    <span className="w-16 shrink-0 truncate font-mono text-[11px] text-muted-foreground">
+                    <Badge variant="outline" className="h-5 px-1.5 font-mono text-[11px] tabular-nums">
                       {change.id === "default" ? "default" : `#${change.id}`}
-                    </span>
+                    </Badge>
                     <span className="min-w-0 flex-1 truncate text-xs">{summary || "No description"}</span>
-                    <span className="w-8 shrink-0 text-right text-[11px] tabular-nums text-muted-foreground" title="Changes">
-                      {openedCount}
-                    </span>
-                    <span
-                      className={cn(
-                        "w-8 shrink-0 text-right text-[11px] tabular-nums",
-                        shelvedCount > 0 ? "text-diff-hunk" : "text-muted-foreground",
-                      )}
-                      title="Shelved"
-                    >
-                      {shelvedCount}
-                    </span>
                   </button>
                 );
               })}

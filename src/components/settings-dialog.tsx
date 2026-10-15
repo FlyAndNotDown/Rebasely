@@ -96,6 +96,7 @@ function SettingsForm() {
   const [pathP4, setPathP4] = useState<string | null>(null);
   const [p4Ready, setP4Ready] = useState(false);
   const [addingP4, setAddingP4] = useState(false);
+  const [p4Refresh, setP4Refresh] = useState(String(prefs.p4RefreshMinutes));
   const [themeChoice, setThemeChoice] = useState<ThemeChoice>(() =>
     theme === "light" || theme === "dark" || theme === "system" ? theme : "dark",
   );
@@ -145,6 +146,7 @@ function SettingsForm() {
         setGuiTools(installedTools);
         setGuiToolsReady(true);
         setAutoFetch(String(prefs.autoFetchMinutes));
+        setP4Refresh(String(prefs.p4RefreshMinutes));
         setPrune(prefs.fetchPrune);
         const onPath = executables.pathGit;
         const selected = prefs.gitPath && onPath && sameGitPath(prefs.gitPath, onPath) ? "" : prefs.gitPath;
@@ -457,7 +459,9 @@ function SettingsForm() {
             <>
               <DialogHeader>
                 <DialogTitle>Perforce</DialogTitle>
-                <DialogDescription>The p4 executable Rebasely runs.</DialogDescription>
+                <DialogDescription>
+                  The p4 executable Rebasely runs, and how often an open workspace refreshes.
+                </DialogDescription>
               </DialogHeader>
               <div className="mt-6 grid gap-8">
                 <P4ExecutableSection
@@ -470,6 +474,21 @@ function SettingsForm() {
                   onRemove={removeP4Executable}
                   onAdd={() => void addP4Executable()}
                 />
+                <FieldGroup title="Refresh">
+                  <SelectField
+                    id="p4-refresh"
+                    label="Refresh in the background"
+                    value={p4Refresh}
+                    options={AUTO_FETCH_CHOICES.map((minutes) => ({
+                      id: String(minutes),
+                      label: minutes === 0 ? "Never" : `Every ${minutes} minutes`,
+                    }))}
+                    onChange={(value) => {
+                      setP4Refresh(value);
+                      void persistPrefs({ p4RefreshMinutes: Number(value) });
+                    }}
+                  />
+                </FieldGroup>
               </div>
             </>
           ) : section === "ssh" ? (

@@ -32,8 +32,16 @@ export const p4Api = {
   open: (path: string) => call<P4OpenResult>("p4_open", { path }),
   refreshPending: (connection: P4Connection) =>
     call<P4Changelist[]>("p4_refresh_pending", { connection }),
-  submitted: (connection: P4Connection, limit = 50, before?: number | null) =>
-    call<P4ChangePage>("p4_submitted", { connection, limit, before: before ?? null }),
+  submitted: (
+    connection: P4Connection,
+    user: string,
+    client: string,
+    limit = 50,
+    before?: number | null,
+  ) => call<P4ChangePage>("p4_submitted", { connection, user, client, limit, before: before ?? null }),
+  listUsers: (connection: P4Connection) => call<string[]>("p4_list_users", { connection }),
+  listClients: (connection: P4Connection, user: string) =>
+    call<string[]>("p4_list_clients", { connection, user }),
   describe: (connection: P4Connection, changeId: string) =>
     call<P4Describe>("p4_describe", { connection, changeId }),
   openedDiff: (connection: P4Connection, path: string) =>

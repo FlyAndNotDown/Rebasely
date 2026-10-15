@@ -302,6 +302,8 @@ export interface AppPrefs {
   p4User: string;
   /** Empty leaves charset unset. */
   p4Charset: string;
+  /** Minutes between background refreshes of an open Perforce workspace; 0 turns them off. */
+  p4RefreshMinutes: number;
 }
 
 export interface GitExecutables {

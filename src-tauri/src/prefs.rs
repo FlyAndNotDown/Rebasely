@@ -72,6 +72,13 @@ pub struct AppPrefs {
     /// Empty leaves charset unset. Otherwise a value such as `utf8`.
     #[serde(default)]
     pub p4_charset: String,
+    /// Minutes between background refreshes of an open Perforce workspace; 0 turns them off.
+    #[serde(default = "default_p4_refresh_minutes")]
+    pub p4_refresh_minutes: u32,
+}
+
+fn default_p4_refresh_minutes() -> u32 {
+    60
 }
 
 fn default_auto_fetch_minutes() -> u32 {
@@ -115,6 +122,7 @@ impl Default for AppPrefs {
             p4_port: String::new(),
             p4_user: String::new(),
             p4_charset: String::new(),
+            p4_refresh_minutes: default_p4_refresh_minutes(),
         }
     }
 }
