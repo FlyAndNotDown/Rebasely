@@ -13,25 +13,27 @@ export function P4Header() {
   const client = connection?.client ?? "";
 
   return (
-    <div className="flex min-w-0 items-center gap-2">
+    <div className="flex min-w-0 items-center gap-1.5">
       {client ? (
-        <span className="max-w-56 truncate font-mono text-sm" title={client}>
-          {client}
-        </span>
+        <Button variant="outline" size="sm" asChild className="pointer-events-none max-w-44 shrink-0 font-mono">
+          <span title={client}>
+            <span className="truncate">{client}</span>
+          </span>
+        </Button>
       ) : null}
       <div className="flex h-7 shrink-0 items-center gap-1.5 rounded-[min(var(--radius-md),12px)] border border-input bg-secondary px-0.5">
         <HeaderButton label="Refresh" onClick={() => void refresh()}>
-          <RefreshCwIcon />
+          <RefreshCwIcon className="size-4" />
         </HeaderButton>
         <HeaderButton label="Get latest" onClick={() => void sync()}>
-          <DownloadIcon />
+          <DownloadIcon className="size-4" />
         </HeaderButton>
         <HeaderButton label="Reconcile" onClick={() => void reconcile()}>
-          <FolderSyncIcon />
+          <FolderSyncIcon className="size-4" />
         </HeaderButton>
         <span className="h-3.5 w-px self-center bg-foreground/20" />
         <HeaderButton label="Edit connection" onClick={() => setConnectionOpen(true)}>
-          <CableIcon />
+          <CableIcon className="size-4" />
         </HeaderButton>
       </div>
     </div>
