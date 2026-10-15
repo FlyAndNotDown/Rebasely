@@ -51,6 +51,13 @@ export function formatAbsoluteTime(timestamp: number): string {
   return `${year}-${month}-${day} ${hours}:${minutes}`;
 }
 
+/** Absolute time with seconds, for a tooltip beside the minute-precision label. */
+export function formatExactTime(timestamp: number): string {
+  const date = new Date(timestamp * 1000);
+  const seconds = String(date.getSeconds()).padStart(2, "0");
+  return `${formatAbsoluteTime(timestamp)}:${seconds}`;
+}
+
 export function fileName(path: string): string {
   const parts = path.split("/");
   return parts[parts.length - 1] || path;

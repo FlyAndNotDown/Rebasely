@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { HoverTip } from "@/components/ui/tooltip";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   DropdownMenu,
@@ -612,11 +613,11 @@ export function ChangesPane() {
               if (!selected) selectOnly(section, file.path);
             }}
           >
+            <HoverTip label={file.oldPath ? `${file.oldPath} → ${file.path}` : file.path}>
             <button
               type="button"
               tabIndex={-1}
               className="flex min-w-0 flex-1 items-baseline gap-2 text-left"
-              title={file.oldPath ? `${file.oldPath} → ${file.path}` : file.path}
               onClick={(event) => clickFile(event, section, file.path)}
             >
               <span className={cn("w-3 shrink-0 font-mono text-[11px] font-medium", fileKindClass(file.kind))}>
@@ -627,6 +628,7 @@ export function ChangesPane() {
                 <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground">{directory}</span>
               ) : null}
             </button>
+            </HoverTip>
             <Button
               type="button"
               variant="ghost"
@@ -659,28 +661,30 @@ export function ChangesPane() {
             : plural(new Set([...files.unstaged, ...files.staged].map((file) => file.path)).size, "changed file")}
         </span>
         <div role="group" aria-label="Changed files layout" className="flex shrink-0 rounded-md bg-muted p-0.5">
-          <Button
-            type="button"
-            variant={tree ? "ghost" : "secondary"}
-            size="icon-xs"
-            aria-pressed={!tree}
-            aria-label="Show as list"
-            title="Show as list"
-            onClick={() => tree && void updatePrefs({ ...prefs, changesTree: false })}
-          >
-            <ListIcon />
-          </Button>
-          <Button
-            type="button"
-            variant={tree ? "secondary" : "ghost"}
-            size="icon-xs"
-            aria-pressed={tree}
-            aria-label="Group by folder"
-            title="Group by folder"
-            onClick={() => !tree && void updatePrefs({ ...prefs, changesTree: true })}
-          >
-            <FolderTreeIcon />
-          </Button>
+            <HoverTip label="Show as list">
+              <Button
+                type="button"
+                variant={tree ? "ghost" : "secondary"}
+                size="icon-xs"
+                aria-pressed={!tree}
+                aria-label="Show as list"
+                onClick={() => tree && void updatePrefs({ ...prefs, changesTree: false })}
+              >
+                <ListIcon />
+              </Button>
+            </HoverTip>
+            <HoverTip label="Group by folder">
+              <Button
+                type="button"
+                variant={tree ? "secondary" : "ghost"}
+                size="icon-xs"
+                aria-pressed={tree}
+                aria-label="Group by folder"
+                onClick={() => !tree && void updatePrefs({ ...prefs, changesTree: true })}
+              >
+                <FolderTreeIcon />
+              </Button>
+            </HoverTip>
         </div>
       </div>
       <ScrollArea className="min-h-0 flex-1" viewportRef={windowed.viewportRef}>
@@ -731,14 +735,13 @@ export function ChangesPane() {
             Discard all
           </Button>
           <div className="inline-flex overflow-hidden rounded-lg">
-            <Button
-              type="submit"
-              disabled={!canCommit}
-              className="rounded-none"
-              title={operation && conflicted ? "Resolve every conflict first" : undefined}
-            >
-              {primaryLabel}
-            </Button>
+            <HoverTip label={operation && conflicted ? "Resolve every conflict first" : undefined}>
+              <span className="inline-flex">
+                <Button type="submit" disabled={!canCommit} className="rounded-none">
+                  {primaryLabel}
+                </Button>
+              </span>
+            </HoverTip>
             {operation ? null : (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>

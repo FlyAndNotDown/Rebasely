@@ -1,12 +1,17 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { DownloadIcon, FilePenIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { toast } from "sonner";
-import { FileTree } from "@/components/file-tree";
+import { AuthorAvatar } from "@/components/author-avatar";
+import { FileTree, type FileTreeEntry } from "@/components/file-tree";
+import { ChangeBadge } from "@/components/p4/change-badge";
+import { FileStatusIcon } from "@/components/p4/file-status-icon";
 import { P4Diff } from "@/components/p4/p4-diff";
-import { ContextMenuContent, ContextMenuItem } from "@/components/ui/context-menu";
+import { ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from "@/components/ui/context-menu";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
-import { formatRelativeTime } from "@/lib/format";
+import { formatAbsoluteTime, formatExactTime } from "@/lib/format";
+import { HoverTip } from "@/components/ui/tooltip";
 import { errorMessage } from "@/lib/git";
-import { changeSummary, p4ActionClass, p4ActionLetter, relativeToRoot } from "@/lib/p4";
+import { changeSummary, relativeToRoot } from "@/lib/p4";
 import { cn } from "@/lib/utils";
 import { useP4 } from "@/state/p4-context";
 import type { FileDiff } from "@/types/git";
@@ -23,7 +28,6 @@ export function P4Files() {
   const [revisionLoading, setRevisionLoading] = useState(false);
   const request = useRef(0);
   const diffRequest = useRef(0);
-  const opened = useMemo(() => openedByLocal(p4.pending, root), [p4.pending, root]);
 
   function choose(path: string) {
     if (path === selected && history) return;
@@ -88,16 +92,26 @@ export function P4Files() {
               <WorkspaceTree
                 key={root}
                 selected={selected}
-                opened={opened}
                 onSelect={choose}
                 menu={(path) => (
-                  <ContextMenuContent className="w-44">
-                    <ContextMenuItem onClick={() => void p4.fileAction("edit", [path])}>Check out</ContextMenuItem>
-                    <ContextMenuItem onClick={() => void p4.fileAction("add", [path])}>Mark for add</ContextMenuItem>
+                  <ContextMenuContent className="w-48">
+                    <ContextMenuItem onClick={() => void p4.sync([path])}>
+                      <DownloadIcon />
+                      Get latest
+                    </ContextMenuItem>
+                    <ContextMenuSeparator />
+                    <ContextMenuItem onClick={() => void p4.fileAction("edit", [path])}>
+                      <FilePenIcon />
+                      Check out
+                    </ContextMenuItem>
+                    <ContextMenuItem onClick={() => void p4.fileAction("add", [path])}>
+                      <PlusIcon />
+                      Mark for add
+                    </ContextMenuItem>
                     <ContextMenuItem onClick={() => void p4.fileAction("delete", [path])}>
+                      <Trash2Icon />
                       Mark for delete
                     </ContextMenuItem>
-                    <ContextMenuItem onClick={() => void p4.sync([path])}>Get latest</ContextMenuItem>
                   </ContextMenuContent>
                 )}
               />
@@ -109,55 +123,63 @@ export function P4Files() {
       <ResizablePanel id="p4-file-main" defaultSize="72%" minSize="40%">
         <div className="flex h-full min-h-0 flex-col">
           <div className="flex h-10 shrink-0 items-center border-b px-3">
-            <div className="min-w-0 flex-1 truncate font-mono text-xs" title={selected ?? ""}>
-              {selected ? relativeToRoot(root, selected) || selected : "Select a file"}
-            </div>
+            <HoverTip label={selected ? relativeToRoot(root, selected) || selected : ""}>
+              <div className="min-w-0 flex-1 truncate font-mono text-xs">
+                {selected ? relativeToRoot(root, selected) || selected : "Select a file"}
+              </div>
+            </HoverTip>
           </div>
           {selected ? (
-            <div className="flex min-h-0 flex-1">
-              <div className="w-64 shrink-0 overflow-auto border-r">
-                {historyLoading && !history ? (
-                  <p className="p-3 text-xs text-muted-foreground">Loading history</p>
-                ) : history && history.length === 0 ? (
-                  <p className="p-3 text-xs text-muted-foreground">No revisions.</p>
-                ) : (
-                  history?.map((revision) => (
-                    <button
-                      key={`${revision.rev}:${revision.change}`}
-                      type="button"
-                      className={cn(
-                        "block w-full border-b px-3 py-2 text-left hover:bg-muted/50",
-                        selectedRev === revision.rev && "bg-muted",
-                      )}
-                      onClick={() => void showRevision(selected, revision.rev)}
-                    >
-                      <div className="flex items-baseline justify-between gap-2">
-                        <span className="font-mono text-xs">#{revision.rev}</span>
-                        <span className="text-[11px] text-muted-foreground">
-                          {revision.time ? formatRelativeTime(revision.time) : ""}
+            <ResizablePanelGroup orientation="vertical" className="min-h-0 min-w-0 flex-1">
+              <ResizablePanel id="p4-file-history" defaultSize="34%" minSize="16%">
+                <div className="h-full overflow-auto px-1 py-1">
+                  {historyLoading && !history ? (
+                    <p className="p-3 text-xs text-muted-foreground">Loading history</p>
+                  ) : history && history.length === 0 ? (
+                    <p className="p-3 text-xs text-muted-foreground">No revisions.</p>
+                  ) : (
+                    history?.map((revision) => (
+                      <button
+                        key={`${revision.rev}:${revision.change}`}
+                        type="button"
+                        className={cn(
+                          "flex h-8 w-full items-center gap-2 rounded-md px-2 text-left hover:bg-muted/70",
+                          selectedRev === revision.rev && "bg-muted",
+                        )}
+                        onClick={() => void showRevision(selected, revision.rev)}
+                      >
+                        <ChangeBadge id={revision.rev} />
+                        <span className="min-w-0 flex-1 truncate text-xs">
+                          {changeSummary(revision.description) || "No description"}
                         </span>
-                      </div>
-                      <div className="truncate text-xs">
-                        {changeSummary(revision.description) || revision.action}
-                      </div>
-                      <div className="truncate text-[11px] text-muted-foreground">
-                        {revision.action} · {revision.user} · @{revision.change}
-                      </div>
-                    </button>
-                  ))
-                )}
-              </div>
-              <div className="min-w-0 flex-1">
+                        <span className="flex w-36 shrink-0 items-center gap-1.5 text-[11px]">
+                          <AuthorAvatar name={revision.user} email="" className="size-4" />
+                          <span className="truncate font-medium text-foreground">{revision.user}</span>
+                        </span>
+                        {revision.time ? (
+                          <HoverTip label={formatExactTime(revision.time)}>
+                            <span className="w-[7.25rem] shrink-0 text-right text-[11px] tabular-nums text-muted-foreground">
+                              {formatAbsoluteTime(revision.time)}
+                            </span>
+                          </HoverTip>
+                        ) : null}
+                      </button>
+                    ))
+                  )}
+                </div>
+              </ResizablePanel>
+              <ResizableHandle />
+              <ResizablePanel id="p4-file-diff" defaultSize="66%" minSize="24%">
                 <P4Diff
                   diff={revisionDiff}
                   loading={revisionLoading || (historyLoading && !revisionDiff)}
                   empty="No revision to show"
                 />
-              </div>
-            </div>
+              </ResizablePanel>
+            </ResizablePanelGroup>
           ) : (
             <div className="flex min-h-0 flex-1 items-center justify-center p-6 text-center text-sm text-muted-foreground">
-              Browse the client root. Opened files are marked in the tree.
+              Open a file to see its history.
             </div>
           )}
         </div>
@@ -168,18 +190,16 @@ export function P4Files() {
 
 function WorkspaceTree({
   selected,
-  opened,
   onSelect,
   menu,
 }: {
   selected: string | null;
-  opened: Map<string, OpenedFile>;
   onSelect: (path: string) => void;
   menu: (path: string) => ReactNode;
 }) {
   const { connection, listDir } = useP4();
   const root = connection?.root ?? "";
-  const [entries, setEntries] = useState<Record<string, P4DirEntry[]>>({});
+  const [entries, setEntries] = useState<Record<string, FileTreeEntry[]>>({});
   const [open, setOpen] = useState<Set<string>>(() => new Set());
   const [failed, setFailed] = useState(false);
 
@@ -187,7 +207,7 @@ function WorkspaceTree({
     let live = true;
     void listDir("")
       .then((next) => {
-        if (live) setEntries({ "": next });
+        if (live) setEntries({ "": next.map(presentFile) });
       })
       .catch(() => {
         if (live) setFailed(true);
@@ -209,7 +229,7 @@ function WorkspaceTree({
     if (!entries[path]) {
       try {
         const next = await listDir(relativeToRoot(root, path));
-        setEntries((current) => ({ ...current, [path]: next }));
+        setEntries((current) => ({ ...current, [path]: next.map(presentFile) }));
       } catch {
         return;
       }
@@ -230,36 +250,16 @@ function WorkspaceTree({
       onToggle={(path) => void toggle(path)}
       onOpenFile={onSelect}
       menu={(entry) => menu(entry.path)}
-      trailing={(entry) => {
-        const action = opened.get(normalize(entry.path))?.action;
-        if (!action) return null;
-        return (
-          <span className={cn("w-3 shrink-0 text-center font-mono text-[11px] font-medium", p4ActionClass(action))} title={action}>
-            {p4ActionLetter(action)}
-          </span>
-        );
-      }}
     />
   );
 }
 
-interface OpenedFile {
-  depotPath: string;
-  action: string;
-}
-
-function openedByLocal(pending: { files: { localPath: string; depotPath: string; action: string }[] }[], root: string) {
-  const map = new Map<string, OpenedFile>();
-  for (const change of pending) {
-    for (const file of change.files) {
-      if (!file.localPath || !file.depotPath) continue;
-      if (root && !normalize(file.localPath).startsWith(normalize(root))) continue;
-      map.set(normalize(file.localPath), { depotPath: file.depotPath, action: file.action });
-    }
-  }
-  return map;
-}
-
-function normalize(path: string) {
-  return path.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+function presentFile(entry: P4DirEntry): FileTreeEntry {
+  return {
+    path: entry.path,
+    name: entry.name,
+    dir: entry.dir,
+    icon: entry.dir ? undefined : <FileStatusIcon status={entry.status} />,
+    iconTitle: entry.detail || undefined,
+  };
 }

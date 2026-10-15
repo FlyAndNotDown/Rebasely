@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { CheckIcon, ChevronDownIcon } from "lucide-react";
+import { toast } from "sonner";
+import { AuthorAvatar } from "@/components/author-avatar";
 import { ChangeBadge } from "@/components/p4/change-badge";
 import { P4Diff } from "@/components/p4/p4-diff";
 import { Button } from "@/components/ui/button";
@@ -11,10 +13,24 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
-import { formatRelativeTime } from "@/lib/format";
+import { formatAbsoluteTime, formatExactTime } from "@/lib/format";
+import { HoverTip } from "@/components/ui/tooltip";
 import { changeSummary, depotBase, p4ActionClass, p4ActionLetter } from "@/lib/p4";
 import { cn } from "@/lib/utils";
 import { useP4 } from "@/state/p4-context";
+
+async function copyText(value: string, success: string) {
+  if (!value) {
+    toast.error("Nothing to copy");
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(value);
+    toast.success(success);
+  } catch {
+    toast.error("Could not copy");
+  }
+}
 
 export function P4Submitted() {
   const p4 = useP4();
@@ -127,15 +143,16 @@ export function P4Submitted() {
                     onClick={() => void p4.selectSubmitted(change.id)}
                   >
                     <ChangeBadge id={change.id} />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-xs">
-                        {changeSummary(change.description) || "No description"}
-                      </span>
-                      <span className="block truncate text-[11px] text-muted-foreground">{change.user}</span>
+                    <span className="min-w-0 flex-1 truncate text-xs">
+                      {changeSummary(change.description) || "No description"}
                     </span>
-                    <span className="shrink-0 text-[11px] text-muted-foreground">
-                      {change.time ? formatRelativeTime(change.time) : ""}
-                    </span>
+                    {change.time ? (
+                      <HoverTip label={formatExactTime(change.time)}>
+                        <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
+                          {formatAbsoluteTime(change.time)}
+                        </span>
+                      </HoverTip>
+                    ) : null}
                   </button>
                 );
               })
@@ -168,31 +185,61 @@ export function P4Submitted() {
                     ? changeSummary(p4.submittedDetail.description) || `Change ${p4.submittedDetail.id}`
                     : "Submitted"}
                 </div>
-                {p4.submittedDetail?.description && changeSummary(p4.submittedDetail.description) !== p4.submittedDetail.description.trim() ? (
-                  <p className="mt-1 line-clamp-3 whitespace-pre-wrap text-xs text-muted-foreground">
-                    {p4.submittedDetail.description}
-                  </p>
+                {p4.submittedDetail ? (
+                  <div className="mt-1 flex items-center gap-x-2 text-[11px] text-muted-foreground">
+                    <HoverTip label="Copy user">
+                    <button
+                      type="button"
+                      className="inline-flex min-w-0 items-center gap-1.5 rounded-md px-1 py-0.5 hover:bg-muted hover:text-foreground"
+                      onClick={() => void copyText(p4.submittedDetail?.user ?? "", "Copied user")}
+                    >
+                      <AuthorAvatar name={p4.submittedDetail.user} email="" className="size-4" />
+                      <span className="truncate">{p4.submittedDetail.user}</span>
+                    </button>
+                    </HoverTip>
+                    {p4.submittedDetail.time ? (
+                      <HoverTip label={formatExactTime(p4.submittedDetail.time)}>
+                      <button
+                        type="button"
+                        className="shrink-0 rounded-md px-1 py-0.5 tabular-nums hover:bg-muted hover:text-foreground"
+                        onClick={() => void copyText(formatExactTime(p4.submittedDetail?.time ?? 0), "Copied time")}
+                      >
+                        {formatAbsoluteTime(p4.submittedDetail.time)}
+                      </button>
+                      </HoverTip>
+                    ) : null}
+                    <HoverTip label="Copy changelist">
+                    <button
+                      type="button"
+                      className="shrink-0 rounded-md px-1 py-0.5 font-mono hover:bg-muted hover:text-foreground"
+                      onClick={() => void copyText(p4.submittedDetail?.id ?? "", "Copied changelist")}
+                    >
+                      #{p4.submittedDetail.id}
+                    </button>
+                    </HoverTip>
+                  </div>
                 ) : null}
               </div>
               <div className="min-h-0 flex-1 overflow-auto px-1 py-1">
                 {p4.submittedDetail?.files.map((item) => (
-                  <button
-                    key={item.depotPath}
-                    type="button"
-                    title={item.action}
-                    className={cn(
-                      "flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-xs hover:bg-muted/70",
-                      file === item.depotPath && "bg-muted",
-                    )}
-                    onClick={() => setPicked(item.depotPath)}
-                  >
-                    <span className={cn("w-3 shrink-0 text-center font-mono text-[11px] font-medium", p4ActionClass(item.action))}>
-                      {p4ActionLetter(item.action)}
-                    </span>
-                    <span className="min-w-0 flex-1 truncate font-mono" title={item.depotPath}>
-                      {depotBase(item.depotPath)}
-                    </span>
-                  </button>
+                  <HoverTip key={item.depotPath} label={`${item.action}\n${item.depotPath}`}>
+                    <button
+                      type="button"
+                      className={cn(
+                        "flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-xs hover:bg-muted/70",
+                        file === item.depotPath && "bg-muted",
+                      )}
+                      onClick={() => setPicked(item.depotPath)}
+                    >
+                      <span className={cn("w-3 shrink-0 text-center font-mono text-[11px] font-medium", p4ActionClass(item.action))}>
+                        {p4ActionLetter(item.action)}
+                      </span>
+                      <span className="min-w-0 flex-1 truncate font-mono">{depotBase(item.depotPath)}</span>
+                      {p4.submittedDiffs.some((diff) => diff.binary && diff.path === item.depotPath) ? (
+                        <span className="shrink-0 text-muted-foreground">binary</span>
+                      ) : null}
+                    </button>
+                  </HoverTip>
                 ))}
               </div>
             </div>

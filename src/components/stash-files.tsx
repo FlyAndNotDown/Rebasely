@@ -1,6 +1,7 @@
 import { memo, useCallback } from "react";
 import { LayersArrowDownIcon, LayersArrowUpIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { HoverTip } from "@/components/ui/tooltip";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { fileKindClass, fileKindLabel } from "@/lib/file-kind";
@@ -42,9 +43,9 @@ export function StashFiles() {
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
       <div className="flex h-10 shrink-0 items-center gap-2 border-b px-3">
-        <span className="min-w-0 flex-1 truncate text-sm" title={message}>
-          {message}
-        </span>
+        <HoverTip label={message}>
+          <span className="min-w-0 flex-1 truncate text-sm">{message}</span>
+        </HoverTip>
         <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{`stash@{${stashSelection.index}}`}</span>
         <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{stashSelection.id.slice(0, 7)}</span>
         {count != null ? (
@@ -52,29 +53,33 @@ export function StashFiles() {
             {count === 1 ? "1 file" : `${count} files`}
           </span>
         ) : null}
-        <Button
-          type="button"
-          size="icon-xs"
-          variant="ghost"
-          aria-label="Apply"
-          title="Apply"
-          onClick={() => void stashApply(stashSelection.id)}
-        >
-          <LayersArrowDownIcon />
-        </Button>
-        <Button
-          type="button"
-          size="icon-xs"
-          variant="ghost"
-          aria-label="Pop"
-          title="Pop"
-          onClick={() => void stashPop(stashSelection.id)}
-        >
-          <LayersArrowUpIcon />
-        </Button>
-        <Button type="button" size="icon-xs" variant="ghost" aria-label="Close" title="Close" onClick={closeStash}>
-          <XIcon />
-        </Button>
+        <HoverTip label="Apply">
+          <Button
+            type="button"
+            size="icon-xs"
+            variant="ghost"
+            aria-label="Apply"
+            onClick={() => void stashApply(stashSelection.id)}
+          >
+            <LayersArrowDownIcon />
+          </Button>
+        </HoverTip>
+        <HoverTip label="Pop">
+          <Button
+            type="button"
+            size="icon-xs"
+            variant="ghost"
+            aria-label="Pop"
+            onClick={() => void stashPop(stashSelection.id)}
+          >
+            <LayersArrowUpIcon />
+          </Button>
+        </HoverTip>
+        <HoverTip label="Close">
+          <Button type="button" size="icon-xs" variant="ghost" aria-label="Close" onClick={closeStash}>
+            <XIcon />
+          </Button>
+        </HoverTip>
       </div>
       {!ready ? (
         <StashFilesSkeleton />

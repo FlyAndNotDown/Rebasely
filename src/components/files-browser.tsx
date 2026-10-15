@@ -8,6 +8,7 @@ import { FileTree } from "@/components/file-tree";
 import { ImageDiff, isImagePath } from "@/components/image-diff";
 import { DiffSkeleton } from "@/components/skeletons";
 import { Button } from "@/components/ui/button";
+import { HoverTip } from "@/components/ui/tooltip";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { languageFor, styleSpans, textColumns, type TokenRange } from "@/lib/diff-text";
@@ -157,16 +158,17 @@ export function FilesBrowser() {
           <div className="flex h-full min-h-0 flex-col">
             <div className="flex h-10 shrink-0 items-center gap-2 border-b px-3">
               <span className="min-w-0 flex-1 truncate font-mono text-xs">{path}</span>
-              <Button
-                type="button"
-                size="icon-xs"
-                variant="ghost"
-                aria-label="Open in editor"
-                title="Open in editor"
-                onClick={() => void openInEditor(path)}
-              >
-                <SquarePenIcon />
-              </Button>
+              <HoverTip label="Open in editor">
+                <Button
+                  type="button"
+                  size="icon-xs"
+                  variant="ghost"
+                  aria-label="Open in editor"
+                  onClick={() => void openInEditor(path)}
+                >
+                  <SquarePenIcon />
+                </Button>
+              </HoverTip>
               <div className="flex shrink-0 rounded-md bg-muted p-0.5">
                 <Button
                   type="button"
@@ -190,19 +192,20 @@ export function FilesBrowser() {
                   History
                 </Button>
               </div>
-              <Button
-                type="button"
-                size="icon-xs"
-                variant="ghost"
-                aria-label="Close"
-                title="Close"
-                onClick={() => {
-                  setPath(null);
-                  setPin(null);
-                }}
-              >
-                <XIcon />
-              </Button>
+              <HoverTip label="Close">
+                <Button
+                  type="button"
+                  size="icon-xs"
+                  variant="ghost"
+                  aria-label="Close"
+                  onClick={() => {
+                    setPath(null);
+                    setPin(null);
+                  }}
+                >
+                  <XIcon />
+                </Button>
+              </HoverTip>
             </div>
             {mode === "browse" ? (
               <FileBrowsePane key={path} repoPath={repoPath} path={path} onOpenCommit={openBlameCommit} />
@@ -577,28 +580,31 @@ function BlameMargin({
   );
   if (!hunk) {
     return (
-      <div className={className} style={{ background: fill }} title={dirty ? "Not committed" : undefined}>
-        {body}
-      </div>
+      <HoverTip label={dirty ? "Not committed" : undefined}>
+        <div className={className} style={{ background: fill }}>
+          {body}
+        </div>
+      </HoverTip>
     );
   }
   const open = () => onOpenCommit(hunk.commitId);
   if (!label) {
     return (
+      <HoverTip label={row.tip}>
       <div
         className={cn(className, "cursor-pointer")}
         style={{ background: fill }}
-        title={row.tip}
         onClick={open}
       >
         {body}
       </div>
+      </HoverTip>
     );
   }
   return (
+    <HoverTip label={row.tip}>
     <button
       type="button"
-      title={row.tip}
       aria-label={`${hunk.author}, ${row.when}`}
       className={cn(
         className,
@@ -609,6 +615,7 @@ function BlameMargin({
     >
       {body}
     </button>
+    </HoverTip>
   );
 }
 

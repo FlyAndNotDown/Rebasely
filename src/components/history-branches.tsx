@@ -6,6 +6,7 @@ import { MergeDialog, RebaseOntoDialog } from "@/components/rebase-dialog";
 import { RepoStructure } from "@/components/repo-structure";
 import { BranchSidebarSkeleton } from "@/components/skeletons";
 import { Button } from "@/components/ui/button";
+import { HoverTip } from "@/components/ui/tooltip";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   ContextMenu,
@@ -868,24 +869,26 @@ function TreeRows({
               </span>
             </button>
             {remoteSection && onAddRemote ? (
-              <button
-                type="button"
-                title="Add remote"
-                className="flex size-6 shrink-0 items-center justify-center rounded-sm hover:bg-muted hover:text-foreground"
-                onClick={onAddRemote}
-              >
-                <PlusIcon className="size-3.5" />
-              </button>
+              <HoverTip label="Add remote">
+                <button
+                  type="button"
+                  className="flex size-6 shrink-0 items-center justify-center rounded-sm hover:bg-muted hover:text-foreground"
+                  onClick={onAddRemote}
+                >
+                  <PlusIcon className="size-3.5" />
+                </button>
+              </HoverTip>
             ) : null}
             {tags && onCreateTag ? (
-              <button
-                type="button"
-                title="Create tag"
-                className="flex size-6 shrink-0 items-center justify-center rounded-sm hover:bg-muted hover:text-foreground"
-                onClick={onCreateTag}
-              >
-                <PlusIcon className="size-3.5" />
-              </button>
+              <HoverTip label="Create tag">
+                <button
+                  type="button"
+                  className="flex size-6 shrink-0 items-center justify-center rounded-sm hover:bg-muted hover:text-foreground"
+                  onClick={onCreateTag}
+                >
+                  <PlusIcon className="size-3.5" />
+                </button>
+              </HoverTip>
             ) : null}
           </div>
         );
@@ -1023,9 +1026,9 @@ function WatchButton({
   onClick: (event: { stopPropagation: () => void }) => void;
 }) {
   return (
+    <HoverTip label={title}>
     <button
       type="button"
-      title={title}
       className={cn(
         "flex size-6 shrink-0 items-center justify-center rounded-sm hover:bg-muted",
         active ? "text-foreground" : "text-muted-foreground/45 hover:text-muted-foreground",
@@ -1034,6 +1037,7 @@ function WatchButton({
     >
       <EyeIcon className="size-3.5" />
     </button>
+    </HoverTip>
   );
 }
 

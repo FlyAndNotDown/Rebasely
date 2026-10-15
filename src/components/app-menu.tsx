@@ -14,7 +14,7 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { HoverTip, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { disambiguateRepoLabels, displayPath } from "@/lib/format";
 import { useGitPick } from "@/state/git-context";
 import { asVcs } from "@/state/session";
@@ -96,16 +96,15 @@ export function AppMenu() {
                     return (
                       <DropdownMenuItem
                         key={`${asVcs(repo.vcs)}:${repo.path}`}
-                        title={path}
                         onSelect={() => void openPath(repo.path, repo.vcs ? asVcs(repo.vcs) : undefined)}
                       >
                             <span className="flex w-full min-w-0 items-center gap-2">
                           <VcsIcon vcs={asVcs(repo.vcs)} className="size-3.5 shrink-0 text-muted-foreground" />
                           <span className="flex min-w-0 flex-1 flex-col">
                           <span className="truncate">{label}</span>
-                          <span className="truncate font-mono text-[11px] text-muted-foreground">
-                            {path}
-                          </span>
+                          <HoverTip label={path}>
+                            <span className="truncate font-mono text-[11px] text-muted-foreground">{path}</span>
+                          </HoverTip>
                           </span>
                         </span>
                       </DropdownMenuItem>

@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import type { ReactElement, ReactNode } from "react"
 import { cn } from "cn"
 import { Tooltip as TooltipPrimitive } from "radix-ui"
 
@@ -53,4 +54,27 @@ function TooltipContent({
   )
 }
 
-export { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger }
+function HoverTip({
+  label,
+  side,
+  children,
+}: {
+  label?: ReactNode
+  side?: "top" | "right" | "bottom" | "left"
+  children: ReactElement
+}) {
+  if (label == null || label === false || label === "") return children
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{children}</TooltipTrigger>
+      <TooltipContent
+        side={side}
+        className="max-w-sm text-left whitespace-pre-line wrap-break-word"
+      >
+        {label}
+      </TooltipContent>
+    </Tooltip>
+  )
+}
+
+export { HoverTip, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger }

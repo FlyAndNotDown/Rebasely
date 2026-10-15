@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { CableIcon, DownloadIcon, FolderSyncIcon, RefreshCwIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { HoverTip, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { useP4 } from "@/state/p4-context";
 
@@ -15,11 +15,13 @@ export function P4Header() {
   return (
     <div className="flex min-w-0 items-center gap-1.5">
       {client ? (
-        <Button variant="outline" size="sm" asChild className="pointer-events-none max-w-44 shrink-0 font-mono">
-          <span title={client}>
-            <span className="truncate">{client}</span>
-          </span>
-        </Button>
+        <HoverTip label={client}>
+          <Button variant="outline" size="sm" asChild className="max-w-44 shrink-0 cursor-default font-mono">
+            <span>
+              <span className="truncate">{client}</span>
+            </span>
+          </Button>
+        </HoverTip>
       ) : null}
       <div className="flex h-7 shrink-0 items-center gap-1.5 rounded-[min(var(--radius-md),12px)] border border-input bg-secondary px-0.5">
         <HeaderButton label="Refresh" onClick={() => void refresh()}>

@@ -18,7 +18,13 @@ pub fn parse_ztag(text: &str) -> Vec<ZtagRecord> {
     let mut last_key: Option<String> = None;
     for raw in text.split('\n') {
         let line = raw.trim_end_matches('\r');
-        if let Some(rest) = line.strip_prefix("... ") {
+        let mut rest = line;
+        let mut tagged = false;
+        while let Some(next) = rest.strip_prefix("... ") {
+            tagged = true;
+            rest = next;
+        }
+        if tagged {
             let (key, value) = rest
                 .split_once(' ')
                 .map(|(key, value)| (key, value.to_string()))
@@ -565,6 +571,20 @@ and the rest
             Some("Fix it\nand the rest")
         );
         assert_eq!(records[1].get("user").map(String::as_str), Some("bob"));
+    }
+
+    #[test]
+    fn ztag_reads_a_repeated_tag_prefix_as_one_field() {
+        let text = "\
+... clientFile E:\\depot\\p4ignore.txt
+... headRev 70
+... haveRev 70
+... ... otherOpen 1
+";
+        let records = parse_ztag(text);
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].get("otherOpen").map(String::as_str), Some("1"));
+        assert_eq!(records[0].get("haveRev").map(String::as_str), Some("70"));
     }
 
     #[test]

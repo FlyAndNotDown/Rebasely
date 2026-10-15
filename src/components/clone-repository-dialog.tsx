@@ -3,6 +3,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { ChevronDownIcon, FolderOpenIcon, Loader2Icon } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { HoverTip } from "@/components/ui/tooltip";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -204,14 +205,15 @@ function GitCloneForm({
         <div className="grid min-w-0 gap-2">
           <Label htmlFor="clone-parent">Location</Label>
           <div className="flex min-w-0 gap-2">
-            <Input
-              id="clone-parent"
-              className="min-w-0 font-mono"
-              readOnly
-              value={parent}
-              placeholder="Choose a parent folder"
-              title={parent}
-            />
+            <HoverTip label={parent}>
+              <Input
+                id="clone-parent"
+                className="min-w-0 font-mono"
+                readOnly
+                value={parent}
+                placeholder="Choose a parent folder"
+              />
+            </HoverTip>
             <Button
               type="button"
               variant="outline"
@@ -223,9 +225,9 @@ function GitCloneForm({
             </Button>
           </div>
           {destination ? (
-            <p className="truncate font-mono text-[11px] text-muted-foreground" title={destination}>
-              {destination}
-            </p>
+            <HoverTip label={destination}>
+              <p className="truncate font-mono text-[11px] text-muted-foreground">{destination}</p>
+            </HoverTip>
           ) : null}
         </div>
       </div>

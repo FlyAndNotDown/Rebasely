@@ -4,7 +4,7 @@
 //! root. History lives on the server, so reads go through `p4` rather than a
 //! local commit graph.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -79,6 +79,10 @@ pub struct P4File {
     pub action: String,
     pub rev: String,
     pub shelved: bool,
+    /// Workspace icon state: current, stale, conflict, edit, add, delete, integrate, other, local.
+    pub status: String,
+    /// Sentence shown in the file tooltip.
+    pub detail: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -156,6 +160,10 @@ pub struct P4DirEntry {
     pub name: String,
     pub path: String,
     pub dir: bool,
+    /// Empty, or current, stale, edit, add, delete, integrate, other, local.
+    pub status: String,
+    /// Sentence shown when the file icon is hovered.
+    pub detail: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -409,6 +417,8 @@ pub fn list_dir(connection: &P4Connection, relative: &str) -> AppResult<Vec<P4Di
             name,
             path: entry.path().to_string_lossy().into_owned(),
             dir: file_type.is_dir(),
+            status: String::new(),
+            detail: String::new(),
         });
     }
     entries.sort_by(|left, right| {
@@ -417,7 +427,207 @@ pub fn list_dir(connection: &P4Connection, relative: &str) -> AppResult<Vec<P4Di
             .cmp(&left.dir)
             .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
     });
+    if entries.iter().any(|entry| !entry.dir) {
+        annotate_status(connection, &dir, &mut entries);
+    }
     Ok(entries)
+}
+
+fn annotate_status(connection: &P4Connection, dir: &Path, entries: &mut [P4DirEntry]) {
+    let env = env_for(connection);
+    let pattern = dir.join("*");
+    let pattern = pattern.to_string_lossy();
+    let Ok(output) = cli::run_p4(
+        &env,
+        &[
+            "-ztag",
+            "fstat",
+            "-T",
+            "clientFile haveRev headRev action otherOpen otherLock unresolved",
+            pattern.as_ref(),
+        ],
+        None,
+    ) else {
+        return;
+    };
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut by_name = HashMap::<String, (String, String)>::new();
+    for record in parse_ztag(&stdout) {
+        let client_file = field(&record, "clientFile");
+        let name = client_file
+            .rsplit(['/', '\\'])
+            .next()
+            .unwrap_or("")
+            .to_lowercase();
+        if name.is_empty() {
+            continue;
+        }
+        by_name.insert(name, status_of(&record));
+    }
+    if by_name.is_empty() {
+        return;
+    }
+    for entry in entries.iter_mut() {
+        if entry.dir {
+            continue;
+        }
+        let Some((status, detail)) = by_name.get(&entry.name.to_lowercase()) else {
+            entry.status = "local".to_string();
+            entry.detail = "Not in the depot".to_string();
+            continue;
+        };
+        entry.status.clone_from(status);
+        entry.detail.clone_from(detail);
+    }
+}
+
+fn annotate_pending(connection: &P4Connection, changes: &mut [P4Changelist]) {
+    let env = env_for(connection);
+    let mut paths = Vec::new();
+    for change in changes.iter() {
+        for file in &change.files {
+            if file.depot_path.starts_with("//") {
+                paths.push(file.depot_path.clone());
+            }
+        }
+    }
+    paths.sort();
+    paths.dedup();
+    let mut known = HashMap::<String, (String, String)>::new();
+    for chunk in paths.chunks(40) {
+        let mut args = vec![
+            "-ztag".to_string(),
+            "fstat".into(),
+            "-T".into(),
+            "depotFile haveRev headRev action otherOpen otherLock unresolved".into(),
+        ];
+        args.extend(chunk.iter().cloned());
+        let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+        let Ok(output) = cli::run_p4(&env, &refs, None) else {
+            continue;
+        };
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        for record in parse_ztag(&stdout) {
+            let depot = field(&record, "depotFile");
+            if depot.is_empty() {
+                continue;
+            }
+            known.insert(depot, status_of(&record));
+        }
+    }
+    for change in changes.iter_mut() {
+        for file in &mut change.files {
+            let (status, detail) =
+                combine_status(known.get(&file.depot_path).cloned(), &file.action);
+            file.status = status;
+            file.detail = detail;
+        }
+    }
+}
+
+fn combine_status(fstat: Option<(String, String)>, action: &str) -> (String, String) {
+    let fallback = action_status(action);
+    let Some((status, detail)) = fstat else {
+        return fallback;
+    };
+    if matches!(status.as_str(), "current" | "local" | "") && !fallback.0.is_empty() {
+        return fallback;
+    }
+    if (status == "stale" || status == "conflict")
+        && !fallback.1.is_empty()
+        && !detail.contains(fallback.1.as_str())
+    {
+        return (status, format!("{detail} · {}", fallback.1));
+    }
+    (status, detail)
+}
+
+fn action_status(action: &str) -> (String, String) {
+    let action = action.to_lowercase();
+    if action.contains("delete") {
+        ("delete".to_string(), "Marked for delete".to_string())
+    } else if action.contains("add") {
+        ("add".to_string(), "Marked for add".to_string())
+    } else if action.contains("edit") {
+        ("edit".to_string(), "Checked out for edit".to_string())
+    } else if action.contains("integrate") || action.contains("move") || action.contains("branch") {
+        ("integrate".to_string(), "Opened for integrate".to_string())
+    } else {
+        (String::new(), String::new())
+    }
+}
+
+fn status_of(record: &ZtagRecord) -> (String, String) {
+    let action = field(record, "action").to_lowercase();
+    let have = field(record, "haveRev").parse::<u64>().unwrap_or(0);
+    let head = field(record, "headRev").parse::<u64>().unwrap_or(0);
+    let others = field(record, "otherOpen").parse::<u64>().unwrap_or(0);
+    let locked = !field(record, "otherLock").is_empty();
+    let unresolved = record.contains_key("unresolved");
+    let revs = if head == 0 {
+        String::new()
+    } else if have == 0 {
+        format!("head {head}")
+    } else if have == head {
+        format!("revision {have}")
+    } else {
+        format!("have {have}, head {head}")
+    };
+    let opened = if action.contains("delete") {
+        Some("Marked for delete")
+    } else if action.contains("add") {
+        Some("Marked for add")
+    } else if action.contains("edit") {
+        Some("Checked out for edit")
+    } else if action.contains("integrate") || action.contains("move") || action.contains("branch") {
+        Some("Opened for integrate")
+    } else {
+        None
+    };
+    let (status, mut label) = if unresolved {
+        ("conflict", "Needs resolve".to_string())
+    } else if action.contains("delete") {
+        ("delete", "Marked for delete".to_string())
+    } else if action.contains("add") {
+        ("add", "Marked for add".to_string())
+    } else if head > have && head > 0 {
+        (
+            "stale",
+            if have == 0 {
+                "Not synced".to_string()
+            } else {
+                "Not latest".to_string()
+            },
+        )
+    } else if action.contains("edit") {
+        ("edit", "Checked out for edit".to_string())
+    } else if action.contains("integrate") || action.contains("move") || action.contains("branch") {
+        ("integrate", "Opened for integrate".to_string())
+    } else if others > 0 || locked {
+        (
+            "other",
+            if locked {
+                "Locked by another user".to_string()
+            } else {
+                "Opened by another user".to_string()
+            },
+        )
+    } else if head > 0 {
+        ("current", "Up to date".to_string())
+    } else {
+        ("local", "Not in the depot".to_string())
+    };
+    if let Some(opened) = opened {
+        if (status == "stale" || status == "conflict") && !label.contains(opened) {
+            label = format!("{label} · {opened}");
+        }
+    }
+    let detail = if revs.is_empty() {
+        label
+    } else {
+        format!("{label} · {revs}")
+    };
+    (status.to_string(), detail)
 }
 
 pub fn submit(connection: &P4Connection, change_id: &str, description: &str) -> AppResult<()> {
@@ -938,6 +1148,7 @@ fn load_pending(connection: &P4Connection) -> AppResult<Vec<P4Changelist>> {
     }
     numbered.sort_by_key(|change| std::cmp::Reverse(change_number(&change.id)));
     changes.extend(numbered);
+    annotate_pending(connection, &mut changes);
     Ok(changes)
 }
 
@@ -961,6 +1172,8 @@ fn file_from_opened(
         action: field(record, "action"),
         rev: field(record, "rev"),
         shelved,
+        status: String::new(),
+        detail: String::new(),
     }
 }
 
@@ -986,6 +1199,8 @@ fn files_from_groups(
                 action: field(group, "action"),
                 rev: field(group, "rev"),
                 shelved,
+                status: String::new(),
+                detail: String::new(),
             })
         })
         .collect()

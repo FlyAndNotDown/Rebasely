@@ -29,6 +29,7 @@ import {
 import { AuthorAvatar } from "@/components/author-avatar";
 import { CommitLine, CreateBranchDialog, CreateTagDialog } from "@/components/create-ref-dialogs";
 import { Button } from "@/components/ui/button";
+import { HoverTip } from "@/components/ui/tooltip";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -372,39 +373,43 @@ export function HistoryPane() {
       <div className="flex shrink-0 items-center gap-1 border-b px-2 py-1.5">
         <div className="relative min-w-0 flex-1">
           <SearchIcon className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
-                setApplied(query.trim());
-              }
-              if (event.key === "Escape") {
-                event.preventDefault();
-                setQuery("");
-                setApplied("");
-              }
-            }}
-            placeholder="Search commits · author: path: content: since:"
-            title={
+          <HoverTip
+            label={
               "Words match the subject, author, hash, or a branch or tag. Narrow with filters:\n" +
               "author:name  path:src/file.cs  content:\"text added or removed\"\n" +
               "regex:pattern  since:2.weeks  until:2026-01-01"
             }
-            className="h-7 pl-7"
-          />
+          >
+            <Input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  setApplied(query.trim());
+                }
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  setQuery("");
+                  setApplied("");
+                }
+              }}
+              placeholder="Search commits · author: path: content: since:"
+              className="h-7 pl-7"
+            />
+          </HoverTip>
         </div>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          aria-label="Reflog"
-          title="Reflog"
-          onClick={() => setOpenPanel("reflog")}
-        >
-          <FileClockIcon />
-        </Button>
+        <HoverTip label="Reflog">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Reflog"
+            onClick={() => setOpenPanel("reflog")}
+          >
+            <FileClockIcon />
+          </Button>
+        </HoverTip>
       </div>
       <ScrollArea className="min-h-0 flex-1" viewportRef={rows.viewportRef} onScroll={onScroll}>
         {visible.length === 0 ? (
@@ -781,12 +786,11 @@ const CommitRow = memo(function CommitRow({
             />
             <span className="truncate">{commit.authorName}</span>
           </span>
-          <span
-            className="w-[7.25rem] shrink-0 text-right text-[11px] tabular-nums text-muted-foreground"
-            title={formatAbsoluteTime(commit.timestamp)}
-          >
-            {formatAbsoluteTime(commit.timestamp)}
-          </span>
+          <HoverTip label={formatAbsoluteTime(commit.timestamp)}>
+            <span className="w-[7.25rem] shrink-0 text-right text-[11px] tabular-nums text-muted-foreground">
+              {formatAbsoluteTime(commit.timestamp)}
+            </span>
+          </HoverTip>
         </button>
       </ContextMenuTrigger>
       <ContextMenuContent className="w-48">

@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { AuthorAvatar } from "@/components/author-avatar";
 import { CommitFilesSkeleton } from "@/components/skeletons";
 import { Button } from "@/components/ui/button";
+import { HoverTip } from "@/components/ui/tooltip";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { formatAbsoluteTime } from "@/lib/format";
 import { fileKindClass, fileKindLabel } from "@/lib/file-kind";
@@ -46,30 +47,32 @@ export function CommitFiles() {
           <div className="min-w-0 flex-1">
             <div className="text-sm font-medium">Compare</div>
             <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
-              <span className="min-w-0 truncate font-mono" title={comparison.base.rev}>
-                {comparison.base.label}
-              </span>
-              <button
-                type="button"
-                title="Swap sides"
-                className="flex size-5 shrink-0 items-center justify-center rounded-sm hover:bg-muted hover:text-foreground"
-                onClick={swapComparison}
-              >
-                <ArrowLeftRightIcon className="size-3.5" />
-              </button>
-              <span className="min-w-0 truncate font-mono" title={comparison.head.rev}>
-                {comparison.head.label}
-              </span>
+              <HoverTip label={comparison.base.rev}>
+                <span className="min-w-0 truncate font-mono">{comparison.base.label}</span>
+              </HoverTip>
+              <HoverTip label="Swap sides">
+                <button
+                  type="button"
+                  className="flex size-5 shrink-0 items-center justify-center rounded-sm hover:bg-muted hover:text-foreground"
+                  onClick={swapComparison}
+                >
+                  <ArrowLeftRightIcon className="size-3.5" />
+                </button>
+              </HoverTip>
+              <HoverTip label={comparison.head.rev}>
+                <span className="min-w-0 truncate font-mono">{comparison.head.label}</span>
+              </HoverTip>
             </div>
           </div>
-          <button
-            type="button"
-            title="Close compare"
-            className="flex size-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground"
-            onClick={closeComparison}
-          >
-            <XIcon className="size-3.5" />
-          </button>
+          <HoverTip label="Close compare">
+            <button
+              type="button"
+              className="flex size-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+              onClick={closeComparison}
+            >
+              <XIcon className="size-3.5" />
+            </button>
+          </HoverTip>
         </div>
         {comparison.files === null ? (
           <CommitFilesSkeleton />
@@ -121,14 +124,16 @@ export function CommitFiles() {
       <div className="shrink-0 px-3 py-2">
         <div className="flex items-start gap-2">
           <div className="min-w-0 flex-1 text-sm font-medium">{commit.summary}</div>
-          <Button type="button" size="icon-xs" variant="ghost" aria-label="Close" title="Close" onClick={closeCommit}>
-            <XIcon />
-          </Button>
+          <HoverTip label="Close">
+            <Button type="button" size="icon-xs" variant="ghost" aria-label="Close" onClick={closeCommit}>
+              <XIcon />
+            </Button>
+          </HoverTip>
         </div>
         <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+          <HoverTip label="Copy author">
           <button
             type="button"
-            title="Copy author"
             className="inline-flex items-center gap-1.5 rounded-md px-1 py-0.5 hover:bg-muted hover:text-foreground"
             onClick={() => void copyText(commit.authorName, "Copied author")}
           >
@@ -138,22 +143,25 @@ export function CommitFiles() {
             />
             {commit.authorName}
           </button>
+          </HoverTip>
+          <HoverTip label="Copy time">
           <button
             type="button"
-            title="Copy time"
             className="rounded-md px-1 py-0.5 tabular-nums hover:bg-muted hover:text-foreground"
             onClick={() => void copyText(formatAbsoluteTime(commit.timestamp), "Copied time")}
           >
             {formatAbsoluteTime(commit.timestamp)}
           </button>
+          </HoverTip>
+          <HoverTip label="Copy full hash">
           <button
             type="button"
-            title="Copy full hash"
             className="rounded-md px-1 py-0.5 font-mono hover:bg-muted hover:text-foreground"
             onClick={() => void copyText(commit.id, "Copied commit hash")}
           >
             {commit.shortId}
           </button>
+          </HoverTip>
         </div>
         {commit.body ? (
           <ScrollArea

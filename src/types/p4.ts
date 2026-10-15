@@ -16,6 +16,8 @@ export interface P4File {
   action: string;
   rev: string;
   shelved: boolean;
+  status: string;
+  detail: string;
 }
 
 export interface P4Changelist {
@@ -52,6 +54,8 @@ export interface P4DirEntry {
   name: string;
   path: string;
   dir: boolean;
+  status: string;
+  detail: string;
 }
 
 export interface P4Auth {

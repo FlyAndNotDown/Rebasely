@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { ChevronRightIcon, FileIcon, FolderIcon, FolderOpenIcon } from "lucide-react";
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu";
+import { HoverTip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
 export interface FileTreeEntry {
@@ -8,6 +9,8 @@ export interface FileTreeEntry {
   name: string;
   dir: boolean;
   ignored?: boolean;
+  icon?: ReactNode;
+  iconTitle?: string;
 }
 
 export function FileTree({
@@ -37,12 +40,12 @@ export function FileTree({
     <>
       {items.map((item) => {
         const expanded = item.dir && open.has(item.path);
+        const tip = item.iconTitle || (item.ignored ? "Ignored" : item.name);
         const row = (
             <button
               type="button"
-              title={item.ignored ? "Ignored" : item.name}
               className={cn(
-                "flex h-7 w-full items-center gap-1 pr-2 text-left text-xs hover:bg-muted/70",
+                "flex h-7 w-full items-center gap-1.5 pr-2 text-left text-xs hover:bg-muted/70",
                 selected === item.path && "bg-muted",
                 item.ignored && "text-muted-foreground",
               )}
@@ -59,12 +62,14 @@ export function FileTree({
               )}
               {item.dir ? (
                 expanded ? (
-                  <FolderOpenIcon className="size-3.5 shrink-0" />
+                  <FolderOpenIcon className="mr-1 size-3.5 shrink-0" />
                 ) : (
-                  <FolderIcon className="size-3.5 shrink-0" />
+                  <FolderIcon className="mr-1 size-3.5 shrink-0" />
                 )
+              ) : item.icon ? (
+                <span className="mr-1 inline-flex shrink-0">{item.icon}</span>
               ) : (
-                <FileIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                <FileIcon className="mr-1 size-3.5 shrink-0 text-muted-foreground" />
               )}
               <span className="min-w-0 flex-1 truncate font-mono">{item.name}</span>
               {trailing ? trailing(item) : null}
@@ -74,11 +79,13 @@ export function FileTree({
           <div key={item.path}>
             {menu && !item.dir ? (
               <ContextMenu>
-                <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
+                <HoverTip label={tip}>
+                  <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
+                </HoverTip>
                 {menu(item)}
               </ContextMenu>
             ) : (
-              row
+              <HoverTip label={tip}>{row}</HoverTip>
             )}
             {expanded ? (
               <FileTree

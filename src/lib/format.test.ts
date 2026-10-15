@@ -5,6 +5,7 @@ import {
   fileName,
   foldRepoPath,
   formatAbsoluteTime,
+  formatExactTime,
   formatBlameWhen,
   formatRelativeTime,
   normalizeRepoPath,
@@ -49,6 +50,7 @@ describe("formatAbsoluteTime", () => {
   it("prints the local date and minute", () => {
     const stamp = Math.floor(new Date(2026, 0, 5, 9, 7).getTime() / 1000);
     expect(formatAbsoluteTime(stamp)).toBe("2026-01-05 09:07");
+    expect(formatExactTime(stamp)).toBe("2026-01-05 09:07:00");
   });
 });
 

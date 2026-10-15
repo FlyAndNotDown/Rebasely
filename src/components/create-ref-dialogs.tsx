@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
+import { HoverTip } from "@/components/ui/tooltip";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
@@ -25,9 +26,9 @@ export function CommitLine({ commit }: { commit?: { shortId: string; summary: st
     <div className="mt-2 flex w-full min-w-0 items-baseline gap-2 font-mono text-xs">
       <span className="shrink-0 text-foreground">{commit.shortId}</span>
       {subject ? (
-        <span className="min-w-0 truncate text-muted-foreground" title={subject}>
-          {subject}
-        </span>
+        <HoverTip label={subject}>
+          <span className="min-w-0 truncate text-muted-foreground">{subject}</span>
+        </HoverTip>
       ) : null}
     </div>
   );

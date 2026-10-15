@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ChevronDownIcon, PlusIcon } from "lucide-react";
 import { ChangeBadge } from "@/components/p4/change-badge";
+import { FileStatusIcon } from "@/components/p4/file-status-icon";
 import { P4Diff } from "@/components/p4/p4-diff";
 import { Button } from "@/components/ui/button";
 import {
@@ -19,7 +20,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Textarea } from "@/components/ui/textarea";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
-import { changeSummary, depotBase, p4ActionClass, p4ActionLetter } from "@/lib/p4";
+import { changeSummary, depotBase } from "@/lib/p4";
+import { HoverTip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { useP4 } from "@/state/p4-context";
 
@@ -108,16 +110,19 @@ export function P4Pending() {
                     >
                       Submit
                     </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      disabled={!numbered}
-                      title={numbered ? "Shelve on the server" : "Save as a numbered changelist before shelving"}
-                      onClick={() => void p4.shelveSelected()}
-                    >
-                      Shelve
-                    </Button>
+                    <HoverTip label={numbered ? "Shelve on the server" : "Save as a numbered changelist before shelving"}>
+                      <span className="inline-flex">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          disabled={!numbered}
+                          onClick={() => void p4.shelveSelected()}
+                        >
+                          Shelve
+                        </Button>
+                      </span>
+                    </HoverTip>
                     <Button
                       type="button"
                       size="sm"
@@ -215,7 +220,7 @@ function FileGroup({
 }: {
   title: string;
   open: boolean;
-  files: { depotPath: string; action: string; shelved: boolean }[];
+  files: { depotPath: string; action: string; shelved: boolean; status: string; detail: string }[];
   selectedPath: string | null;
   selectedShelved: boolean;
   onToggle: () => void;
@@ -237,28 +242,39 @@ function FileGroup({
         ? files.map((file) => {
             const active = file.depotPath === selectedPath && file.shelved === selectedShelved;
             return (
-              <button
-                key={`${file.depotPath}:${file.shelved ? "shelf" : "open"}`}
-                type="button"
-                title={file.action}
-                className={cn(
-                  "flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-xs hover:bg-muted/70",
-                  active && "bg-muted",
-                )}
-                onClick={() => onSelect(file.depotPath)}
-              >
-                <span className={cn("w-3 shrink-0 text-center font-mono text-[11px] font-medium", p4ActionClass(file.action))}>
-                  {p4ActionLetter(file.action)}
-                </span>
-                <span className="min-w-0 flex-1 truncate font-mono" title={file.depotPath}>
-                  {depotBase(file.depotPath)}
-                </span>
-              </button>
+              <HoverTip key={`${file.depotPath}:${file.shelved ? "shelf" : "open"}`} label={fileTip(file)}>
+                <button
+                  type="button"
+                  className={cn(
+                    "flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-xs hover:bg-muted/70",
+                    active && "bg-muted",
+                  )}
+                  onClick={() => onSelect(file.depotPath)}
+                >
+                  <FileStatusIcon status={file.status || actionStatus(file.action)} className="mr-1" />
+                  <span className="min-w-0 flex-1 truncate font-mono">{depotBase(file.depotPath)}</span>
+                </button>
+              </HoverTip>
             );
           })
         : null}
     </div>
   );
+}
+
+function fileTip(file: { depotPath: string; detail: string; action: string }) {
+  const detail = file.detail || file.action;
+  if (!detail) return file.depotPath;
+  return `${detail}\n${file.depotPath}`;
+}
+
+function actionStatus(action: string) {
+  const value = action.toLowerCase();
+  if (value.includes("delete")) return "delete";
+  if (value.includes("add")) return "add";
+  if (value.includes("edit")) return "edit";
+  if (value.includes("integrate") || value.includes("move") || value.includes("branch")) return "integrate";
+  return "";
 }
 
 function NewChangeDialog({

@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { Columns2Icon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { HoverTip } from "@/components/ui/tooltip";
 import { splitRows } from "@/lib/diff-select";
 import { cn } from "@/lib/utils";
 import { useGitPick } from "@/state/git-context";
@@ -33,21 +34,22 @@ export function P4Diff({
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex h-10 shrink-0 items-center justify-between gap-3 border-b px-3">
-        <div className="min-w-0 truncate font-mono text-sm" title={diff.path}>
-          {diff.path || "Diff"}
-        </div>
+        <HoverTip label={diff.path}>
+          <div className="min-w-0 truncate font-mono text-sm">{diff.path || "Diff"}</div>
+        </HoverTip>
         {diff.binary ? null : (
-          <Button
-            type="button"
-            size="icon-xs"
-            variant={prefs.diffSplit ? "secondary" : "ghost"}
-            aria-pressed={prefs.diffSplit}
-            aria-label="Side by side"
-            title="Side by side"
-            onClick={() => void setDiffOptions({ split: !prefs.diffSplit })}
-          >
-            <Columns2Icon />
-          </Button>
+          <HoverTip label="Side by side">
+            <Button
+              type="button"
+              size="icon-xs"
+              variant={prefs.diffSplit ? "secondary" : "ghost"}
+              aria-pressed={prefs.diffSplit}
+              aria-label="Side by side"
+              onClick={() => void setDiffOptions({ split: !prefs.diffSplit })}
+            >
+              <Columns2Icon />
+            </Button>
+          </HoverTip>
         )}
       </div>
       {diff.binary ? (

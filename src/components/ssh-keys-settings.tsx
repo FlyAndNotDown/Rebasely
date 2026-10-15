@@ -4,6 +4,7 @@ import { CheckIcon, ChevronDownIcon, CircleAlertIcon, FolderOpenIcon } from "luc
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { HoverTip } from "@/components/ui/tooltip";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -235,9 +236,11 @@ export function SshKeysSettings({ email }: { email: string }) {
       <div className="mt-6 grid min-w-0 gap-4">
         {list ? (
           <div className="flex items-center gap-2">
-            <p className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground" title={displayPath(list.directory)}>
-              {displayPath(list.directory)}
-            </p>
+            <HoverTip label={displayPath(list.directory)}>
+              <p className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
+                {displayPath(list.directory)}
+              </p>
+            </HoverTip>
             <Button
               type="button"
               variant="outline"
@@ -354,15 +357,15 @@ export function SshKeysSettings({ email }: { email: string }) {
               return (
                 <li key={key.name} className="grid gap-1.5 px-3 py-3">
                   <div className="flex w-max min-w-full items-center gap-2">
-                    <span className="font-mono text-xs whitespace-nowrap" title={key.name}>
-                      {key.name}
-                    </span>
+                    <HoverTip label={key.name}>
+                      <span className="font-mono text-xs whitespace-nowrap">{key.name}</span>
+                    </HoverTip>
                     <span className="min-w-2 flex-1" />
                     {label ? <Badge variant="outline">{label}</Badge> : null}
                     {key.defaultIdentity ? (
-                      <Badge variant="secondary" title="OpenSSH tries this file name on its own">
-                        Default
-                      </Badge>
+                      <HoverTip label="OpenSSH tries this file name on its own">
+                        <Badge variant="secondary">Default</Badge>
+                      </HoverTip>
                     ) : null}
                     {key.encrypted ? <Badge variant="secondary">Passphrase</Badge> : null}
                   </div>
@@ -370,9 +373,11 @@ export function SshKeysSettings({ email }: { email: string }) {
                     <p className="w-max whitespace-nowrap text-xs text-muted-foreground">{key.comment}</p>
                   ) : null}
                   {key.fingerprint ? (
-                    <p className="w-max font-mono text-[11px] whitespace-nowrap text-muted-foreground select-text" title={key.fingerprint}>
-                      {key.fingerprint}
-                    </p>
+                    <HoverTip label={key.fingerprint}>
+                      <p className="w-max font-mono text-[11px] whitespace-nowrap text-muted-foreground select-text">
+                        {key.fingerprint}
+                      </p>
+                    </HoverTip>
                   ) : null}
                   {pendingRemove === key.name ? (
                     <div className="mt-1 flex flex-wrap items-center gap-2">

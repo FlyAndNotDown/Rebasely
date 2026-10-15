@@ -4,6 +4,7 @@ import { ConflictEditor } from "@/components/conflict-editor";
 import { ImageDiff, isImagePath } from "@/components/image-diff";
 import { DiffSkeleton } from "@/components/skeletons";
 import { Button } from "@/components/ui/button";
+import { HoverTip } from "@/components/ui/tooltip";
 import {
   Dialog,
   DialogContent,
@@ -226,71 +227,78 @@ export function DiffViewer({ source }: { source: DiffSource }) {
           ) : null}
           {textual ? (
             <>
-              <Button
-                type="button"
-                size="icon-xs"
-                variant={prefs.diffSplit ? "secondary" : "ghost"}
-                aria-pressed={prefs.diffSplit}
-                aria-label="Side by side"
-                title="Side by side"
-                onClick={() => void setDiffOptions({ split: !prefs.diffSplit })}
-              >
-                <Columns2Icon />
-              </Button>
-              <Button
-                type="button"
-                size="icon-xs"
-                variant={ignoreWhitespace ? "secondary" : "ghost"}
-                aria-pressed={ignoreWhitespace}
-                aria-label="Hide whitespace changes"
-                title={
+              <HoverTip label="Side by side">
+                <Button
+                  type="button"
+                  size="icon-xs"
+                  variant={prefs.diffSplit ? "secondary" : "ghost"}
+                  aria-pressed={prefs.diffSplit}
+                  aria-label="Side by side"
+                  onClick={() => void setDiffOptions({ split: !prefs.diffSplit })}
+                >
+                  <Columns2Icon />
+                </Button>
+              </HoverTip>
+              <HoverTip
+                label={
                   ignoreWhitespace
                     ? "Whitespace changes are hidden; line staging is off until they are shown"
                     : "Hide whitespace changes"
                 }
-                onClick={() => void setDiffOptions({ ignoreWhitespace: !ignoreWhitespace })}
               >
-                <PilcrowIcon />
-              </Button>
+                <Button
+                  type="button"
+                  size="icon-xs"
+                  variant={ignoreWhitespace ? "secondary" : "ghost"}
+                  aria-pressed={ignoreWhitespace}
+                  aria-label="Hide whitespace changes"
+                  onClick={() => void setDiffOptions({ ignoreWhitespace: !ignoreWhitespace })}
+                >
+                  <PilcrowIcon />
+                </Button>
+              </HoverTip>
             </>
           ) : null}
           {fileSource && !conflicted && changeKind !== "untracked" ? (
-            <Button
-              type="button"
-              size="icon-xs"
-              variant="ghost"
-              aria-label="Open in diff tool"
-              title="Open in diff tool"
-              onClick={() => fileSource && void openDifftool(fileSource)}
-            >
-              <ExternalLinkIcon />
-            </Button>
+            <HoverTip label="Open in diff tool">
+              <Button
+                type="button"
+                size="icon-xs"
+                variant="ghost"
+                aria-label="Open in diff tool"
+                onClick={() => fileSource && void openDifftool(fileSource)}
+              >
+                <ExternalLinkIcon />
+              </Button>
+            </HoverTip>
           ) : null}
           {selection.path ? (
+            <HoverTip label="Open in editor">
+              <Button
+                type="button"
+                size="icon-xs"
+                variant="ghost"
+                aria-label="Open in editor"
+                onClick={() => {
+                  const line = diff?.lines.find((item) => item.newLineno)?.newLineno ?? null;
+                  void openInEditor(selection.path, line);
+                }}
+              >
+                <SquarePenIcon />
+              </Button>
+            </HoverTip>
+          ) : null}
+          <HoverTip label="Close">
             <Button
               type="button"
               size="icon-xs"
               variant="ghost"
-              aria-label="Open in editor"
-              title="Open in editor"
-              onClick={() => {
-                const line = diff?.lines.find((item) => item.newLineno)?.newLineno ?? null;
-                void openInEditor(selection.path, line);
-              }}
+              aria-label="Close"
+              onClick={() => closeFile(source)}
             >
-              <SquarePenIcon />
+              <XIcon />
             </Button>
-          ) : null}
-          <Button
-            type="button"
-            size="icon-xs"
-            variant="ghost"
-            aria-label="Close"
-            title="Close"
-            onClick={() => closeFile(source)}
-          >
-            <XIcon />
-          </Button>
+          </HoverTip>
         </div>
       </div>
       {conflicted && selection.type === "change" ? (

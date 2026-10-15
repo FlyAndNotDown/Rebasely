@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { EllipsisIcon } from "lucide-react";
 import { CreateBranchDialog } from "@/components/create-ref-dialogs";
 import { Button } from "@/components/ui/button";
+import { HoverTip } from "@/components/ui/tooltip";
 import {
   Dialog,
   DialogContent,
@@ -109,16 +110,17 @@ function ReflogList({ onClose }: { onClose: () => void }) {
             <div key={entry.selector} className="flex h-8 items-center gap-3 border-b px-3 last:border-b-0 hover:bg-muted/50">
               <span className="w-24 shrink-0 truncate font-mono text-[11px] text-muted-foreground">{entry.selector}</span>
               <span className="w-16 shrink-0 font-mono text-[11px]">{entry.shortId}</span>
-              <div className="min-w-0 flex-1 truncate text-sm" title={title}>
+              <HoverTip label={title}>
+              <div className="min-w-0 flex-1 truncate text-sm">
                 {action ? <span className="mr-1.5 font-medium">{action}</span> : null}
                 <span className="text-muted-foreground">{detail}</span>
               </div>
-              <span
-                className="w-20 shrink-0 text-right text-[11px] text-muted-foreground tabular-nums"
-                title={formatAbsoluteTime(entry.timestamp)}
-              >
+              </HoverTip>
+              <HoverTip label={formatAbsoluteTime(entry.timestamp)}>
+              <span className="w-20 shrink-0 text-right text-[11px] text-muted-foreground tabular-nums">
                 {formatRelativeTime(entry.timestamp)}
               </span>
+              </HoverTip>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="ghost" size="icon-xs" aria-label={`Actions for ${entry.selector}`}>

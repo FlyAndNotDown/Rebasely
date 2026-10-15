@@ -3,6 +3,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { BoxIcon, ChevronRightIcon, FolderGit2Icon, PlusIcon, RefreshCwIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { HoverTip } from "@/components/ui/tooltip";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   ContextMenu,
@@ -118,24 +119,25 @@ export function RepoStructure({ onReady }: { onReady?: (repoPath: string) => voi
             open={openSections.submodules}
             onToggle={() => setOpenSections((current) => ({ ...current, submodules: !current.submodules }))}
             action={
-              <button
-                type="button"
-                title="Update all submodules"
-                className="flex size-6 shrink-0 items-center justify-center rounded-sm hover:bg-muted hover:text-foreground"
-                onClick={() => void updateSubmodules([])}
-              >
-                <RefreshCwIcon className="size-3.5" />
-              </button>
+              <HoverTip label="Update all submodules">
+                <button
+                  type="button"
+                  className="flex size-6 shrink-0 items-center justify-center rounded-sm hover:bg-muted hover:text-foreground"
+                  onClick={() => void updateSubmodules([])}
+                >
+                  <RefreshCwIcon className="size-3.5" />
+                </button>
+              </HoverTip>
             }
           />
           {openSections.submodules
             ? submodules.map((module) => (
                 <ContextMenu key={module.path}>
+                  <HoverTip label={module.url ?? module.path}>
                   <ContextMenuTrigger asChild>
                     <button
                       type="button"
                       className="flex h-7 w-full items-center gap-1.5 pr-2 pl-7 text-left text-xs hover:bg-muted/70"
-                      title={module.url ?? module.path}
                       onDoubleClick={() => {
                         if (module.state !== "uninitialized") void openPath(joinPath(repoPath, module.path));
                       }}
@@ -158,6 +160,7 @@ export function RepoStructure({ onReady }: { onReady?: (repoPath: string) => voi
                       ) : null}
                     </button>
                   </ContextMenuTrigger>
+                  </HoverTip>
                   <ContextMenuContent className="w-48">
                     {module.state !== "uninitialized" ? (
                       <ContextMenuItem onClick={() => void openPath(joinPath(repoPath, module.path))}>
@@ -188,14 +191,15 @@ export function RepoStructure({ onReady }: { onReady?: (repoPath: string) => voi
                 open={openSections.worktrees}
                 onToggle={() => setOpenSections((current) => ({ ...current, worktrees: !current.worktrees }))}
                 action={
-                  <button
-                    type="button"
-                    title="New worktree"
-                    className="flex size-6 shrink-0 items-center justify-center rounded-sm hover:bg-muted hover:text-foreground"
-                    onClick={() => setAdding(true)}
-                  >
-                    <PlusIcon className="size-3.5" />
-                  </button>
+                  <HoverTip label="New worktree">
+                    <button
+                      type="button"
+                      className="flex size-6 shrink-0 items-center justify-center rounded-sm hover:bg-muted hover:text-foreground"
+                      onClick={() => setAdding(true)}
+                    >
+                      <PlusIcon className="size-3.5" />
+                    </button>
+                  </HoverTip>
                 }
               />
             </div>
@@ -208,11 +212,11 @@ export function RepoStructure({ onReady }: { onReady?: (repoPath: string) => voi
         {openSections.worktrees
           ? worktrees.map((tree) => (
               <ContextMenu key={tree.path}>
+                <HoverTip label={tree.path}>
                 <ContextMenuTrigger asChild>
                   <button
                     type="button"
                     className="flex h-7 w-full items-center gap-1.5 pr-2 pl-7 text-left text-xs hover:bg-muted/70"
-                    title={tree.path}
                     onDoubleClick={() => {
                       if (!tree.current && !tree.prunable) void openPath(tree.path);
                     }}
@@ -227,6 +231,7 @@ export function RepoStructure({ onReady }: { onReady?: (repoPath: string) => voi
                     ) : null}
                   </button>
                 </ContextMenuTrigger>
+                </HoverTip>
                 <ContextMenuContent className="w-48">
                   {!tree.current && !tree.prunable ? (
                     <ContextMenuItem onClick={() => void openPath(tree.path)}>Open in a new tab</ContextMenuItem>

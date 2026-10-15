@@ -13,6 +13,7 @@ import {
 import { useTheme } from "next-themes";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { HoverTip } from "@/components/ui/tooltip";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -596,11 +597,13 @@ function SupportList({ items }: { items: { id: string; name: string; available: 
   const missing = items.filter((item) => !item.available);
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button type="button" variant="outline" size="icon" className="shrink-0" aria-label="Supported tools" title="Supported tools">
-          <ListIcon />
-        </Button>
-      </DropdownMenuTrigger>
+      <HoverTip label="Supported tools">
+        <DropdownMenuTrigger asChild>
+          <Button type="button" variant="outline" size="icon" className="shrink-0" aria-label="Supported tools">
+            <ListIcon />
+          </Button>
+        </DropdownMenuTrigger>
+      </HoverTip>
       <DropdownMenuContent align="end" className="w-64">
         <SupportGroup title="Installed" items={installed} />
         <DropdownMenuSeparator />
@@ -747,9 +750,9 @@ function GitExecutableLabel({ path, pathTag = false }: { path: string; pathTag?:
   const label = displayPath(path);
   return (
     <span className="flex min-w-0 flex-1 items-center gap-2">
-      <span className="min-w-0 truncate font-mono text-xs" title={label}>
-        {label}
-      </span>
+      <HoverTip label={label}>
+        <span className="min-w-0 truncate font-mono text-xs">{label}</span>
+      </HoverTip>
       {pathTag ? (
         <span className="inline-flex h-4 shrink-0 items-center rounded border bg-background px-1.5 font-sans text-[10px] leading-none text-muted-foreground">
           PATH

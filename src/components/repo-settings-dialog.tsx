@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { RotateCcwIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { HoverTip } from "@/components/ui/tooltip";
 import {
   Dialog,
   DialogContent,
@@ -123,17 +124,18 @@ function IdentityField({
       <div className="flex items-center gap-2">
         <Input id={id} type={type} value={value} onChange={(event) => onChange(event.target.value)} />
         {changed ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="shrink-0"
-            aria-label={`Reset ${label.toLowerCase()}`}
-            title="Reset to repository default"
-            onClick={() => onChange(fallback)}
-          >
-            <RotateCcwIcon />
-          </Button>
+          <HoverTip label="Reset to repository default">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="shrink-0"
+              aria-label={`Reset ${label.toLowerCase()}`}
+              onClick={() => onChange(fallback)}
+            >
+              <RotateCcwIcon />
+            </Button>
+          </HoverTip>
         ) : null}
       </div>
     </div>

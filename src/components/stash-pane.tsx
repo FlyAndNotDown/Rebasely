@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
+import { HoverTip } from "@/components/ui/tooltip";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -164,10 +165,10 @@ function StashRow({
 
   return (
     <ContextMenu>
+      <HoverTip label={label}>
       <ContextMenuTrigger asChild>
         <button
           type="button"
-          title={label}
           className={cn(
             "block w-full min-w-0 overflow-hidden rounded-md px-1.5 py-2 text-left hover:bg-muted/70",
             selected && "bg-muted",
@@ -181,6 +182,7 @@ function StashRow({
           </div>
         </button>
       </ContextMenuTrigger>
+      </HoverTip>
       <ContextMenuContent className="w-36">
         <ContextMenuItem onClick={onApply}>Apply</ContextMenuItem>
         <ContextMenuItem onClick={onPop}>Pop</ContextMenuItem>
