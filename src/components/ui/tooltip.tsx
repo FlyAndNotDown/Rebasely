@@ -69,6 +69,8 @@ function HoverTip({
       <TooltipTrigger asChild>{children}</TooltipTrigger>
       <TooltipContent
         side={side}
+        align="start"
+        sideOffset={6}
         className="max-w-sm text-left whitespace-pre-line wrap-break-word"
       >
         {label}

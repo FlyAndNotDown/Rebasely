@@ -16,6 +16,7 @@ export interface P4File {
   action: string;
   rev: string;
   shelved: boolean;
+  binary: boolean;
   status: string;
   detail: string;
 }

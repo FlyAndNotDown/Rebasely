@@ -384,8 +384,7 @@ fn split_sections(text: &str) -> Vec<DiffSection> {
 fn header_path(line: &str) -> Option<(String, bool)> {
     let rest = line.strip_prefix("==== ")?.trim();
     let rest = rest.trim_end_matches("====").trim();
-    let binary =
-        rest.contains("(binary)") || rest.contains("(ubinary)") || rest.contains("(apple)");
+    let binary = header_type_is_binary(rest);
     let path = rest
         .split(" - ")
         .next()
@@ -484,6 +483,54 @@ fn diff_from_section(path: &str, binary: bool, body: &str) -> FileDiff {
         truncated,
         lines,
     }
+}
+
+pub fn file_type_is_binary(file_type: &str) -> bool {
+    let base = file_type
+        .split('+')
+        .next()
+        .unwrap_or(file_type)
+        .trim()
+        .trim_matches(|ch: char| ch == '(' || ch == ')');
+    matches!(
+        base.to_ascii_lowercase().as_str(),
+        "binary" | "ubinary" | "apple" | "resource" | "uresource" | "uxbinary"
+    )
+}
+
+fn header_type_is_binary(header: &str) -> bool {
+    let Some(open) = header.rfind('(') else {
+        return false;
+    };
+    let Some(close) = header[open..].find(')') else {
+        return false;
+    };
+    file_type_is_binary(&header[open + 1..open + close])
+}
+
+/// `p4 sync -N` prints `files added/updated/deleted=1/2/3`.
+pub fn sync_estimate_files(text: &str) -> Option<u64> {
+    let rest = text.split_once("files added/updated/deleted=")?.1;
+    let numbers = rest.split([',', ' ', '\r', '\n']).next()?.trim();
+    if numbers.is_empty() {
+        return None;
+    }
+    let mut total = 0_u64;
+    for part in numbers.split('/') {
+        total = total.checked_add(part.parse::<u64>().ok()?)?;
+    }
+    Some(total)
+}
+
+pub fn sync_reports_a_file(line: &str) -> bool {
+    const MARKERS: [&str; 5] = [
+        " - updating ",
+        " - added ",
+        " - deleted ",
+        " - refreshing ",
+        " - moved ",
+    ];
+    MARKERS.iter().any(|marker| line.contains(marker))
 }
 
 fn body_is_binary(body: &str) -> bool {
@@ -684,6 +731,16 @@ Files:
         assert_eq!(diffs[0].lines[2].content, "old");
         assert_eq!(diffs[0].lines[3].kind, "add");
         assert!(diffs[1].binary);
+        let typed = parse_describe_diffs("==== //depot/main/mesh.uasset#4 (binary+l) ====\n");
+        assert!(typed[0].binary);
+        assert_eq!(
+            sync_estimate_files("files added/updated/deleted=1/2/3, bytes added/updated=4/5"),
+            Some(6)
+        );
+        assert!(sync_reports_a_file("//depot/a#2 - updating E:\\a"));
+        assert!(!sync_reports_a_file(
+            "//depot/a#2 - is opened and not being changed"
+        ));
     }
 
     #[test]

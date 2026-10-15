@@ -274,7 +274,7 @@ pub fn run_p4_diff(env: &P4Env, args: &[&str]) -> AppResult<String> {
 pub fn run_p4_stream(
     env: &P4Env,
     args: &[&str],
-    mut on_line: impl FnMut(&str),
+    mut on_line: impl FnMut(String),
 ) -> AppResult<String> {
     let (ok, stdout, stderr) = stream_once(env, args, &mut on_line)?;
     let message = combine(&stderr, &stdout);
@@ -334,7 +334,7 @@ fn run_once(env: &P4Env, args: &[&str], input: Option<&str>) -> AppResult<std::p
 fn stream_once(
     env: &P4Env,
     args: &[&str],
-    on_line: &mut dyn FnMut(&str),
+    on_line: &mut dyn FnMut(String),
 ) -> AppResult<(bool, String, String)> {
     let program = require_p4()?;
     let mut command = prepared(program, env, args);
@@ -374,7 +374,7 @@ fn stream_once(
             }
             stdout_text.push_str(&line);
             stdout_text.push('\n');
-            on_line(&line);
+            on_line(line);
         }
     }
     let status = child.wait().map_err(|err| AppError::msg(err.to_string()))?;

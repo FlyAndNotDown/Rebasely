@@ -1,11 +1,25 @@
 import { useMemo } from "react";
 import { Columns2Icon } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { HoverTip } from "@/components/ui/tooltip";
 import { splitRows } from "@/lib/diff-select";
 import { cn } from "@/lib/utils";
 import { useGitPick } from "@/state/git-context";
 import type { DiffLine, FileDiff } from "@/types/git";
+
+async function copyPath(value: string) {
+  if (!value) {
+    toast.error("Nothing to copy");
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(value);
+    toast.success("Copied path");
+  } catch {
+    toast.error("Could not copy");
+  }
+}
 
 export function P4Diff({
   diff,
@@ -34,9 +48,13 @@ export function P4Diff({
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex h-10 shrink-0 items-center justify-between gap-3 border-b px-3">
-        <HoverTip label={diff.path}>
-          <div className="min-w-0 truncate font-mono text-sm">{diff.path || "Diff"}</div>
-        </HoverTip>
+        <button
+          type="button"
+          className="min-w-0 truncate text-left font-mono text-sm hover:underline"
+          onClick={() => void copyPath(diff.path)}
+        >
+          {diff.path || "Diff"}
+        </button>
         {diff.binary ? null : (
           <HoverTip label="Side by side">
             <Button

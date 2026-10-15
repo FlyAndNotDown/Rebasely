@@ -222,24 +222,23 @@ export function P4Submitted() {
               </div>
               <div className="min-h-0 flex-1 overflow-auto px-1 py-1">
                 {p4.submittedDetail?.files.map((item) => (
-                  <HoverTip key={item.depotPath} label={`${item.action}\n${item.depotPath}`}>
-                    <button
-                      type="button"
-                      className={cn(
-                        "flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-xs hover:bg-muted/70",
-                        file === item.depotPath && "bg-muted",
-                      )}
-                      onClick={() => setPicked(item.depotPath)}
-                    >
-                      <span className={cn("w-3 shrink-0 text-center font-mono text-[11px] font-medium", p4ActionClass(item.action))}>
-                        {p4ActionLetter(item.action)}
-                      </span>
-                      <span className="min-w-0 flex-1 truncate font-mono">{depotBase(item.depotPath)}</span>
-                      {p4.submittedDiffs.some((diff) => diff.binary && diff.path === item.depotPath) ? (
-                        <span className="shrink-0 text-muted-foreground">binary</span>
-                      ) : null}
-                    </button>
-                  </HoverTip>
+                  <button
+                    key={item.depotPath}
+                    type="button"
+                    className={cn(
+                      "flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-xs hover:bg-muted/70",
+                      file === item.depotPath && "bg-muted",
+                    )}
+                    onClick={() => setPicked(item.depotPath)}
+                  >
+                    <span className={cn("w-3 shrink-0 text-center font-mono text-[11px] font-medium", p4ActionClass(item.action))}>
+                      {p4ActionLetter(item.action)}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate font-mono">{depotBase(item.depotPath)}</span>
+                    {item.binary || p4.submittedDiffs.some((diff) => diff.binary && diff.path === item.depotPath) ? (
+                      <span className="shrink-0 text-muted-foreground">binary</span>
+                    ) : null}
+                  </button>
                 ))}
               </div>
             </div>

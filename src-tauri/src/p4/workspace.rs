@@ -14,10 +14,11 @@ use crate::error::{AppError, AppResult, P4_LOGIN, P4_MISSING};
 use crate::git::{strip_verbatim_prefix, FileDiff};
 use crate::p4::cli::{self, P4Env};
 use crate::p4::parse::{
-    blank_change_spec, classic_client_spec, created_change_id, depot_view, indexed_groups,
-    known_p4_value, normalize_charset, parse_describe_diffs, parse_p4_set, parse_p4config,
-    parse_single_diff, parse_ztag, path_depth, path_is_within, read_description, set_description,
-    set_spec_field, valid_client_name, valid_depot_path, view_depots, ZtagRecord,
+    blank_change_spec, classic_client_spec, created_change_id, depot_view, file_type_is_binary,
+    indexed_groups, known_p4_value, normalize_charset, parse_describe_diffs, parse_p4_set,
+    parse_p4config, parse_single_diff, parse_ztag, path_depth, path_is_within, read_description,
+    set_description, set_spec_field, sync_estimate_files, sync_reports_a_file, valid_client_name,
+    valid_depot_path, view_depots, ZtagRecord,
 };
 
 #[derive(Debug, Clone, Deserialize)]
@@ -79,6 +80,7 @@ pub struct P4File {
     pub action: String,
     pub rev: String,
     pub shelved: bool,
+    pub binary: bool,
     /// Workspace icon state: current, stale, conflict, edit, add, delete, integrate, other, local.
     pub status: String,
     /// Sentence shown in the file tooltip.
@@ -718,15 +720,83 @@ pub fn sync(
     mut progress: impl FnMut(&str),
 ) -> AppResult<String> {
     let env = env_for(connection);
-    let mut args = vec!["sync".to_string()];
-    args.extend(paths.iter().cloned());
+    progress("Counting files");
+    let total = run_owned(&env, &sync_args(paths, false, true), None)
+        .ok()
+        .as_deref()
+        .and_then(sync_estimate_files);
+    if total.is_some_and(|count| count > 0) {
+        progress("0% Syncing");
+    }
+    // P4V transfers several files at once. Four threads is its usual default.
+    // Progress is counted from the file lines, because asking p4 for its own
+    // progress indicator turns parallel transfer off.
+    let mut transferred = 0_u64;
+    let mut progress = progress;
+    match run_sync(&env, paths, true, total, &mut transferred, &mut progress) {
+        Err(err) if transferred == 0 && parallel_rejected(&err.to_string()) => {
+            run_sync(&env, paths, false, total, &mut transferred, &mut progress)
+        }
+        result => result,
+    }
+}
+
+fn run_sync(
+    env: &P4Env,
+    paths: &[String],
+    parallel: bool,
+    total: Option<u64>,
+    transferred: &mut u64,
+    progress: &mut dyn FnMut(&str),
+) -> AppResult<String> {
+    let args = sync_args(paths, parallel, false);
     let refs: Vec<&str> = args.iter().map(String::as_str).collect();
-    cli::run_p4_stream(&env, &refs, &mut progress)
+    cli::run_p4_stream(env, &refs, &mut |line: String| {
+        progress(&sync_progress_line(&line, total, transferred));
+    })
+}
+
+fn sync_progress_line(line: &str, total: Option<u64>, transferred: &mut u64) -> String {
+    if sync_reports_a_file(line) {
+        *transferred = transferred.saturating_add(1);
+        if let Some(total) = total.filter(|count| *count > 0) {
+            let percent = (transferred.saturating_mul(100) / total).min(100);
+            return format!("{percent}% {line}");
+        }
+    }
+    line.to_string()
+}
+
+fn sync_args(paths: &[String], parallel: bool, estimate: bool) -> Vec<String> {
+    let mut args = vec!["sync".to_string()];
+    if estimate {
+        args.push("-N".to_string());
+    } else if parallel {
+        args.push("--parallel=threads=4".to_string());
+    }
+    args.extend(paths.iter().cloned());
+    args
+}
+
+fn parallel_rejected(message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    lower.contains("parallel")
+        && (lower.contains("disable")
+            || lower.contains("not enabled")
+            || lower.contains("maximum")
+            || lower.contains("net.parallel")
+            || lower.contains("ignored"))
 }
 
 pub fn reconcile(connection: &P4Connection, mut progress: impl FnMut(&str)) -> AppResult<String> {
     let env = env_for(connection);
-    cli::run_p4_stream(&env, &["reconcile", "-e", "-a", "-d"], &mut progress)
+    cli::run_p4_stream(
+        &env,
+        &["reconcile", "-e", "-a", "-d"],
+        &mut |line: String| {
+            progress(&line);
+        },
+    )
 }
 
 pub fn file_action(connection: &P4Connection, action: &str, paths: &[String]) -> AppResult<()> {
@@ -1172,6 +1242,7 @@ fn file_from_opened(
         action: field(record, "action"),
         rev: field(record, "rev"),
         shelved,
+        binary: file_type_is_binary(&field(record, "type")),
         status: String::new(),
         detail: String::new(),
     }
@@ -1199,6 +1270,7 @@ fn files_from_groups(
                 action: field(group, "action"),
                 rev: field(group, "rev"),
                 shelved,
+                binary: file_type_is_binary(&field(group, "type")),
                 status: String::new(),
                 detail: String::new(),
             })
