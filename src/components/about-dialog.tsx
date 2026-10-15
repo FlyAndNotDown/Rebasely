@@ -34,7 +34,7 @@ export function AboutDialog({
             </div>
           </div>
           <DialogDescription className="mt-4 text-sm leading-relaxed">
-            Your best choice for a Git client.
+            Your best choice for Git and Perforce.
           </DialogDescription>
           <div className="mt-7">
             <p className="text-sm font-medium tracking-tight">{AUTHOR}</p>

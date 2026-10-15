@@ -15,11 +15,13 @@ import { listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { toast } from "sonner";
 import { emptyBinaryDiff, errorMessage, expandHistoryRevs, GIT_MISSING, gitApi, isCancelled, subscribeGitMissing } from "@/lib/git";
+import { P4_MISSING, p4Api } from "@/lib/p4";
 import { normalizeRepoPath, sameRepoPath } from "@/lib/format";
 import { defaultPrefs, normalizePrefs, sameLayout } from "@/lib/prefs";
 import {
   COMMIT_PAGE,
   WELCOME_TAB_ID,
+  asVcs,
   defaultFetchRemote,
   emptySession,
   findRepoTab,
@@ -40,6 +42,7 @@ import {
   type RepoTab,
   type ResetMode,
   type StashSelection,
+  type VcsKind,
   type View,
 } from "@/state/session";
 import {
@@ -76,6 +79,13 @@ import type {
 
 export { COMMIT_PAGE, WELCOME_TAB_ID, defaultFetchRemote, primaryRemote };
 export type Panel = "reflog" | "palette" | "settings" | "new-branch";
+export type RepoKindPrompt = {
+  path: string;
+  gitPath: string;
+  client: string;
+  port: string;
+  root: string;
+};
 export type { AppTab, PublishPrompt, RepoTab, ResetMode, StashSelection, View };
 
 function afterPaint() {
@@ -115,6 +125,8 @@ interface GitContextValue {
   prefs: AppPrefs;
   /** No usable Git executable is selected. */
   gitMissing: boolean;
+  /** A folder that is both a Git repository and a Perforce workspace. */
+  kindPrompt: RepoKindPrompt | null;
   loading: boolean;
   setOpenPanel: (panel: Panel | null) => void;
   setView: (view: View) => void;
@@ -133,7 +145,11 @@ interface GitContextValue {
   closeTab: (id: string) => void;
   reorderTabs: (fromId: string, toId: string, place: "before" | "after") => void;
   openFolder: () => Promise<void>;
-  openPath: (path: string) => Promise<void>;
+  openPath: (path: string, vcs?: VcsKind) => Promise<void>;
+  chooseRepoKind: (vcs: VcsKind) => void;
+  dismissRepoKind: () => void;
+  setTabMeta: (id: string, name: string) => void;
+  retargetRepoTab: (id: string, path: string, name: string) => void;
   cloneRepository: (url: string, destination: string) => Promise<boolean>;
   revealRepo: () => Promise<void>;
   openTerminal: () => Promise<void>;
@@ -249,9 +265,9 @@ const OPEN_SETTINGS_EVENT = "rebasely-open-settings";
 
 function reportError(error: unknown) {
   const message = errorMessage(error);
-  if (message === GIT_MISSING) {
+  if (message === GIT_MISSING || message === P4_MISSING) {
     toast.error(message, {
-      id: "git-missing",
+      id: message === P4_MISSING ? "p4-missing" : "git-missing",
       action: {
         label: "Settings",
         onClick: () => window.dispatchEvent(new Event(OPEN_SETTINGS_EVENT)),
@@ -285,6 +301,8 @@ export function GitProvider({ children }: { children: ReactNode }) {
   const [openPanel, setOpenPanel] = useState<Panel | null>(null);
   const [prefs, setPrefs] = useState<AppPrefs>(defaultPrefs);
   const [gitMissing, setGitMissing] = useState(false);
+  const [kindPrompt, setKindPromptState] = useState<RepoKindPrompt | null>(null);
+  const kindPromptRef = useRef<RepoKindPrompt | null>(null);
   const restoredRef = useRef(false);
   const refreshAfterReplayRef = useRef<() => Promise<void>>(async () => {});
   const prefsRef = useRef(prefs);
@@ -342,6 +360,51 @@ export function GitProvider({ children }: { children: ReactNode }) {
     [commitTabs],
   );
 
+  const setKindPrompt = useCallback((next: RepoKindPrompt | null) => {
+    kindPromptRef.current = next;
+    setKindPromptState(next);
+  }, []);
+
+  const setTabMeta = useCallback(
+    (id: string, name: string) => {
+      const current = tabsRef.current;
+      const index = current.findIndex((tab) => tab.id === id);
+      const tab = current[index];
+      if (!tab || tab.kind !== "repo" || tab.name === name) return;
+      const next = [...current];
+      next[index] = { ...tab, name };
+      commitTabs(next);
+    },
+    [commitTabs],
+  );
+
+  const retargetRepoTab = useCallback(
+    (id: string, path: string, name: string) => {
+      const current = tabsRef.current;
+      const index = current.findIndex((tab) => tab.id === id);
+      const tab = current[index];
+      if (!tab || tab.kind !== "repo") return;
+      if (sameRepoPath(tab.path, path)) {
+        setTabMeta(id, name);
+        return;
+      }
+      const replacement = tabFromPath(path, name, tab.vcs);
+      const duplicate = current.find((item) => item.id === replacement.id && item.id !== id);
+      const next = duplicate
+        ? current.filter((item) => item.id !== id)
+        : current.map((item) => (item.id === id ? replacement : item));
+      if (id !== replacement.id && sessionsRef.current[id]) {
+        const { [id]: _dropped, ...rest } = sessionsRef.current;
+        commitSessions(rest);
+      }
+      commitTabs(next);
+      if (activeTabIdRef.current === id && id !== replacement.id) {
+        commitActiveTabId(duplicate?.id ?? replacement.id);
+      }
+    },
+    [commitActiveTabId, commitSessions, commitTabs, setTabMeta],
+  );
+
   const patchSession = useCallback(
     (
       tabId: string,
@@ -366,11 +429,11 @@ export function GitProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const persistSession = useCallback((nextTabs: AppTab[], nextActiveId: string) => {
-    const openPaths = nextTabs
-      .filter((tab): tab is RepoTab => tab.kind === "repo")
-      .map((tab) => tab.path);
+    const repos = nextTabs.filter((tab): tab is RepoTab => tab.kind === "repo");
+    const openRepos = repos.map((tab) => ({ path: tab.path, vcs: tab.vcs }));
+    const openPaths = repos.map((tab) => tab.path);
     const activeTab = nextTabs.find((tab) => tab.id === nextActiveId);
-    const active = activeTab?.kind === "repo" ? activeTab.path : "welcome";
+    const active = activeTab?.kind === "repo" ? activeTab.id : "welcome";
     const historyRevs = { ...historyRevsMapRef.current };
     const historyExpanded = { ...historyExpandedMapRef.current };
     for (const item of Object.values(sessionsRef.current)) {
@@ -380,7 +443,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
     }
     historyRevsMapRef.current = historyRevs;
     historyExpandedMapRef.current = historyExpanded;
-    void gitApi.saveSession({ openPaths, active, historyRevs, historyExpanded }).catch(() => undefined);
+    void gitApi.saveSession({ openPaths, openRepos, active, historyRevs, historyExpanded }).catch(() => undefined);
   }, []);
 
   const restoreSession = useCallback((session: AppSession, recentsList: RecentRepo[]) => {
@@ -392,17 +455,31 @@ export function GitProvider({ children }: { children: ReactNode }) {
     historyRevsMapRef.current = historyRevsMap;
     historyExpandedMapRef.current = historyExpandedMap;
 
-    for (const path of session.openPaths) {
-      const recent = recentsList.find((item) => sameRepoPath(item.path, path));
-      const tab = tabFromPath(path, recent?.name);
+    const entries =
+      session.openRepos && session.openRepos.length > 0
+        ? session.openRepos.map((item) => ({ path: item.path, vcs: asVcs(item.vcs) }))
+        : session.openPaths.map((path) => ({ path, vcs: "git" as const }));
+    const legacyActive =
+      session.active !== "welcome" &&
+      !session.active.startsWith("repo:") &&
+      !session.active.startsWith("p4:");
+
+    for (const entry of entries) {
+      const recent = recentsList.find((item) => sameRepoPath(item.path, entry.path));
+      const tab = tabFromPath(entry.path, recent?.name, entry.vcs);
       if (nextTabs.some((item) => item.id === tab.id)) continue;
       nextTabs.push(tab);
-      nextSessions[tab.id] = emptySession(
-        path,
-        lookupHistoryRevs(historyRevsMap, path),
-        lookupPathList(historyExpandedMap, path),
-      );
-      if (session.active !== "welcome" && sameRepoPath(session.active, path)) {
+      if (entry.vcs === "git") {
+        nextSessions[tab.id] = emptySession(
+          entry.path,
+          lookupHistoryRevs(historyRevsMap, entry.path),
+          lookupPathList(historyExpandedMap, entry.path),
+        );
+      }
+      if (
+        session.active === tab.id ||
+        (legacyActive && entry.vcs === "git" && sameRepoPath(session.active, entry.path))
+      ) {
         activeId = tab.id;
       }
     }
@@ -477,7 +554,9 @@ export function GitProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const persistKey = useMemo(() => {
-    const open = tabs.filter((tab): tab is RepoTab => tab.kind === "repo").map((tab) => tab.path);
+    const open = tabs
+      .filter((tab): tab is RepoTab => tab.kind === "repo")
+      .map((tab) => `${tab.vcs}\n${tab.path}`);
     return JSON.stringify([open, activeTabId]);
   }, [activeTabId, tabs]);
 
@@ -563,7 +642,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
   const hydrateRepo = useCallback(
     async (tabId: string) => {
       const tab = tabsRef.current.find((item) => item.id === tabId);
-      if (!tab || tab.kind !== "repo") return;
+      if (!tab || tab.kind !== "repo" || tab.vcs === "perforce") return;
       if (sessionsRef.current[tabId]?.snapshot) return;
 
       const pendingKey = normalizeRepoPath(tab.path);
@@ -611,8 +690,8 @@ export function GitProvider({ children }: { children: ReactNode }) {
     void hydrateRepo(activeTabId);
   }, [activeTabId, hydrateRepo, loading]);
 
-  const openPath = useCallback(async (path: string) => {
-    const existing = findRepoTab(tabsRef.current, path);
+  const openGitPath = useCallback(async (path: string) => {
+    const existing = findRepoTab(tabsRef.current, path, "git");
     if (existing) {
       const next = placeOpenedRepoTab(tabsRef.current, existing);
       if (next !== tabsRef.current) commitTabs(next);
@@ -620,14 +699,14 @@ export function GitProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    const pendingKey = normalizeRepoPath(path);
+    const pendingKey = `git\n${normalizeRepoPath(path)}`;
     if (openingPathsRef.current.has(pendingKey)) return;
     openingPathsRef.current.add(pendingKey);
     try {
       const snapshot = await runActivity("Opening repository", path, () =>
         gitApi.openRepository(path),
       );
-      const tab = findRepoTab(tabsRef.current, snapshot.repo.path) ?? tabFromSnapshot(snapshot);
+      const tab = findRepoTab(tabsRef.current, snapshot.repo.path, "git") ?? tabFromSnapshot(snapshot);
       const current = sessionsRef.current;
       commitSessions({
         ...current,
@@ -652,11 +731,70 @@ export function GitProvider({ children }: { children: ReactNode }) {
     }
   }, [commitActiveTabId, commitSessions, commitTabs, runActivity, setActiveTab]);
 
+  const openPerforcePath = useCallback((path: string) => {
+    const existing = findRepoTab(tabsRef.current, path, "perforce");
+    if (existing) {
+      const next = placeOpenedRepoTab(tabsRef.current, existing);
+      if (next !== tabsRef.current) commitTabs(next);
+      setActiveTab(existing.id);
+      return;
+    }
+    const tab = tabFromPath(path, undefined, "perforce");
+    const nextTabs = placeOpenedRepoTab(tabsRef.current, tab);
+    if (nextTabs !== tabsRef.current) commitTabs(nextTabs);
+    commitActiveTabId(tab.id);
+  }, [commitActiveTabId, commitTabs, setActiveTab]);
+
+  const openPath = useCallback(async (path: string, vcs?: VcsKind) => {
+    if (vcs === "git") {
+      await openGitPath(path);
+      return;
+    }
+    if (vcs === "perforce") {
+      openPerforcePath(path);
+      return;
+    }
+    try {
+      const detected = await p4Api.detectRepository(path);
+      if (detected.kind === "git") {
+        await openGitPath(detected.path);
+        return;
+      }
+      if (detected.kind === "perforce") {
+        openPerforcePath(detected.connection.root || path);
+        return;
+      }
+      if (detected.kind === "ambiguous") {
+        setKindPrompt({
+          path: detected.path,
+          gitPath: detected.gitPath,
+          client: detected.connection.client,
+          port: detected.connection.port,
+          root: detected.connection.root || path,
+        });
+        return;
+      }
+      toast.error(`No Git repository or Perforce workspace found at ${path}`);
+    } catch (error) {
+      reportError(error);
+    }
+  }, [openGitPath, openPerforcePath, setKindPrompt]);
+
+  const chooseRepoKind = useCallback((vcs: VcsKind) => {
+    const prompt = kindPromptRef.current;
+    setKindPrompt(null);
+    if (!prompt) return;
+    if (vcs === "git") void openGitPath(prompt.gitPath);
+    else openPerforcePath(prompt.root);
+  }, [openGitPath, openPerforcePath, setKindPrompt]);
+
+  const dismissRepoKind = useCallback(() => setKindPrompt(null), [setKindPrompt]);
+
   const openFolder = useCallback(async () => {
     const selected = await open({
       directory: true,
       multiple: false,
-      title: "Open Git repository",
+      title: "Open repository",
     });
     if (typeof selected === "string") {
       await openPath(selected);
@@ -672,7 +810,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
           (activityId) => gitApi.cloneRepository(url, destination, activityId),
           true,
         );
-        await openPath(path);
+        await openPath(path, "git");
         return true;
       } catch (error) {
         if (isCancelled(error)) toast.info("Cancelled: Cloning repository");
@@ -932,7 +1070,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
             const job = flight.queued.get(next);
             flight.queued.delete(next);
             if (!job) continue;
-            const tab = findRepoTab(tabsRef.current, next);
+            const tab = findRepoTab(tabsRef.current, next, "git");
             if (!tab) continue;
             const current = sessionsRef.current[tab.id];
             const changeGeneration = changeLoadGen.current;
@@ -2553,10 +2691,11 @@ export function GitProvider({ children }: { children: ReactNode }) {
       openPanel,
       prefs,
       gitMissing,
+      kindPrompt,
       loading,
       publishPrompt,
     }),
-    [activeTab, activeTabId, gitMissing, loading, openPanel, prefs, publishPrompt, recents, session, tabs],
+    [activeTab, activeTabId, gitMissing, kindPrompt, loading, openPanel, prefs, publishPrompt, recents, session, tabs],
   );
 
   // Every action reads refs rather than render state, so this object keeps its
@@ -2580,6 +2719,10 @@ export function GitProvider({ children }: { children: ReactNode }) {
       reorderTabs,
       openFolder,
       openPath,
+      chooseRepoKind,
+      dismissRepoKind,
+      setTabMeta,
+      retargetRepoTab,
       cloneRepository,
       revealRepo,
       openTerminal,
@@ -2666,6 +2809,10 @@ export function GitProvider({ children }: { children: ReactNode }) {
       reorderTabs,
       openFolder,
       openPath,
+      chooseRepoKind,
+      dismissRepoKind,
+      setTabMeta,
+      retargetRepoTab,
       cloneRepository,
       revealRepo,
       openTerminal,

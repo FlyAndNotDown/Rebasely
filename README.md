@@ -1,8 +1,8 @@
 # Rebasely
 
-Rebasely is a desktop Git client for the work that sits between an editor and the command line: reading a working tree, reviewing history, and finishing branch operations without leaving the repository.
+Rebasely is a desktop client for Git and Perforce. Git covers the working tree, history, and branch operations. A Perforce tab is an online client workspace: pending changelists, submitted history, and the files on disk.
 
-It is a native window built with Tauri 2. The interface is React. Repository work runs in Rust by calling the `git` executable, so what the window shows is what Git itself would do. Several repositories stay open in tabs, and the open set is restored on the next launch.
+It is a native window built with Tauri 2. The interface is React. Repository work runs in Rust by calling `git` or `p4`, so what the window shows is what those tools themselves would do. Several repositories stay open in tabs, and the open set is restored on the next launch.
 
 ## Design
 
@@ -30,6 +30,8 @@ The work tree is watched for changes and the open snapshot refreshes from disk.
 
 **Workspace.** Open, clone, and switch repositories in tabs. Recents and the open tabs come back on launch. Open a file in an editor, or a diff in the configured diff tool. A command palette (`Ctrl+K`) lists the same actions as the keyboard shortcuts. The theme is light, dark, or system, and the window chrome follows the resolved theme.
 
+**Perforce.** A workspace stays connected to the server. Pending changelists can be submitted, shelved, reverted, and moved. Submitted history and file revisions come from the server. Get latest and reconcile update the client root. The `p4` executable, server, user, and charset are chosen in Settings.
+
 ## Architecture
 
 ```text
@@ -39,6 +41,7 @@ React workspace
         ▼
 Rust backend
   ├── git         status, log, blame, diffs, writes, remotes
+  ├── p4          workspaces, changelists, sync, shelve
   ├── askpass     credential prompts back into the window
   ├── notify      work-tree refresh
   └── session     open tabs and recents
@@ -53,10 +56,11 @@ Commands the user starts can be cancelled by id. A background fetch uses the sam
 ```text
 src/                      React application
   components/             panes, dialogs, and UI primitives
-  state/                  tabs, session, and the Git command client
+  state/                  tabs, session, and the command clients
   lib/                    diffs, commit graph, shortcuts, formatting
 src-tauri/src/
-  git/                    repository operations
+  git/                    Git repository operations
+  p4/                     Perforce workspace operations
   askpass.rs              credential helper
   watch.rs                work-tree notifications
   session.rs              restored tabs

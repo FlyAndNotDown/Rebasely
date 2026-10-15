@@ -4,6 +4,8 @@ import { AppSidebar } from "@/components/app-sidebar";
 import { AskpassDialog } from "@/components/askpass-dialog";
 import { CommandCenter } from "@/components/command-palette";
 import { ReflogDialog } from "@/components/lazy-dialogs";
+import { P4Workspace } from "@/components/p4/p4-workspace";
+import { RepoKindDialog } from "@/components/repo-kind-dialog";
 import { WelcomeScreen } from "@/components/welcome-screen";
 import { Workspace } from "@/components/workspace";
 import { Button } from "@/components/ui/button";
@@ -12,12 +14,14 @@ import { GIT_MISSING } from "@/lib/git";
 import { WELCOME_TAB_ID, useGitPick } from "@/state/git-context";
 
 export default function App() {
-  const { activeTabId, loading, openPanel, setOpenPanel } = useGitPick([
+  const { activeTab, activeTabId, loading, openPanel, setOpenPanel } = useGitPick([
+    "activeTab",
     "activeTabId",
     "loading",
     "openPanel",
     "setOpenPanel",
   ]);
+  const perforce = activeTab.kind === "repo" && activeTab.vcs === "perforce";
 
   return (
     <div className="relative flex h-full min-h-0 flex-col bg-background">
@@ -29,15 +33,18 @@ export default function App() {
         <div className="min-h-0 min-w-0 flex-1">
           {loading ? null : activeTabId === WELCOME_TAB_ID ? (
             <WelcomeScreen />
+          ) : perforce ? (
+            <P4Workspace key={activeTabId} />
           ) : (
             <Workspace key={activeTabId} />
           )}
         </div>
       </div>
       <AskpassDialog />
+      <RepoKindDialog />
       <CommandCenter />
       <ReflogDialog
-        open={openPanel === "reflog" && activeTabId !== WELCOME_TAB_ID}
+        open={openPanel === "reflog" && activeTabId !== WELCOME_TAB_ID && !perforce}
         onOpenChange={(open) => setOpenPanel(open ? "reflog" : null)}
       />
     </div>

@@ -5,6 +5,7 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { GitProvider } from "@/state/git-context";
+import { P4Provider } from "@/state/p4-context";
 import "./index.css";
 
 // Runs on the way back up, after the app's own menus have opened. Preventing
@@ -22,8 +23,10 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     <ThemeProvider>
       <TooltipProvider>
         <GitProvider>
-          <App />
-          <Toaster position="bottom-right" />
+          <P4Provider>
+            <App />
+            <Toaster position="bottom-right" />
+          </P4Provider>
         </GitProvider>
       </TooltipProvider>
     </ThemeProvider>

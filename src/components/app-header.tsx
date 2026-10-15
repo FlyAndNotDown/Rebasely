@@ -34,6 +34,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { ActivityMeter } from "@/components/activity-meter";
 import { AppMenu } from "@/components/app-menu";
 import { AppToolbar } from "@/components/app-toolbar";
+import { P4Header } from "@/components/p4/p4-header";
+import { VcsIcon } from "@/components/vcs-icon";
 import { WindowControls } from "@/components/window-controls";
 import { CreateBranchDialog } from "@/components/create-ref-dialogs";
 import { defaultBranchRank, groupRemoteBranches, remoteGroupRank, shortRemoteName } from "@/lib/branches";
@@ -49,6 +51,7 @@ export function AppHeader() {
   const {
     snapshot,
     tabs,
+    activeTab,
     activeTabId,
     setActiveTab,
     closeTab,
@@ -64,6 +67,7 @@ export function AppHeader() {
   } = useGitPick([
     "snapshot",
     "tabs",
+    "activeTab",
     "activeTabId",
     "setActiveTab",
     "closeTab",
@@ -108,6 +112,8 @@ export function AppHeader() {
   const current = repo?.isDetached
     ? (repo.headId?.slice(0, 7) ?? "detached")
     : (repo?.currentBranch ?? "unknown");
+  const perforce = activeTab.kind === "repo" && activeTab.vcs === "perforce";
+  const repoOpen = activeTab.kind === "repo";
 
   return (
     <header className="shrink-0 bg-background">
@@ -125,7 +131,9 @@ export function AppHeader() {
       </div>
 
       <div className="flex h-9 items-center gap-1.5 border-y px-2">
-        {repo ? (
+        {perforce ? (
+          <P4Header />
+        ) : repo ? (
         <>
           <DropdownMenu
             open={branchMenuOpen}
@@ -209,11 +217,11 @@ export function AppHeader() {
         </>
       ) : null}
 
-      {repo ? <AppToolbar /> : null}
+      {repo && !perforce ? <AppToolbar /> : null}
 
       <ActivityMeter />
 
-      {repo ? (
+      {repoOpen ? (
         <>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -459,6 +467,7 @@ function TabStrip({
                     className="gap-2"
                     onClick={() => setActiveTab(tab.id)}
                   >
+                    <VcsIcon vcs={tab.kind === "repo" ? tab.vcs : "git"} className="size-3.5 shrink-0" />
                     <span className="min-w-0 flex-1 truncate">{label}</span>
                     {canClose(tab) ? (
                       <button
@@ -553,8 +562,9 @@ function TabButton({
             type="button"
             onClick={onSelect}
             onAuxClick={handleAuxClick}
-            className="flex min-w-0 flex-1 items-center px-2"
+            className="flex min-w-0 flex-1 items-center gap-1.5 px-2"
           >
+            {tab.kind === "repo" ? <VcsIcon vcs={tab.vcs} className="size-3.5 shrink-0" /> : null}
             <span className="truncate">{label}</span>
           </button>
           {closable ? (

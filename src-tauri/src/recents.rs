@@ -23,6 +23,21 @@ pub struct RecentRepo {
     pub path: String,
     pub name: String,
     pub last_opened: i64,
+    /// `git` or `perforce`. Older lists omit this and are Git repositories.
+    #[serde(default = "default_vcs")]
+    pub vcs: String,
+}
+
+fn default_vcs() -> String {
+    "git".to_string()
+}
+
+fn normalize_vcs(vcs: &str) -> String {
+    if vcs == "perforce" {
+        "perforce".to_string()
+    } else {
+        "git".to_string()
+    }
 }
 
 fn recents_path(app: &AppHandle) -> AppResult<PathBuf> {
@@ -66,7 +81,12 @@ fn save_recents(app: &AppHandle, recents: &[RecentRepo]) -> AppResult<()> {
     Ok(())
 }
 
-pub fn remember_repo(app: &AppHandle, path: &str, name: &str) -> AppResult<Vec<RecentRepo>> {
+pub fn remember_repo(
+    app: &AppHandle,
+    path: &str,
+    name: &str,
+    vcs: &str,
+) -> AppResult<Vec<RecentRepo>> {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
@@ -81,6 +101,7 @@ pub fn remember_repo(app: &AppHandle, path: &str, name: &str) -> AppResult<Vec<R
             path,
             name: name.to_string(),
             last_opened: now,
+            vcs: normalize_vcs(vcs),
         },
     );
     recents.truncate(MAX_RECENTS);

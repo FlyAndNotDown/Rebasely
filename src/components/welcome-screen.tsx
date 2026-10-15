@@ -4,8 +4,10 @@ import { AppMark } from "@/components/app-mark";
 import { CloneRepositoryDialog } from "@/components/lazy-dialogs";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { VcsIcon } from "@/components/vcs-icon";
 import { disambiguateRepoLabels, displayPath, formatRelativeTime } from "@/lib/format";
 import { useGitPick } from "@/state/git-context";
+import { asVcs } from "@/state/session";
 
 export function WelcomeScreen() {
   const { recents, openFolder, openPath, forgetRecent } = useGitPick([
@@ -25,7 +27,7 @@ export function WelcomeScreen() {
           <div>
             <h1 className="text-2xl font-medium tracking-tight">Rebasely</h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              Open a local Git repository, or clone one, to inspect changes, review history, and commit.
+              Open a Git repository or a Perforce workspace. Clone a Git remote, or create a Perforce workspace, to review changes and history.
             </p>
           </div>
         </div>
@@ -52,15 +54,18 @@ export function WelcomeScreen() {
                 <li key={repo.path} className="flex items-center gap-2 pr-1">
                   <button
                     type="button"
-                    className="min-w-0 flex-1 px-3 py-2.5 text-left hover:bg-muted/60"
-                    onClick={() => void openPath(repo.path)}
+                    className="flex min-w-0 flex-1 items-center gap-2 px-3 py-2.5 text-left hover:bg-muted/60"
+                    onClick={() => void openPath(repo.path, repo.vcs ? asVcs(repo.vcs) : undefined)}
                   >
-                    <div className="truncate text-sm font-medium">
-                      {labels.get(repo.path) ?? repo.name}
-                    </div>
-                    <div className="truncate font-mono text-[11px] text-muted-foreground">
-                      {displayPath(repo.path)}
-                    </div>
+                    <VcsIcon vcs={asVcs(repo.vcs)} className="size-3.5 shrink-0 text-muted-foreground" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium">
+                        {labels.get(repo.path) ?? repo.name}
+                      </span>
+                      <span className="block truncate font-mono text-[11px] text-muted-foreground">
+                        {displayPath(repo.path)}
+                      </span>
+                    </span>
                   </button>
                   <span className="shrink-0 text-[11px] text-muted-foreground">
                     {formatRelativeTime(repo.lastOpened)}

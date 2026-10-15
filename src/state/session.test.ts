@@ -77,6 +77,17 @@ describe("tabs", () => {
     expect(findRepoTab(tabs, "e:/B/")?.id).toBe("repo:E:\\b");
     expect(tabFromPath("E:\\code\\rebasely").name).toBe("rebasely");
   });
+
+  it("keeps Git and Perforce of the same folder as different tabs", () => {
+    const git = tabFromPath("E:\\client");
+    const perforce = tabFromPath("E:\\client", "client", "perforce");
+    expect(git.id).toBe("repo:E:\\client");
+    expect(perforce.id).toBe("p4:E:\\client");
+    const open = placeOpenedRepoTab(placeOpenedRepoTab([], git), perforce);
+    expect(open.map((tab) => tab.id)).toEqual([git.id, perforce.id]);
+    expect(findRepoTab(open, "E:\\client", "perforce")?.id).toBe(perforce.id);
+    expect(findRepoTab(open, "E:\\client", "git")?.id).toBe(git.id);
+  });
 });
 
 describe("opening into tabs", () => {

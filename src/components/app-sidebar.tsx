@@ -6,6 +6,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { normalizeSidebarOrder, SIDEBAR_VIEWS } from "@/lib/prefs";
 import { cn } from "@/lib/utils";
 import { useGitPick, type View } from "@/state/git-context";
+import { useP4, type P4View } from "@/state/p4-context";
 
 const itemMeta: Record<View, { label: string; icon: typeof CircleDotIcon }> = {
   changes: { label: "Changes", icon: CircleDotIcon },
@@ -13,6 +14,12 @@ const itemMeta: Record<View, { label: string; icon: typeof CircleDotIcon }> = {
   stash: { label: "Stash", icon: ArchiveIcon },
   files: { label: "Files", icon: FolderTreeIcon },
 };
+
+const perforceItems: { id: P4View; label: string; icon: typeof CircleDotIcon }[] = [
+  { id: "pending", label: "Pending", icon: CircleDotIcon },
+  { id: "submitted", label: "Submitted", icon: HistoryIcon },
+  { id: "workspace", label: "Workspace", icon: FolderTreeIcon },
+];
 
 export function AppSidebar() {
   const { view, setView, activeTab, prefs, updatePrefs, openPanel, setOpenPanel } = useGitPick([
@@ -26,6 +33,8 @@ export function AppSidebar() {
   ]);
   const settingsOpen = openPanel === "settings";
   const setSettingsOpen = (open: boolean) => setOpenPanel(open ? "settings" : null);
+  const p4 = useP4();
+  const perforce = activeTab.kind === "repo" && activeTab.vcs === "perforce";
   const [order, setOrder] = useState<View[]>(() => asViews(prefs.sidebarOrder));
   const [savedOrder, setSavedOrder] = useState(prefs.sidebarOrder);
   const [dragging, setDragging] = useState<View | null>(null);
@@ -110,7 +119,30 @@ export function AppSidebar() {
   return (
     <nav className="flex w-14 shrink-0 flex-col items-center gap-1 border-r bg-sidebar py-2">
       <div ref={listRef} className={cn("flex flex-col items-center gap-1", dragging && "select-none")}>
-        {order.map((id) => {
+        {perforce
+          ? perforceItems.map((item) => {
+              const Icon = item.icon;
+              const active = p4.view === item.id;
+              return (
+                <Tooltip key={item.id}>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      aria-label={item.label}
+                      aria-current={active ? "page" : undefined}
+                      className={cn(active && "bg-muted text-foreground")}
+                      onClick={() => p4.setView(item.id)}
+                    >
+                      <Icon />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="right">{item.label}</TooltipContent>
+                </Tooltip>
+              );
+            })
+          : order.map((id) => {
           const item = itemMeta[id];
           const Icon = item.icon;
           const active = repoOpen && view === id;

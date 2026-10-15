@@ -7,6 +7,8 @@ import { fuzzyScore } from "@/lib/fuzzy";
 import { SHORTCUTS, formatCombo, isEditableTarget, matchesCombo, type ShortcutId } from "@/lib/shortcuts";
 import { cn } from "@/lib/utils";
 import { WELCOME_TAB_ID, useGitPick } from "@/state/git-context";
+import { asVcs } from "@/state/session";
+import { useP4 } from "@/state/p4-context";
 
 interface Command {
   id: string;
@@ -50,6 +52,7 @@ export function CommandCenter() {
     "setDiffOptions",
     "updatePrefs",
   ]);
+  const p4 = useP4();
   const {
     snapshot,
     recents,
@@ -59,7 +62,9 @@ export function CommandCenter() {
     openPanel,
     setOpenPanel,
   } = git;
-  const repoOpen = activeTabId !== WELCOME_TAB_ID && snapshot !== null;
+  const activeTab = tabs.find((tab) => tab.id === activeTabId);
+  const perforceOpen = activeTab?.kind === "repo" && activeTab.vcs === "perforce";
+  const repoOpen = activeTabId !== WELCOME_TAB_ID && snapshot !== null && !perforceOpen;
 
   const commands = useMemo(() => {
     const list: Command[] = [];
@@ -70,6 +75,26 @@ export function CommandCenter() {
       const next = tabs[(start + step + tabs.length) % tabs.length];
       if (next) git.setActiveTab(next.id);
     };
+    if (perforceOpen) {
+      list.push(
+        { id: "view-pending", label: "Go to Pending", group: "Navigate", shortcut: "viewChanges", run: () => p4.setView("pending") },
+        { id: "view-submitted", label: "Go to Submitted", group: "Navigate", shortcut: "viewHistory", run: () => p4.setView("submitted") },
+        { id: "view-workspace", label: "Go to Workspace", group: "Navigate", shortcut: "viewStash", run: () => p4.setView("workspace") },
+        { id: "sync", label: "Get latest", group: "Workspace", shortcut: "fetch", run: () => void p4.sync() },
+        { id: "reconcile", label: "Reconcile offline work", group: "Workspace", run: () => void p4.reconcile() },
+        { id: "refresh-p4", label: "Refresh workspace", group: "Workspace", run: () => void p4.refresh() },
+        { id: "editor", label: "Open in editor", group: "Repository", shortcut: "openInEditor", run: () => void git.openInEditor() },
+        { id: "terminal", label: "Open terminal", group: "Repository", shortcut: "openTerminal", run: () => void git.openTerminal() },
+        { id: "reveal", label: "Open folder", group: "Repository", run: () => void git.revealRepo() },
+        { id: "close", label: "Close repository", group: "Repository", shortcut: "closeRepository", run: () => git.closeRepo() },
+        {
+          id: "toggle-split",
+          label: prefs.diffSplit ? "Show diffs inline" : "Show diffs side by side",
+          group: "View",
+          run: () => void git.setDiffOptions({ split: !prefs.diffSplit }),
+        },
+      );
+    }
     if (repoOpen) {
       list.push(
         { id: "view-changes", label: "Go to Changes", group: "Navigate", shortcut: "viewChanges", run: () => git.setView("changes") },
@@ -158,11 +183,11 @@ export function CommandCenter() {
         detail: recent.path,
         group: "Recent repositories",
         dynamic: true,
-        run: () => void git.openPath(recent.path),
+        run: () => void git.openPath(recent.path, recent.vcs ? asVcs(recent.vcs) : undefined),
       });
     }
     return list;
-  }, [activeTabId, git, prefs, recents, repoOpen, setOpenPanel, snapshot, tabs]);
+  }, [activeTabId, git, p4, perforceOpen, prefs, recents, repoOpen, setOpenPanel, snapshot, tabs]);
 
   const commandsRef = useRef(commands);
   const panelRef = useRef(openPanel);

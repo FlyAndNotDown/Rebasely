@@ -292,6 +292,16 @@ export interface AppPrefs {
   gitPath: string;
   /** User-added git executables. The PATH entry is not included. */
   extraGitPaths: string[];
+  /** Empty uses the p4 executable on PATH. Otherwise an absolute path. */
+  p4Path: string;
+  /** User-added p4 executables. The PATH entry is not included. */
+  extraP4Paths: string[];
+  /** Default P4PORT for a new workspace. */
+  p4Port: string;
+  /** Default P4USER for a new workspace. */
+  p4User: string;
+  /** Empty leaves charset unset. */
+  p4Charset: string;
 }
 
 export interface GitExecutables {
@@ -345,10 +355,18 @@ export interface RecentRepo {
   path: string;
   name: string;
   lastOpened: number;
+  /** Missing on lists saved before Perforce support; those are Git repositories. */
+  vcs?: "git" | "perforce" | string;
+}
+
+export interface OpenRepo {
+  path: string;
+  vcs?: "git" | "perforce" | string;
 }
 
 export interface AppSession {
   openPaths: string[];
+  openRepos?: OpenRepo[];
   active: string;
   historyRevs?: Record<string, string[]>;
   historyExpanded?: Record<string, string[]>;

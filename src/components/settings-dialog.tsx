@@ -34,14 +34,16 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Label } from "@/components/ui/label";
 import { SshKeysSettings } from "@/components/ssh-keys-settings";
+import { GitLogo, PerforceMark } from "@/components/vcs-icon";
 import { errorMessage, gitApi } from "@/lib/git";
+import { p4Api } from "@/lib/p4";
 import { displayPath } from "@/lib/format";
-import { AUTO_FETCH_CHOICES, isGitFileName, normalizePrefs, sameGitPath } from "@/lib/prefs";
+import { AUTO_FETCH_CHOICES, isGitFileName, isP4FileName, normalizePrefs, sameGitPath, sameP4Path } from "@/lib/prefs";
 import { cn } from "@/lib/utils";
 import { useGitPick } from "@/state/git-context";
 import type { AppPrefs, TerminalOption, ToolConfig } from "@/types/git";
 
-type SettingsSection = "git" | "ssh" | "general";
+type SettingsSection = "git" | "perforce" | "ssh" | "general";
 type GuiTool = { id: string; name: string; installed: boolean };
 type ThemeChoice = "dark" | "light" | "system";
 
@@ -49,6 +51,17 @@ const themeOptions: { id: ThemeChoice; label: string }[] = [
   { id: "dark", label: "Dark" },
   { id: "light", label: "Light" },
   { id: "system", label: "System" },
+];
+
+const p4Charsets = [
+  { id: "", label: "Server default" },
+  { id: "utf8", label: "utf8" },
+  { id: "utf8-bom", label: "utf8-bom" },
+  { id: "utf16", label: "utf16" },
+  { id: "utf16le", label: "utf16le" },
+  { id: "utf16be", label: "utf16be" },
+  { id: "utf32le", label: "utf32le" },
+  { id: "utf32be", label: "utf32be" },
 ];
 
 export function SettingsDialog({
@@ -89,6 +102,12 @@ function SettingsForm() {
   const [pathGit, setPathGit] = useState<string | null>(null);
   const [executablesReady, setExecutablesReady] = useState(false);
   const [addingGit, setAddingGit] = useState(false);
+  const [p4Path, setP4Path] = useState(prefs.p4Path);
+  const [extraP4Paths, setExtraP4Paths] = useState(prefs.extraP4Paths);
+  const [pathP4, setPathP4] = useState<string | null>(null);
+  const [p4Ready, setP4Ready] = useState(false);
+  const [addingP4, setAddingP4] = useState(false);
+  const [p4Charset, setP4Charset] = useState(prefs.p4Charset);
   const [themeChoice, setThemeChoice] = useState<ThemeChoice>(() =>
     theme === "light" || theme === "dark" || theme === "system" ? theme : "dark",
   );
@@ -113,8 +132,9 @@ function SettingsForm() {
       gitApi.getToolConfig(),
       gitApi.listGuiTools(),
       gitApi.gitExecutables(),
+      p4Api.executables().catch(() => null),
     ])
-      .then(([identity, loadedPrefs, options, editorOptions, toolConfig, installedTools, executables]) => {
+      .then(([identity, loadedPrefs, options, editorOptions, toolConfig, installedTools, executables, p4Executables]) => {
         const prefs = normalizePrefs(loadedPrefs);
         const visibleEditors = editorOptions.filter((editor) => editor.available);
         const visibleTerminals = options.filter((terminal) => terminal.available);
@@ -147,6 +167,18 @@ function SettingsForm() {
           selected && !extras.some((path) => sameGitPath(path, selected)) ? [selected, ...extras] : extras,
         );
         setExecutablesReady(true);
+        const p4OnPath = p4Executables?.pathP4 ?? null;
+        const selectedP4 = prefs.p4Path && p4OnPath && sameP4Path(prefs.p4Path, p4OnPath) ? "" : prefs.p4Path;
+        const p4Extras = prefs.extraP4Paths.filter((path) => !p4OnPath || !sameP4Path(path, p4OnPath));
+        setPathP4(p4OnPath);
+        setP4Path(selectedP4);
+        setExtraP4Paths(
+          selectedP4 && !p4Extras.some((path) => sameP4Path(path, selectedP4))
+            ? [selectedP4, ...p4Extras]
+            : p4Extras,
+        );
+        setP4Charset(prefs.p4Charset);
+        setP4Ready(true);
       })
       .catch((error) => toast.error(errorMessage(error)));
   }, []);
@@ -260,6 +292,51 @@ function SettingsForm() {
     void persistPrefs({ gitPath: path, extraGitPaths });
   }
 
+  async function addP4Executable() {
+    const picked = await openFile({ multiple: false, title: "p4 executable" });
+    if (typeof picked !== "string") return;
+    if (!isP4FileName(picked)) {
+      toast.error(
+        typeof navigator !== "undefined" && /windows/i.test(navigator.userAgent)
+          ? "Choose a file named p4. On Windows, choose p4.exe."
+          : "Choose a file named p4.",
+      );
+      return;
+    }
+    if (pathP4 && sameP4Path(picked, pathP4)) {
+      setP4Path("");
+      void persistPrefs({ p4Path: "" });
+      return;
+    }
+    setAddingP4(true);
+    try {
+      await p4Api.checkExecutable(picked);
+      const extras = extraP4Paths.some((path) => sameP4Path(path, picked))
+        ? extraP4Paths
+        : [...extraP4Paths, picked];
+      setExtraP4Paths(extras);
+      setP4Path(picked);
+      void persistPrefs({ p4Path: picked, extraP4Paths: extras });
+    } catch (error) {
+      toast.error(errorMessage(error));
+    } finally {
+      setAddingP4(false);
+    }
+  }
+
+  function removeP4Executable(path: string) {
+    const extras = extraP4Paths.filter((item) => !sameP4Path(item, path));
+    const nextPath = sameP4Path(p4Path, path) ? "" : p4Path;
+    setExtraP4Paths(extras);
+    setP4Path(nextPath);
+    void persistPrefs({ p4Path: nextPath, extraP4Paths: extras });
+  }
+
+  function selectP4Executable(path: string) {
+    setP4Path(path);
+    void persistPrefs({ p4Path: path, extraP4Paths });
+  }
+
   return (
     <>
       <div className="flex min-h-0 flex-1">
@@ -269,6 +346,9 @@ function SettingsForm() {
           </NavButton>
           <NavButton active={section === "git"} icon={<GitLogo />} onClick={() => setSection("git")}>
             Git
+          </NavButton>
+          <NavButton active={section === "perforce"} icon={<PerforceMark />} onClick={() => setSection("perforce")}>
+            Perforce
           </NavButton>
           <NavButton active={section === "ssh"} icon={<KeyRoundIcon />} onClick={() => setSection("ssh")}>
             SSH
@@ -382,6 +462,39 @@ function SettingsForm() {
                     tools={guiTools}
                     ready={guiToolsReady}
                     onChange={(mergeTool) => changeTool("mergeTool", mergeTool)}
+                  />
+                </FieldGroup>
+              </div>
+            </>
+          ) : section === "perforce" ? (
+            <>
+              <DialogHeader>
+                <DialogTitle>Perforce</DialogTitle>
+                <DialogDescription>
+                  The p4 executable Rebasely runs, and the charset used for a new workspace.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="mt-6 grid gap-8">
+                <P4ExecutableSection
+                  ready={p4Ready}
+                  pathP4={pathP4}
+                  p4Path={p4Path}
+                  extras={extraP4Paths}
+                  busy={addingP4}
+                  onSelect={selectP4Executable}
+                  onRemove={removeP4Executable}
+                  onAdd={() => void addP4Executable()}
+                />
+                <FieldGroup title="New workspace">
+                  <SelectField
+                    id="p4-charset"
+                    label="Charset"
+                    value={p4Charset}
+                    options={p4Charsets}
+                    onChange={(value) => {
+                      setP4Charset(value);
+                      void persistPrefs({ p4Charset: value });
+                    }}
                   />
                 </FieldGroup>
               </div>
@@ -654,6 +767,109 @@ function GitExecutableLabel({ path, pathTag = false }: { path: string; pathTag?:
   );
 }
 
+function P4ExecutableSection({
+  ready,
+  pathP4,
+  p4Path,
+  extras,
+  busy,
+  onSelect,
+  onRemove,
+  onAdd,
+}: {
+  ready: boolean;
+  pathP4: string | null;
+  p4Path: string;
+  extras: string[];
+  busy: boolean;
+  onSelect: (path: string) => void;
+  onRemove: (path: string) => void;
+  onAdd: () => void;
+}) {
+  const unusable = ready && !pathP4 && p4Path === "";
+  const selectedCustom = extras.find((path) => sameP4Path(path, p4Path));
+  const selectedPath = selectedCustom ?? (pathP4 && p4Path === "" ? pathP4 : null);
+  if (!ready) {
+    return (
+      <FieldGroup title="Executable">
+        <Skeleton className="h-8 w-full" role="status" aria-label="Loading p4 executable" />
+      </FieldGroup>
+    );
+  }
+  return (
+    <FieldGroup title="Executable">
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button type="button" variant="outline" className="w-full justify-between font-normal" disabled={busy}>
+            {selectedPath ? (
+              <GitExecutableLabel path={selectedPath} pathTag={!selectedCustom} />
+            ) : (
+              <span className="truncate text-muted-foreground">Not found</span>
+            )}
+            <ChevronDownIcon />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="w-(--radix-dropdown-menu-trigger-width)">
+          {pathP4 ? (
+            <DropdownMenuItem className="min-w-0" onClick={() => onSelect("")}>
+              <span className="min-w-4">{p4Path === "" ? <CheckIcon className="size-3.5" /> : null}</span>
+              <GitExecutableLabel path={pathP4} pathTag />
+            </DropdownMenuItem>
+          ) : null}
+          {extras.map((path) => (
+            <DropdownMenuItem
+              key={path}
+              className="min-w-0"
+              onSelect={(event) => {
+                if (event.target instanceof Element && event.target.closest("[data-remove-p4]")) {
+                  event.preventDefault();
+                }
+              }}
+              onClick={() => onSelect(path)}
+            >
+              <span className="min-w-4">
+                {sameP4Path(p4Path, path) ? <CheckIcon className="size-3.5" /> : null}
+              </span>
+              <GitExecutableLabel path={path} />
+              <button
+                type="button"
+                data-remove-p4=""
+                className="shrink-0 rounded-sm p-0.5 text-muted-foreground hover:text-foreground"
+                aria-label={`Remove ${displayPath(path)}`}
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onRemove(path);
+                }}
+              >
+                <XIcon className="size-3.5" />
+              </button>
+            </DropdownMenuItem>
+          ))}
+          {pathP4 || extras.length > 0 ? <DropdownMenuSeparator /> : null}
+          <DropdownMenuItem onClick={() => window.setTimeout(onAdd, 0)}>
+            <span className="min-w-4">
+              <PlusIcon className="size-3.5" />
+            </span>
+            Add p4 executable
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {unusable ? (
+        <p className="flex items-start gap-1.5 text-xs text-destructive" role="status">
+          <CircleAlertIcon className="mt-0.5 size-3.5 shrink-0" />
+          <span>
+            {extras.length === 0
+              ? "p4 executable was not found. Add one to continue."
+              : "p4 executable was not found. Select one of the added executables."}
+          </span>
+        </p>
+      ) : null}
+    </FieldGroup>
+  );
+}
+
 function FieldGroup({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="grid gap-4">
@@ -836,19 +1052,6 @@ function SelectField<T extends string>({
         </DropdownMenuContent>
       </DropdownMenu>
     </div>
-  );
-}
-
-/** Official Git mark from https://git-scm.com/images/logos/downloads/Git-Icon-1788C.svg */
-function GitLogo() {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 78 78" aria-hidden="true">
-      <path
-        fill="currentColor"
-        transform="translate(10 10) rotate(-45 29 29)"
-        d="M5,58c-2.76142,0 -5,-2.23858 -5,-5v-48c0,-2.76142 2.23858,-5 5,-5h33v12.54404c-2.06553,0.94801 -3.5,3.03446 -3.5,5.45596c0,0.73514 0.13221,1.43941 0.37415,2.09031l-15.28384,15.28384c-0.6509,-0.24194 -1.35517,-0.37415 -2.09031,-0.37415c-3.31371,0 -6,2.68629 -6,6c0,3.31371 2.68629,6 6,6c3.31371,0 6,-2.68629 6,-6c0,-0.73514 -0.13221,-1.43941 -0.37415,-2.09031l14.87415,-14.87415l0,11.50851c-2.06553,0.94801 -3.5,3.03446 -3.5,5.45596c0,3.31371 2.68629,6 6,6c3.31371,0 6,-2.68629 6,-6c0,-2.42149 -1.43447,-4.50795 -3.5,-5.45596l0,-12.08808c2.06553,-0.94801 3.5,-3.03446 3.5,-5.45596c0,-2.42149 -1.43447,-4.50795 -3.5,-5.45596l0,-12.54404h10c2.76142,0 5,2.23858 5,5v48c0,2.76142 -2.23858,5 -5,5z"
-      />
-    </svg>
   );
 }
 

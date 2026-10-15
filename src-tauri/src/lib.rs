@@ -4,6 +4,7 @@ mod error;
 mod fsutil;
 mod git;
 mod locate;
+mod p4;
 mod prefs;
 mod recents;
 mod session;
@@ -118,7 +119,7 @@ async fn open_repository(path: String, app: AppHandle) -> AppResult<WorkspaceSna
     blocking(move || {
         let mut repo = git::discover(&path)?;
         let snapshot = git::snapshot(&mut repo)?;
-        recents::remember_repo(&app, &snapshot.repo.path, &snapshot.repo.name)?;
+        recents::remember_repo(&app, &snapshot.repo.path, &snapshot.repo.name, "git")?;
         Ok(snapshot)
     })
     .await
@@ -960,6 +961,204 @@ async fn check_git_executable(path: String) -> AppResult<()> {
     blocking(move || git::check_git_executable(&path)).await
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct P4Executables {
+    path_p4: Option<String>,
+    active: Option<String>,
+}
+
+#[tauri::command]
+async fn detect_repository(path: String) -> AppResult<p4::RepoDetection> {
+    blocking(move || p4::detect_repository(&path)).await
+}
+
+#[tauri::command]
+async fn p4_open(path: String, app: AppHandle) -> AppResult<p4::P4Open> {
+    blocking(move || {
+        let opened = p4::open_workspace(&path)?;
+        if let p4::P4Open::Ready { connection, .. } = &opened {
+            let name = if connection.client.is_empty() {
+                connection.root.clone()
+            } else {
+                connection.client.clone()
+            };
+            recents::remember_repo(&app, &connection.root, &name, "perforce")?;
+        }
+        Ok(opened)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn p4_refresh_pending(connection: p4::P4Connection) -> AppResult<Vec<p4::P4Changelist>> {
+    blocking(move || p4::refresh_pending(&connection)).await
+}
+
+#[tauri::command]
+async fn p4_submitted(
+    connection: p4::P4Connection,
+    limit: Option<usize>,
+    before: Option<i64>,
+) -> AppResult<p4::P4ChangePage> {
+    blocking(move || p4::submitted(&connection, limit.unwrap_or(50), before)).await
+}
+
+#[tauri::command]
+async fn p4_describe(connection: p4::P4Connection, change_id: String) -> AppResult<p4::P4Describe> {
+    blocking(move || p4::describe(&connection, &change_id)).await
+}
+
+#[tauri::command]
+async fn p4_opened_diff(connection: p4::P4Connection, path: String) -> AppResult<git::FileDiff> {
+    blocking(move || p4::opened_diff(&connection, &path)).await
+}
+
+#[tauri::command]
+async fn p4_revision_diff(
+    connection: p4::P4Connection,
+    depot_path: String,
+    rev: String,
+) -> AppResult<git::FileDiff> {
+    blocking(move || p4::revision_diff(&connection, &depot_path, &rev)).await
+}
+
+#[tauri::command]
+async fn p4_filelog(connection: p4::P4Connection, path: String) -> AppResult<Vec<p4::P4Revision>> {
+    blocking(move || p4::filelog(&connection, &path)).await
+}
+
+#[tauri::command]
+async fn p4_list_dir(
+    connection: p4::P4Connection,
+    relative: String,
+) -> AppResult<Vec<p4::P4DirEntry>> {
+    blocking(move || p4::list_dir(&connection, &relative)).await
+}
+
+#[tauri::command]
+async fn p4_submit(
+    connection: p4::P4Connection,
+    change_id: String,
+    description: String,
+) -> AppResult<()> {
+    blocking(move || p4::submit(&connection, &change_id, &description)).await
+}
+
+#[tauri::command]
+async fn p4_save_change(
+    connection: p4::P4Connection,
+    change_id: String,
+    description: String,
+) -> AppResult<String> {
+    blocking(move || p4::save_change(&connection, &change_id, &description)).await
+}
+
+#[tauri::command]
+async fn p4_new_change(connection: p4::P4Connection, description: String) -> AppResult<String> {
+    blocking(move || p4::new_change(&connection, &description)).await
+}
+
+#[tauri::command]
+async fn p4_reopen(
+    connection: p4::P4Connection,
+    change_id: String,
+    files: Vec<String>,
+) -> AppResult<()> {
+    blocking(move || p4::reopen(&connection, &change_id, &files)).await
+}
+
+#[tauri::command]
+async fn p4_revert(connection: p4::P4Connection, files: Vec<String>) -> AppResult<()> {
+    blocking(move || p4::revert(&connection, &files)).await
+}
+
+#[tauri::command]
+async fn p4_revert_unchanged(connection: p4::P4Connection) -> AppResult<()> {
+    blocking(move || p4::revert_unchanged(&connection)).await
+}
+
+#[tauri::command]
+async fn p4_shelve(connection: p4::P4Connection, change_id: String) -> AppResult<()> {
+    blocking(move || p4::shelve(&connection, &change_id)).await
+}
+
+#[tauri::command]
+async fn p4_unshelve(connection: p4::P4Connection, change_id: String) -> AppResult<()> {
+    blocking(move || p4::unshelve(&connection, &change_id)).await
+}
+
+#[tauri::command]
+async fn p4_delete_shelf(connection: p4::P4Connection, change_id: String) -> AppResult<()> {
+    blocking(move || p4::delete_shelf(&connection, &change_id)).await
+}
+
+#[tauri::command]
+async fn p4_sync(
+    connection: p4::P4Connection,
+    paths: Vec<String>,
+    activity_id: Option<String>,
+    app: AppHandle,
+) -> AppResult<String> {
+    blocking(move || {
+        p4::sync(
+            &connection,
+            &paths,
+            progress_sink(&app, activity_id.as_deref()),
+        )
+    })
+    .await
+}
+
+#[tauri::command]
+async fn p4_reconcile(
+    connection: p4::P4Connection,
+    activity_id: Option<String>,
+    app: AppHandle,
+) -> AppResult<String> {
+    blocking(move || p4::reconcile(&connection, progress_sink(&app, activity_id.as_deref()))).await
+}
+
+#[tauri::command]
+async fn p4_file_action(
+    connection: p4::P4Connection,
+    action: String,
+    paths: Vec<String>,
+) -> AppResult<()> {
+    blocking(move || p4::file_action(&connection, &action, &paths)).await
+}
+
+#[tauri::command]
+async fn p4_login(connection: p4::P4Connection, password: String) -> AppResult<()> {
+    blocking(move || p4::login(&connection, &password)).await
+}
+
+#[tauri::command]
+async fn p4_create_workspace(
+    request: p4::P4CreateRequest,
+    activity_id: Option<String>,
+    app: AppHandle,
+) -> AppResult<p4::P4Connection> {
+    blocking(move || p4::create_workspace(request, progress_sink(&app, activity_id.as_deref())))
+        .await
+}
+
+#[tauri::command]
+async fn p4_executables() -> AppResult<P4Executables> {
+    blocking(|| {
+        Ok(P4Executables {
+            path_p4: p4::p4_on_path(),
+            active: p4::active_p4(),
+        })
+    })
+    .await
+}
+
+#[tauri::command]
+async fn check_p4_executable(path: String) -> AppResult<()> {
+    blocking(move || p4::check_p4_executable(&path)).await
+}
+
 #[tauri::command]
 async fn list_ssh_keys() -> AppResult<sshkeys::SshKeyList> {
     blocking(sshkeys::list).await
@@ -1002,9 +1201,25 @@ fn set_prefs(mut prefs: AppPrefs, app: AppHandle) -> AppResult<AppPrefs> {
     let (git_path, extra_git_paths) = git::prepare_git_prefs(&prefs.git_path, extras)?;
     prefs.git_path = git_path;
     prefs.extra_git_paths = extra_git_paths;
+    let p4_extras = std::mem::take(&mut prefs.extra_p4_paths);
+    let (p4_path, extra_p4_paths) = p4::prepare_p4_prefs(&prefs.p4_path, p4_extras)?;
+    prefs.p4_path = p4_path;
+    prefs.extra_p4_paths = extra_p4_paths;
+    prefs.p4_port = clean_setting(&prefs.p4_port);
+    prefs.p4_user = clean_setting(&prefs.p4_user);
+    prefs.p4_charset = p4::normalize_charset(&prefs.p4_charset);
     let saved = prefs::save_prefs(&app, prefs)?;
     git::set_git_executable(&saved.git_path);
+    p4::set_p4_executable(&saved.p4_path);
     Ok(saved)
+}
+
+fn clean_setting(value: &str) -> String {
+    value
+        .trim()
+        .chars()
+        .filter(|ch| *ch != '\n' && *ch != '\r')
+        .collect()
 }
 
 #[tauri::command]
@@ -1135,6 +1350,7 @@ pub fn run() {
         .setup(|app| {
             if let Ok(prefs) = prefs::load_prefs(app.handle()) {
                 git::set_git_executable(&prefs.git_path);
+                p4::set_p4_executable(&prefs.p4_path);
             }
             askpass::start(app.handle());
             if let Some(window) = app.get_webview_window("main") {
@@ -1241,6 +1457,31 @@ pub fn run() {
             run_mergetool,
             git_executables,
             check_git_executable,
+            detect_repository,
+            p4_open,
+            p4_refresh_pending,
+            p4_submitted,
+            p4_describe,
+            p4_opened_diff,
+            p4_revision_diff,
+            p4_filelog,
+            p4_list_dir,
+            p4_submit,
+            p4_save_change,
+            p4_new_change,
+            p4_reopen,
+            p4_revert,
+            p4_revert_unchanged,
+            p4_shelve,
+            p4_unshelve,
+            p4_delete_shelf,
+            p4_sync,
+            p4_reconcile,
+            p4_file_action,
+            p4_login,
+            p4_create_workspace,
+            p4_executables,
+            check_p4_executable,
             list_ssh_keys,
             preview_ssh_key,
             generate_ssh_key,

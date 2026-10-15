@@ -17,6 +17,8 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { disambiguateRepoLabels, displayPath } from "@/lib/format";
 import { useGitPick } from "@/state/git-context";
+import { asVcs } from "@/state/session";
+import { VcsIcon } from "@/components/vcs-icon";
 
 export function AppMenu() {
   const { recents, openFolder, openPath, setOpenPanel } = useGitPick([
@@ -95,12 +97,15 @@ export function AppMenu() {
                       <DropdownMenuItem
                         key={repo.path}
                         title={path}
-                        onSelect={() => void openPath(repo.path)}
+                        onSelect={() => void openPath(repo.path, repo.vcs ? asVcs(repo.vcs) : undefined)}
                       >
-                            <span className="flex w-full min-w-0 flex-col">
+                            <span className="flex w-full min-w-0 items-center gap-2">
+                          <VcsIcon vcs={asVcs(repo.vcs)} className="size-3.5 shrink-0 text-muted-foreground" />
+                          <span className="flex min-w-0 flex-1 flex-col">
                           <span className="truncate">{label}</span>
                           <span className="truncate font-mono text-[11px] text-muted-foreground">
                             {path}
+                          </span>
                           </span>
                         </span>
                       </DropdownMenuItem>

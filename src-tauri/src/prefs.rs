@@ -57,6 +57,21 @@ pub struct AppPrefs {
     /// User-added executables. The PATH entry is not stored here.
     #[serde(default)]
     pub extra_git_paths: Vec<String>,
+    /// Empty uses the `p4` executable on PATH.
+    #[serde(default)]
+    pub p4_path: String,
+    /// User-added p4 executables. The PATH entry is not stored here.
+    #[serde(default)]
+    pub extra_p4_paths: Vec<String>,
+    /// Default server for a new Perforce workspace.
+    #[serde(default)]
+    pub p4_port: String,
+    /// Default user for a new Perforce workspace.
+    #[serde(default)]
+    pub p4_user: String,
+    /// Empty leaves charset unset. Otherwise a value such as `utf8`.
+    #[serde(default)]
+    pub p4_charset: String,
 }
 
 fn default_auto_fetch_minutes() -> u32 {
@@ -95,6 +110,11 @@ impl Default for AppPrefs {
             fetch_prune: false,
             git_path: String::new(),
             extra_git_paths: Vec::new(),
+            p4_path: String::new(),
+            extra_p4_paths: Vec::new(),
+            p4_port: String::new(),
+            p4_user: String::new(),
+            p4_charset: String::new(),
         }
     }
 }

@@ -27,6 +27,11 @@ export const defaultPrefs: AppPrefs = {
   fetchPrune: false,
   gitPath: "",
   extraGitPaths: [],
+  p4Path: "",
+  extraP4Paths: [],
+  p4Port: "",
+  p4User: "",
+  p4Charset: "",
 };
 
 export const AUTO_FETCH_CHOICES = [0, 5, 15, 30, 60] as const;
@@ -116,6 +121,41 @@ function foldGitPath(path: string): string {
   return pathsIgnoreCase() ? slash.toLowerCase() : slash;
 }
 
+export function isP4FileName(path: string): boolean {
+  const base = path.trim().split(/[/\\]/).pop() ?? "";
+  if (!base || base === "." || base === "..") return false;
+  const dot = base.lastIndexOf(".");
+  const stem = dot > 0 ? base.slice(0, dot) : base;
+  return stem.toLowerCase() === "p4";
+}
+
+export function sameP4Path(left: string, right: string): boolean {
+  return foldGitPath(left) === foldGitPath(right);
+}
+
+function normalizeP4Path(path: unknown): string {
+  if (typeof path !== "string") return "";
+  const trimmed = path.trim();
+  return isP4FileName(trimmed) ? trimmed : "";
+}
+
+function normalizeP4Paths(paths: unknown): string[] {
+  if (!Array.isArray(paths)) return [];
+  const next: string[] = [];
+  for (const raw of paths) {
+    if (typeof raw !== "string") continue;
+    const path = raw.trim();
+    if (!isP4FileName(path) || next.some((item) => sameP4Path(item, path))) continue;
+    next.push(path);
+  }
+  return next;
+}
+
+function normalizeSetting(value: unknown): string {
+  if (typeof value !== "string") return "";
+  return value.trim().replace(/[\r\n]/g, "");
+}
+
 function normalizeGitPath(path: unknown): string {
   if (typeof path !== "string") return "";
   const trimmed = path.trim();
@@ -132,6 +172,13 @@ function normalizeGitPaths(paths: unknown): string[] {
     next.push(path);
   }
   return next;
+}
+
+function normalizeCharset(value: unknown): string {
+  const text = normalizeSetting(value).toLowerCase();
+  return ["utf8", "utf8-bom", "utf16", "utf16le", "utf16be", "utf32le", "utf32be"].includes(text)
+    ? text
+    : "";
 }
 
 export function normalizePrefs(prefs: Partial<AppPrefs> | null | undefined): AppPrefs {
@@ -151,5 +198,10 @@ export function normalizePrefs(prefs: Partial<AppPrefs> | null | undefined): App
     fetchPrune: prefs?.fetchPrune === true,
     gitPath: normalizeGitPath(prefs?.gitPath),
     extraGitPaths: normalizeGitPaths(prefs?.extraGitPaths),
+    p4Path: normalizeP4Path(prefs?.p4Path),
+    extraP4Paths: normalizeP4Paths(prefs?.extraP4Paths),
+    p4Port: normalizeSetting(prefs?.p4Port),
+    p4User: normalizeSetting(prefs?.p4User),
+    p4Charset: normalizeCharset(prefs?.p4Charset),
   };
 }

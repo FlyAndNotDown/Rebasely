@@ -39,9 +39,11 @@ export type PublishPrompt = {
 };
 
 export type WelcomeTab = { id: typeof WELCOME_TAB_ID; kind: "welcome" };
+export type VcsKind = "git" | "perforce";
 export type RepoTab = {
   id: string;
   kind: "repo";
+  vcs: VcsKind;
   path: string;
   name: string;
   branch: string | null;
@@ -94,8 +96,12 @@ export interface RepoSession {
   commitDraft: CommitDraft | null;
 }
 
-export function repoTabId(path: string): string {
-  return `repo:${path}`;
+export function asVcs(value: string | null | undefined): VcsKind {
+  return value === "perforce" ? "perforce" : "git";
+}
+
+export function repoTabId(path: string, vcs: VcsKind = "git"): string {
+  return vcs === "perforce" ? `p4:${path}` : `repo:${path}`;
 }
 
 export function emptySession(
@@ -142,10 +148,11 @@ export function repoNameFromPath(path: string): string {
   return segments[segments.length - 1] || path;
 }
 
-export function tabFromPath(path: string, name?: string): RepoTab {
+export function tabFromPath(path: string, name?: string, vcs: VcsKind = "git"): RepoTab {
   return {
-    id: repoTabId(path),
+    id: repoTabId(path, vcs),
     kind: "repo",
+    vcs,
     path,
     name: name || repoNameFromPath(path),
     branch: null,
@@ -155,8 +162,9 @@ export function tabFromPath(path: string, name?: string): RepoTab {
 
 export function tabFromSnapshot(snapshot: WorkspaceSnapshot): RepoTab {
   return {
-    id: repoTabId(snapshot.repo.path),
+    id: repoTabId(snapshot.repo.path, "git"),
     kind: "repo",
+    vcs: "git",
     path: snapshot.repo.path,
     name: snapshot.repo.name,
     branch: snapshot.repo.currentBranch,
@@ -164,9 +172,10 @@ export function tabFromSnapshot(snapshot: WorkspaceSnapshot): RepoTab {
   };
 }
 
-export function findRepoTab(tabs: AppTab[], path: string): RepoTab | undefined {
+export function findRepoTab(tabs: AppTab[], path: string, vcs?: VcsKind): RepoTab | undefined {
   return tabs.find(
-    (tab): tab is RepoTab => tab.kind === "repo" && sameRepoPath(tab.path, path),
+    (tab): tab is RepoTab =>
+      tab.kind === "repo" && sameRepoPath(tab.path, path) && (vcs === undefined || tab.vcs === vcs),
   );
 }
 

@@ -15,6 +15,12 @@ pub const CANCELLED: &str = "Cancelled";
 /// The frontend matches this exact text to open Settings.
 pub const GIT_MISSING: &str = "Git executable was not found. Choose one in Settings.";
 
+/// The frontend matches this exact text to open Settings.
+pub const P4_MISSING: &str = "p4 executable was not found. Choose one in Settings.";
+
+/// The frontend matches this exact text and asks for a Perforce password.
+pub const P4_LOGIN: &str = "Perforce login is required.";
+
 impl AppError {
     pub fn msg(message: impl Into<String>) -> Self {
         Self::Message(message.into())
