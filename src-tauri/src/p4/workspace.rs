@@ -14,7 +14,7 @@ use crate::error::{AppError, AppResult, P4_LOGIN, P4_MISSING};
 use crate::git::{strip_verbatim_prefix, FileDiff};
 use crate::p4::cli::{self, P4Env};
 use crate::p4::parse::{
-    blank_change_spec, classic_client_spec, created_change_id, depot_view, file_type_is_binary,
+    blank_change_spec, classic_client_spec, created_change_id, file_type_is_binary,
     indexed_groups, known_p4_value, normalize_charset, parse_describe_diffs, parse_p4_set,
     parse_p4config, parse_single_diff, parse_ztag, path_depth, path_is_within, read_description,
     remove_spec_field, set_description, set_spec_field, spec_field, sync_estimate_files,
@@ -290,16 +290,9 @@ pub fn submitted(
     }
     // A user or workspace already scopes the query. A depot path on top of that
     // hides this client's own submits when the stream view does not match them.
-    if user.is_none() && client.is_none() {
-        for spec in history_specs(&env, connection)? {
-            args.push(match before {
-                Some(change) if change > 1 => format!("{spec}@1,@{}", change - 1),
-                _ => spec,
-            });
-        }
-    } else if let Some(change) = before.filter(|change| *change > 1) {
-        args.push(format!("@1,@{}", change - 1));
-    }
+    // A stream's own history is `-S stream`. Searching `//stream/...` scans file
+    // revisions and often comes back empty.
+    push_history_scope(&mut args, &env, connection, &user, &client, before)?;
     let stdout = run_owned(&env, &args, None)?;
     let mut changes = Vec::new();
     for record in parse_ztag(&stdout) {
@@ -417,8 +410,14 @@ fn exact_submitted(
         args.push(client.clone());
     }
     if user.is_none() && client.is_none() {
-        for spec in history_specs(&env, connection)? {
-            args.push(format!("{spec}@{id},{id}"));
+        if let Some(stream) = stream_arg(connection) {
+            args.push("-S".into());
+            args.push(stream);
+            args.push(format!("@{id},{id}"));
+        } else {
+            for spec in history_specs(&env, connection)? {
+                args.push(format!("{spec}@{id},{id}"));
+            }
         }
     } else {
         args.push(format!("@{id},{id}"));
@@ -2041,12 +2040,52 @@ fn local_from_client(root: &Path, client: &str, client_file: &str) -> String {
         .into_owned()
 }
 
-fn history_specs(env: &P4Env, connection: &P4Connection) -> AppResult<Vec<String>> {
-    if let Some(stream) = &connection.stream {
-        if known_p4_value(stream) {
-            return Ok(vec![depot_view(stream)]);
+fn push_history_scope(
+    args: &mut Vec<String>,
+    env: &P4Env,
+    connection: &P4Connection,
+    user: &Option<String>,
+    client: &Option<String>,
+    before: Option<i64>,
+) -> AppResult<()> {
+    if user.is_none() && client.is_none() {
+        if let Some(stream) = stream_arg(connection) {
+            args.push("-S".into());
+            args.push(stream);
+            if let Some(change) = before.filter(|change| *change > 1) {
+                args.push(format!("@1,@{}", change - 1));
+            }
+            return Ok(());
         }
+        for spec in history_specs(env, connection)? {
+            args.push(match before {
+                Some(change) if change > 1 => format!("{spec}@1,@{}", change - 1),
+                _ => spec,
+            });
+        }
+        return Ok(());
     }
+    if let Some(change) = before.filter(|change| *change > 1) {
+        args.push(format!("@1,@{}", change - 1));
+    }
+    Ok(())
+}
+
+fn stream_arg(connection: &P4Connection) -> Option<String> {
+    let stream = connection.stream.as_deref()?;
+    if !known_p4_value(stream) {
+        return None;
+    }
+    let stream = stream.trim().trim_end_matches('/');
+    let stream = stream.strip_suffix("/...").unwrap_or(stream);
+    if stream.starts_with("//") && stream.len() > 2 {
+        Some(stream.to_string())
+    } else {
+        None
+    }
+}
+
+fn history_specs(env: &P4Env, connection: &P4Connection) -> AppResult<Vec<String>> {
     let spec = run_ok(env, &["client", "-o", &connection.client], None)?;
     let depots = view_depots(&spec);
     if depots.is_empty() {
@@ -2611,5 +2650,71 @@ mod tests {
         assert!(named.iter().all(|hit| hit.dir));
 
         let _ = fs::remove_dir_all(&root);
+    }
+
+    fn sample_connection(stream: Option<&str>) -> P4Connection {
+        P4Connection {
+            root: "D:/work".into(),
+            port: "ssl:perforce.example.com:1666".into(),
+            user: "alice".into(),
+            client: "dev-pc".into(),
+            charset: String::new(),
+            stream: stream.map(str::to_string),
+            server: String::new(),
+        }
+    }
+
+    fn sample_env() -> P4Env {
+        P4Env {
+            cwd: PathBuf::from("D:/work"),
+            port: String::new(),
+            user: String::new(),
+            client: String::new(),
+            charset: String::new(),
+        }
+    }
+
+    #[test]
+    fn stream_history_uses_the_stream_flag() {
+        let connection =
+            sample_connection(Some("//depot/main/..."));
+        assert_eq!(
+            stream_arg(&connection).as_deref(),
+            Some("//depot/main")
+        );
+        let mut args = Vec::new();
+        push_history_scope(
+            &mut args,
+            &sample_env(),
+            &connection,
+            &None,
+            &None,
+            Some(1200),
+        )
+        .unwrap();
+        assert_eq!(
+            args,
+            vec![
+                "-S".to_string(),
+                "//depot/main".to_string(),
+                "@1,@1199".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_user_filter_does_not_add_a_depot_path() {
+        let connection = sample_connection(Some("//depot/main"));
+        let user = Some("alice".to_string());
+        let mut args = Vec::new();
+        push_history_scope(&mut args, &sample_env(), &connection, &user, &None, Some(50)).unwrap();
+        assert_eq!(args, vec!["@1,@49".to_string()]);
+    }
+
+    #[test]
+    fn a_blank_stream_is_not_a_history_scope() {
+        assert_eq!(stream_arg(&sample_connection(None)), None);
+        assert_eq!(stream_arg(&sample_connection(Some("none"))), None);
+        assert_eq!(stream_arg(&sample_connection(Some("*unknown*"))), None);
     }
 }

@@ -71,6 +71,16 @@ export function P4Submitted() {
   const listRef = useRef<HTMLDivElement>(null);
   const paging = useRef(false);
   const detail = p4.submittedDetail;
+  const selectSubmitted = p4.selectSubmitted;
+  const selectedSubmitted = p4.selectedSubmitted;
+  const submitted = p4.submitted;
+  const submittedLoading = p4.submittedLoading;
+  const selectedRow = submitted.find((change) => change.id === selectedSubmitted) ?? null;
+  const heading = detail
+    ? changeSummary(detail.description) || `Change ${detail.id}`
+    : selectedRow
+      ? changeSummary(selectedRow.description) || `Change ${selectedRow.id}`
+      : null;
   const file =
     picked && detail?.files.some((item) => item.depotPath === picked)
       ? picked
@@ -87,6 +97,11 @@ export function P4Submitted() {
     loaded.current = { scope, users: false, clientsFor: "" };
     void loadSubmitted(false);
   }, [connection, loadSubmitted, scope]);
+
+  useEffect(() => {
+    if (selectedSubmitted || submittedLoading || submitted.length === 0) return;
+    void selectSubmitted(submitted[0].id);
+  }, [selectSubmitted, selectedSubmitted, submitted, submittedLoading]);
 
   function ensureUsers() {
     if (!connection || loaded.current.users) return;
@@ -209,7 +224,8 @@ export function P4Submitted() {
     void loadMoreRef.current();
   }
 
-  const listBusy = needle ? searching : p4.submittedLoading;
+  const describing = Boolean(selectedSubmitted) && !detail && submittedLoading;
+  const listBusy = needle ? searching : submittedLoading && !describing;
 
   return (
     <ResizablePanelGroup orientation="horizontal" className="min-h-0 min-w-0 flex-1">
@@ -302,11 +318,7 @@ export function P4Submitted() {
           <ResizablePanel id="p4-submitted-files" defaultSize="32%" minSize="16%">
             <div className="flex h-full min-h-0 flex-col">
               <div className="shrink-0 border-b px-3 py-2">
-                <div className="truncate text-sm">
-                  {p4.submittedDetail
-                    ? changeSummary(p4.submittedDetail.description) || `Change ${p4.submittedDetail.id}`
-                    : "Submitted"}
-                </div>
+                <div className="truncate text-sm">{heading}</div>
                 {p4.submittedDetail ? (
                   <div className="mt-1 flex items-center gap-x-2 text-[11px] text-muted-foreground">
                     <HoverTip label="Copy user">
