@@ -175,6 +175,11 @@ async fn list_directory(repo_path: String, path: String) -> AppResult<Vec<DirEnt
 }
 
 #[tauri::command]
+async fn search_files(repo_path: String, query: String) -> AppResult<git::FileSearch> {
+    with_repo_async(repo_path, move |repo| git::search_files(repo, &query)).await
+}
+
+#[tauri::command]
 async fn read_file(repo_path: String, path: String) -> AppResult<FileText> {
     with_repo_async(repo_path, move |repo| git::read_file(repo, &path)).await
 }
@@ -1067,6 +1072,47 @@ async fn p4_list_dir(
 }
 
 #[tauri::command]
+async fn p4_search_files(
+    connection: p4::P4Connection,
+    query: String,
+) -> AppResult<p4::P4FileSearch> {
+    blocking(move || p4::search_files(&connection, &query)).await
+}
+
+#[tauri::command]
+async fn p4_search_submitted(
+    connection: p4::P4Connection,
+    user: Option<String>,
+    client: Option<String>,
+    query: String,
+    before: Option<i64>,
+    match_limit: Option<usize>,
+    scan_limit: Option<usize>,
+) -> AppResult<p4::P4ChangePage> {
+    blocking(move || {
+        p4::search_submitted(
+            &connection,
+            user.as_deref().unwrap_or(""),
+            client.as_deref().unwrap_or(""),
+            &query,
+            before,
+            match_limit.unwrap_or(40),
+            scan_limit.unwrap_or(400),
+        )
+    })
+    .await
+}
+
+#[tauri::command]
+async fn p4_save_workspace(
+    connection: p4::P4Connection,
+    root: String,
+    stream: String,
+) -> AppResult<p4::P4Connection> {
+    blocking(move || p4::save_workspace(&connection, &root, &stream)).await
+}
+
+#[tauri::command]
 async fn p4_submit(
     connection: p4::P4Connection,
     change_id: String,
@@ -1430,6 +1476,7 @@ pub fn run() {
             get_workdir_diff,
             get_commit_details,
             list_directory,
+            search_files,
             read_file,
             file_blame,
             file_commits,
@@ -1519,6 +1566,9 @@ pub fn run() {
             p4_revision_diff,
             p4_filelog,
             p4_list_dir,
+            p4_search_files,
+            p4_search_submitted,
+            p4_save_workspace,
             p4_submit,
             p4_save_change,
             p4_new_change,

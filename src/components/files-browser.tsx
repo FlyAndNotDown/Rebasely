@@ -4,9 +4,9 @@ import { toast } from "sonner";
 import { AuthorAvatar } from "@/components/author-avatar";
 import { avatarColor, avatarInitial, avatarSeed } from "@/lib/avatar";
 import { DiffLines } from "@/components/diff-viewer";
-import { FileTree } from "@/components/file-tree";
+import { FileTree, FileTreeFilter, FilteredFileTree } from "@/components/file-tree";
 import { ImageDiff, isImagePath } from "@/components/image-diff";
-import { DiffSkeleton } from "@/components/skeletons";
+import { DiffSkeleton, FileTreeSkeleton } from "@/components/skeletons";
 import { Button } from "@/components/ui/button";
 import { HoverTip } from "@/components/ui/tooltip";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
@@ -14,7 +14,9 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { languageFor, styleSpans, textColumns, type TokenRange } from "@/lib/diff-text";
 import { formatAbsoluteTime, formatBlameWhen } from "@/lib/format";
 import { errorMessage, gitApi } from "@/lib/git";
+import { type SearchNode } from "@/lib/file-search";
 import { dirsToReload, touchesFile } from "@/lib/repo-paths";
+import { useFileQuery } from "@/lib/use-file-query";
 import { useWindowedRows } from "@/lib/use-windowed-rows";
 import { cn } from "@/lib/utils";
 import { useGitPick, useGitSelect } from "@/state/git-context";
@@ -39,6 +41,24 @@ export function FilesBrowser() {
     () => new Set(fileFocus ? ancestorDirs(fileFocus.path) : []),
   );
   const [path, setPath] = useState<string | null>(fileFocus?.path ?? null);
+  const [query, setQuery] = useState("");
+  const searchFiles = useCallback(
+    async (needle: string) => {
+      if (!repoPath) return { hits: [], truncated: false };
+      try {
+        return await gitApi.searchFiles(repoPath, needle);
+      } catch (error) {
+        toast.error(errorMessage(error));
+        throw error;
+      }
+    },
+    [repoPath],
+  );
+  const fileQuery = useFileQuery(repoPath, query, searchFiles);
+  const searchNodes = useMemo<SearchNode[]>(
+    () => (fileQuery.result?.hits ?? []).map((hit) => ({ relative: hit.path, dir: hit.dir })),
+    [fileQuery.result],
+  );
   const [mode, setMode] = useState<"browse" | "history">(fileFocus?.mode ?? "browse");
   // A commit picked from blame, to select when the history opens.
   const [pin, setPin] = useState<string | null>(null);
@@ -120,31 +140,63 @@ export function FilesBrowser() {
     >
       <ResizablePanel id="files-tree" defaultSize="22%" minSize="14%" maxSize="40%">
         <div className="flex h-full min-h-0 flex-col">
-          <div className="flex h-10 shrink-0 items-center border-b px-3 text-sm font-medium">Files</div>
+          <FileTreeFilter title="Files" query={query} onQuery={setQuery} />
           <ScrollArea className="min-h-0 flex-1">
-            <FileTree
-              dir=""
-              depth={0}
-              entries={entries}
-              open={open}
-              selected={path}
-              onToggle={async (dir) => {
-                if (open.has(dir)) {
-                  setOpen((current) => {
-                    const next = new Set(current);
-                    next.delete(dir);
-                    return next;
-                  });
-                  return;
-                }
-                if (!entries[dir]) await loadDir(dir);
-                setOpen((current) => new Set(current).add(dir));
-              }}
-              onOpenFile={(next) => {
-                setPath(next);
-                setPin(null);
-              }}
-            />
+            <div className={fileQuery.active ? "hidden" : undefined}>
+              <FileTree
+                dir=""
+                depth={0}
+                entries={entries}
+                open={open}
+                selected={path}
+                onToggle={async (dir) => {
+                  if (open.has(dir)) {
+                    setOpen((current) => {
+                      const next = new Set(current);
+                      next.delete(dir);
+                      return next;
+                    });
+                    return;
+                  }
+                  if (!entries[dir]) await loadDir(dir);
+                  setOpen((current) => new Set(current).add(dir));
+                }}
+                onOpenFile={(next) => {
+                  setPath(next);
+                  setPin(null);
+                }}
+              />
+            </div>
+            {fileQuery.active ? (
+              fileQuery.searching ? (
+                <FileTreeSkeleton />
+              ) : (
+                <FilteredFileTree
+                  nodes={searchNodes}
+                  toPath={(relative) => relative}
+                  selected={path}
+                  truncated={fileQuery.result?.truncated}
+                  onOpenFile={(next) => {
+                    setPath(next);
+                    setPin(null);
+                  }}
+                  onLoadDir={async (dir) => {
+                    try {
+                      const items = await gitApi.listDirectory(repoPath, dir);
+                      return items.map((item) => ({
+                        path: item.path,
+                        name: item.name,
+                        dir: item.dir,
+                        ignored: item.ignored,
+                      }));
+                    } catch (error) {
+                      toast.error(errorMessage(error));
+                      return null;
+                    }
+                  }}
+                />
+              )
+            ) : null}
           </ScrollArea>
         </div>
       </ResizablePanel>

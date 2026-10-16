@@ -218,6 +218,16 @@ export interface DirEntry {
   ignored: boolean;
 }
 
+export interface FileSearchHit {
+  path: string;
+  dir: boolean;
+}
+
+export interface FileSearch {
+  hits: FileSearchHit[];
+  truncated: boolean;
+}
+
 export interface FileText {
   binary: boolean;
   text: string;

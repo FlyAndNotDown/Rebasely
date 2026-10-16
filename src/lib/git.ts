@@ -8,6 +8,7 @@ import type {
   CommitFile,
   CommitSummary,
   DirEntry,
+  FileSearch,
   FileText,
   BlameHunk,
   ConflictView,
@@ -121,6 +122,7 @@ export const gitApi = {
     call<FileDiff>("get_workdir_diff", { repoPath, path, staged, ignoreWhitespace }),
   listDirectory: (repoPath: string, path: string) =>
     call<DirEntry[]>("list_directory", { repoPath, path }),
+  searchFiles: (repoPath: string, query: string) => call<FileSearch>("search_files", { repoPath, query }),
   readFile: (repoPath: string, path: string) => call<FileText>("read_file", { repoPath, path }),
   fileBlame: (repoPath: string, path: string) => call<BlameHunk[]>("file_blame", { repoPath, path }),
   fileCommits: (repoPath: string, path: string, limit: number, skip: number) =>

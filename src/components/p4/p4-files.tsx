@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { DownloadIcon, FilePenIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { toast } from "sonner";
 import { AuthorAvatar } from "@/components/author-avatar";
-import { FileTree, type FileTreeEntry } from "@/components/file-tree";
+import { FileTree, FileTreeFilter, FilteredFileTree, type FileTreeEntry } from "@/components/file-tree";
 import { ChangeBadge } from "@/components/p4/change-badge";
 import { FileStatusIcon } from "@/components/p4/file-status-icon";
 import { P4Diff } from "@/components/p4/p4-diff";
@@ -10,8 +10,11 @@ import { ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from "@/com
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { formatAbsoluteTime, formatExactTime } from "@/lib/format";
 import { HoverTip } from "@/components/ui/tooltip";
+import { FileTreeSkeleton } from "@/components/skeletons";
 import { errorMessage } from "@/lib/git";
-import { changeSummary, relativeToRoot } from "@/lib/p4";
+import { joinRoot, type SearchNode } from "@/lib/file-search";
+import { changeSummary, p4Api, relativeToRoot } from "@/lib/p4";
+import { useFileQuery } from "@/lib/use-file-query";
 import { cn } from "@/lib/utils";
 import { useP4 } from "@/state/p4-context";
 import type { FileDiff } from "@/types/git";
@@ -20,6 +23,33 @@ import type { P4DirEntry, P4Revision } from "@/types/p4";
 export function P4Files() {
   const p4 = useP4();
   const root = p4.connection?.root ?? "";
+  const [query, setQuery] = useState("");
+  const connection = p4.connection;
+  const searchFiles = useCallback(
+    async (needle: string) => {
+      if (!connection) return { hits: [], truncated: false };
+      try {
+        return await p4Api.searchFiles(connection, needle);
+      } catch (caught) {
+        const message = errorMessage(caught);
+        if (message && message !== "Login cancelled") toast.error(message);
+        throw caught;
+      }
+    },
+    [connection],
+  );
+  const fileQuery = useFileQuery(connection?.root ?? "", query, searchFiles);
+  const searchNodes = useMemo<SearchNode[]>(() => {
+    if (!fileQuery.result) return [];
+    return fileQuery.result.hits
+      .map((hit) => ({
+        relative: relativeToRoot(root, hit.path),
+        dir: hit.dir,
+        status: hit.status,
+        detail: hit.detail,
+      }))
+      .filter((node) => node.relative);
+  }, [fileQuery.result, root]);
   const [selected, setSelected] = useState<string | null>(null);
   const [history, setHistory] = useState<P4Revision[] | null>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -86,14 +116,16 @@ export function P4Files() {
     <ResizablePanelGroup orientation="horizontal" className="min-h-0 min-w-0 flex-1">
       <ResizablePanel id="p4-tree" defaultSize="28%" minSize="18%" maxSize="46%">
         <div className="flex h-full min-h-0 flex-col">
-          <div className="flex h-10 shrink-0 items-center border-b px-3 text-sm font-medium">Workspace</div>
+          <FileTreeFilter title="Workspace" query={query} onQuery={setQuery} />
           <div className="min-h-0 flex-1 overflow-auto py-1">
             {root ? (
-              <WorkspaceTree
-                key={root}
-                selected={selected}
-                onSelect={choose}
-                menu={(path) => (
+              <>
+                <div className={fileQuery.active ? "hidden" : undefined}>
+                  <WorkspaceTree
+                    key={root}
+                    selected={selected}
+                    onSelect={choose}
+                    menu={(path) => (
                   <ContextMenuContent className="w-48">
                     <ContextMenuItem onClick={() => void p4.sync([path])}>
                       <DownloadIcon />
@@ -114,7 +146,58 @@ export function P4Files() {
                     </ContextMenuItem>
                   </ContextMenuContent>
                 )}
-              />
+                  />
+                </div>
+                {fileQuery.active ? (
+                  fileQuery.searching ? (
+                    <FileTreeSkeleton />
+                  ) : (
+                    <FilteredFileTree
+                      nodes={searchNodes}
+                      toPath={(relative) => joinRoot(root, relative)}
+                      selected={selected}
+                      onOpenFile={choose}
+                      truncated={fileQuery.result?.truncated}
+                      decorate={(node, entry) => ({
+                        ...entry,
+                        icon: node.dir ? undefined : <FileStatusIcon status={node.status} />,
+                        iconTitle: node.detail || undefined,
+                      })}
+                      onLoadDir={async (path) => {
+                        try {
+                          const next = await p4.listDir(relativeToRoot(root, path));
+                          return next.map(presentFile);
+                        } catch (caught) {
+                          const message = errorMessage(caught);
+                          if (message && message !== "Login cancelled") toast.error(message);
+                          return null;
+                        }
+                      }}
+                      menu={(entry) => (
+                        <ContextMenuContent className="w-48">
+                          <ContextMenuItem onClick={() => void p4.sync([entry.path])}>
+                            <DownloadIcon />
+                            Get latest
+                          </ContextMenuItem>
+                          <ContextMenuSeparator />
+                          <ContextMenuItem onClick={() => void p4.fileAction("edit", [entry.path])}>
+                            <FilePenIcon />
+                            Check out
+                          </ContextMenuItem>
+                          <ContextMenuItem onClick={() => void p4.fileAction("add", [entry.path])}>
+                            <PlusIcon />
+                            Mark for add
+                          </ContextMenuItem>
+                          <ContextMenuItem onClick={() => void p4.fileAction("delete", [entry.path])}>
+                            <Trash2Icon />
+                            Mark for delete
+                          </ContextMenuItem>
+                        </ContextMenuContent>
+                      )}
+                    />
+                  )
+                ) : null}
+              </>
             ) : null}
           </div>
         </div>

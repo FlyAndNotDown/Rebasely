@@ -70,7 +70,27 @@ export function P4ConnectionDialog() {
 
   return (
     <Dialog open={connectionOpen} onOpenChange={(open) => !saving && setConnectionOpen(open)}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent
+        className="sm:max-w-md"
+        onOpenAutoFocus={(event) => {
+          event.preventDefault();
+          const input = document.getElementById("edit-p4-port");
+          if (!(input instanceof HTMLInputElement)) return;
+          input.focus();
+          const placeCaret = () => {
+            if (document.activeElement !== input) return;
+            if (input.selectionStart === 0 && input.selectionEnd === input.value.length) {
+              const end = input.value.length;
+              input.setSelectionRange(end, end);
+            }
+          };
+          // WebView2 selects the whole field when a dialog focuses it.
+          placeCaret();
+          requestAnimationFrame(placeCaret);
+          window.setTimeout(placeCaret, 0);
+          window.setTimeout(placeCaret, 50);
+        }}
+      >
         <DialogHeader>
           <DialogTitle>Edit connection</DialogTitle>
           <DialogDescription>

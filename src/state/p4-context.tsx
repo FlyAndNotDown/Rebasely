@@ -12,13 +12,14 @@ import {
 import { toast } from "sonner";
 import { P4ConnectionDialog } from "@/components/p4/p4-connection-dialog";
 import { P4LoginDialog } from "@/components/p4/p4-login-dialog";
+import { P4WorkspaceDialog } from "@/components/p4/p4-workspace-dialog";
 import { errorMessage } from "@/lib/git";
 import { P4_LOGIN, P4_MISSING, p4Api } from "@/lib/p4";
 import { sameRepoPath } from "@/lib/format";
 import { useGitPick } from "@/state/git-context";
 import { repoTabId, type RepoTab } from "@/state/session";
 import type { FileDiff } from "@/types/git";
-import type { P4Auth, P4Changelist, P4Connection, P4DirEntry, P4File, P4Revision } from "@/types/p4";
+import type { P4Auth, P4ChangePage, P4Changelist, P4Connection, P4DirEntry, P4File, P4Revision } from "@/types/p4";
 
 export type P4View = "pending" | "submitted" | "workspace";
 
@@ -95,10 +96,19 @@ interface P4ContextValue {
   listDir: (relative: string) => Promise<P4DirEntry[]>;
   filelog: (path: string) => Promise<P4Revision[]>;
   revisionDiff: (depotPath: string, rev: string) => Promise<FileDiff | null>;
+  searchSubmitted: (
+    query: string,
+    before: number | null,
+    matchLimit: number,
+    scanLimit: number,
+  ) => Promise<P4ChangePage | null>;
   reconnect: () => void;
   connectionOpen: boolean;
   setConnectionOpen: (open: boolean) => void;
   saveConnection: (edit: P4Auth & { client: string }) => Promise<void>;
+  workspaceOpen: boolean;
+  setWorkspaceOpen: (open: boolean) => void;
+  saveWorkspace: (root: string, stream: string) => Promise<void>;
 }
 
 const P4Context = createContext<P4ContextValue | null>(null);
@@ -119,6 +129,7 @@ export function P4Provider({ children }: { children: ReactNode }) {
   const [submittedLoading, setSubmittedLoading] = useState(false);
   const [loginOpen, setLoginOpen] = useState(false);
   const [connectionOpen, setConnectionOpen] = useState(false);
+  const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const cache = useRef(new Map<string, Session>());
   const generation = useRef(0);
   const diffToken = useRef(0);
@@ -736,6 +747,54 @@ export function P4Provider({ children }: { children: ReactNode }) {
     [guard],
   );
 
+  const searchSubmitted = useCallback(
+    async (query: string, before: number | null, matchLimit: number, scanLimit: number) => {
+      const current = sessionRef.current;
+      if (!current) return null;
+      try {
+        return await guard(current.connection, () =>
+          p4Api.searchSubmitted(
+            current.connection,
+            current.submittedUser,
+            current.submittedClient,
+            query,
+            before,
+            matchLimit,
+            scanLimit,
+          ),
+        );
+      } catch (caught) {
+        report(caught);
+        return null;
+      }
+    },
+    [guard, report],
+  );
+
+  const saveWorkspace = useCallback(
+    async (root: string, stream: string) => {
+      const current = sessionRef.current;
+      const tab = activeTabRef.current;
+      if (!current || tab.kind !== "repo") return;
+      const id = beginActivity("Saving workspace", current.connection.client);
+      try {
+        const next = await guard(current.connection, () => p4Api.saveWorkspace(current.connection, root, stream));
+        if (!sameRepoPath(current.connection.root, next.root)) {
+          retargetRepoTab(tab.id, next.root, next.client);
+        } else {
+          setTabMeta(tab.id, next.client);
+          reconnect();
+        }
+      } catch (caught) {
+        report(caught);
+        throw caught;
+      } finally {
+        endActivity(id);
+      }
+    },
+    [beginActivity, endActivity, guard, reconnect, report, retargetRepoTab, setTabMeta],
+  );
+
   const saveConnection = useCallback(
     async (edit: P4Auth & { client: string }) => {
       const current = sessionRef.current;
@@ -806,10 +865,14 @@ export function P4Provider({ children }: { children: ReactNode }) {
       listDir,
       filelog,
       revisionDiff,
+      searchSubmitted,
       reconnect,
       connectionOpen,
       setConnectionOpen,
       saveConnection,
+      workspaceOpen,
+      setWorkspaceOpen,
+      saveWorkspace,
     }),
     [
       connection,
@@ -830,6 +893,9 @@ export function P4Provider({ children }: { children: ReactNode }) {
       refresh,
       connectionOpen,
       saveConnection,
+      saveWorkspace,
+      searchSubmitted,
+      workspaceOpen,
       revertPaths,
       revertUnchanged,
       revisionDiff,
@@ -856,6 +922,7 @@ export function P4Provider({ children }: { children: ReactNode }) {
     <P4Context.Provider value={value}>
       {children}
       <P4ConnectionDialog />
+      <P4WorkspaceDialog />
       <P4LoginDialog
         open={loginOpen}
         client={loginTarget.client}

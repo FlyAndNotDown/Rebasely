@@ -200,6 +200,33 @@ fn push_description(out: &mut String, description: &str) {
     }
 }
 
+pub fn spec_field(spec: &str, field: &str) -> String {
+    for raw in spec.split('\n') {
+        let line = raw.trim_end_matches('\r');
+        if !is_field(line, field) {
+            continue;
+        }
+        let Some((_, value)) = line.split_once(':') else {
+            continue;
+        };
+        return value.trim().to_string();
+    }
+    String::new()
+}
+
+pub fn remove_spec_field(spec: &str, field: &str) -> String {
+    let mut out = String::new();
+    for raw in spec.split('\n') {
+        let line = raw.trim_end_matches('\r');
+        if is_field(line, field) {
+            continue;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    out
+}
+
 pub fn set_spec_field(spec: &str, field: &str, value: &str) -> String {
     let mut out = String::new();
     let mut wrote = false;
@@ -682,7 +709,11 @@ Files:
     fn root_field_and_view_depots_are_readable() {
         let spec = classic_client_spec("alice_main", "alice", r"D:\work", "//depot/game");
         let moved = set_spec_field(&spec, "Root", r"E:\work");
+        assert_eq!(spec_field(&moved, "Root"), r"E:\work");
         assert!(moved.contains("Root:\tE:\\work"));
+        let cleared = remove_spec_field(&moved, "Root");
+        assert!(spec_field(&cleared, "Root").is_empty());
+        assert!(!cleared.lines().any(|line| line.starts_with("Root:")));
         assert_eq!(view_depots(&moved), vec!["//depot/game/...".to_string()]);
         assert_eq!(depot_view("//depot/main"), "//depot/main/...");
         assert_eq!(depot_view("//depot/main/..."), "//depot/main/...");

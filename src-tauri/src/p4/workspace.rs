@@ -4,7 +4,7 @@
 //! root. History lives on the server, so reads go through `p4` rather than a
 //! local commit graph.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -17,8 +17,8 @@ use crate::p4::parse::{
     blank_change_spec, classic_client_spec, created_change_id, depot_view, file_type_is_binary,
     indexed_groups, known_p4_value, normalize_charset, parse_describe_diffs, parse_p4_set,
     parse_p4config, parse_single_diff, parse_ztag, path_depth, path_is_within, read_description,
-    set_description, set_spec_field, sync_estimate_files, sync_reports_a_file, valid_client_name,
-    valid_depot_path, view_depots, ZtagRecord,
+    remove_spec_field, set_description, set_spec_field, spec_field, sync_estimate_files,
+    sync_reports_a_file, valid_client_name, valid_depot_path, view_depots, ZtagRecord,
 };
 
 #[derive(Debug, Clone, Deserialize)]
@@ -136,6 +136,15 @@ pub enum RepoDetection {
 pub struct P4ChangePage {
     pub changes: Vec<P4Changelist>,
     pub has_more: bool,
+    /// Oldest change number this page already considered. The next page starts before it.
+    pub scanned_through: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct P4FileSearch {
+    pub hits: Vec<P4DirEntry>,
+    pub truncated: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -297,7 +306,128 @@ pub fn submitted(
         changes.push(change_from_record(&record, Vec::new(), false));
     }
     let has_more = changes.len() >= limit;
-    Ok(P4ChangePage { changes, has_more })
+    let scanned_through = changes
+        .iter()
+        .rev()
+        .find_map(|change| change.id.parse::<i64>().ok());
+    Ok(P4ChangePage {
+        changes,
+        has_more,
+        scanned_through,
+    })
+}
+
+pub fn search_submitted(
+    connection: &P4Connection,
+    user: &str,
+    client: &str,
+    query: &str,
+    before: Option<i64>,
+    match_limit: usize,
+    scan_limit: usize,
+) -> AppResult<P4ChangePage> {
+    let needle = query.trim().to_lowercase();
+    if needle.is_empty() {
+        return submitted(connection, user, client, match_limit, before);
+    }
+    let match_limit = match_limit.clamp(1, 100);
+    let scan_limit = scan_limit.clamp(1, 2_000);
+    let mut matches = Vec::new();
+    if before.is_none()
+        && needle.chars().all(|ch| ch.is_ascii_digit())
+        && needle
+            .parse::<i64>()
+            .is_ok_and(|id| id.to_string() == needle)
+    {
+        if let Ok(id) = needle.parse::<i64>() {
+            if let Some(change) = exact_submitted(connection, user, client, id)? {
+                matches.push(change);
+            }
+        }
+    }
+    let mut cursor = before;
+    let mut scanned = 0usize;
+    let mut has_more = false;
+    'pages: loop {
+        if matches.len() >= match_limit || scanned >= scan_limit {
+            has_more = true;
+            break;
+        }
+        let batch = submitted(connection, user, client, 80, cursor)?;
+        if batch.changes.is_empty() {
+            break;
+        }
+        for (index, change) in batch.changes.iter().enumerate() {
+            if let Ok(number) = change.id.parse::<i64>() {
+                cursor = Some(number);
+            }
+            scanned += 1;
+            if change_matches(change, &needle) && !matches.iter().any(|item| item.id == change.id) {
+                matches.push(change.clone());
+            }
+            if matches.len() >= match_limit || scanned >= scan_limit {
+                has_more = index + 1 < batch.changes.len() || batch.has_more;
+                break 'pages;
+            }
+        }
+        if !batch.has_more {
+            break;
+        }
+    }
+    Ok(P4ChangePage {
+        changes: matches,
+        has_more,
+        scanned_through: cursor,
+    })
+}
+
+fn change_matches(change: &P4Changelist, needle: &str) -> bool {
+    change.id.to_lowercase().contains(needle)
+        || change.user.to_lowercase().contains(needle)
+        || change.description.to_lowercase().contains(needle)
+}
+
+fn exact_submitted(
+    connection: &P4Connection,
+    user: &str,
+    client: &str,
+    id: i64,
+) -> AppResult<Option<P4Changelist>> {
+    if id <= 0 {
+        return Ok(None);
+    }
+    let env = env_for(connection);
+    let user = optional_name(user)?;
+    let client = optional_name(client)?;
+    let mut args = vec![
+        "-ztag".to_string(),
+        "changes".into(),
+        "-s".into(),
+        "submitted".into(),
+        "-m".into(),
+        "1".into(),
+        "-L".into(),
+    ];
+    if let Some(user) = &user {
+        args.push("-u".into());
+        args.push(user.clone());
+    }
+    if let Some(client) = &client {
+        args.push("-c".into());
+        args.push(client.clone());
+    }
+    if user.is_none() && client.is_none() {
+        for spec in history_specs(&env, connection)? {
+            args.push(format!("{spec}@{id},{id}"));
+        }
+    } else {
+        args.push(format!("@{id},{id}"));
+    }
+    let stdout = run_owned(&env, &args, None)?;
+    Ok(parse_ztag(&stdout)
+        .into_iter()
+        .map(|record| change_from_record(&record, Vec::new(), false))
+        .find(|change| change.id == id.to_string()))
 }
 
 pub fn describe(connection: &P4Connection, change_id: &str) -> AppResult<P4Describe> {
@@ -435,26 +565,192 @@ pub fn list_dir(connection: &P4Connection, relative: &str) -> AppResult<Vec<P4Di
     Ok(entries)
 }
 
+const FILE_MATCH_CAP: usize = 400;
+const WALK_CAP: usize = 120_000;
+
+pub fn search_files(connection: &P4Connection, query: &str) -> AppResult<P4FileSearch> {
+    let needle = query.trim().to_lowercase();
+    if needle.is_empty() {
+        return Ok(P4FileSearch {
+            hits: Vec::new(),
+            truncated: false,
+        });
+    }
+    let root = PathBuf::from(&connection.root);
+    if !root.is_dir() {
+        return Err(AppError::msg("Workspace folder was not found."));
+    }
+    let (mut hits, truncated) = match_workspace_files(&root, &needle);
+    let files: Vec<String> = hits
+        .iter()
+        .filter(|entry| !entry.dir)
+        .map(|entry| entry.path.clone())
+        .collect();
+    let mut annotated = files
+        .iter()
+        .map(|path| P4DirEntry {
+            name: Path::new(path)
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            path: path.clone(),
+            dir: false,
+            status: String::new(),
+            detail: String::new(),
+        })
+        .collect::<Vec<_>>();
+    annotate_paths(connection, &mut annotated);
+    let mut files_done = 0usize;
+    for hit in &mut hits {
+        if hit.dir {
+            continue;
+        }
+        if let Some(file) = annotated.get(files_done) {
+            hit.status.clone_from(&file.status);
+            hit.detail.clone_from(&file.detail);
+        }
+        files_done += 1;
+    }
+    Ok(P4FileSearch { hits, truncated })
+}
+
+fn match_workspace_files(root: &Path, needle: &str) -> (Vec<P4DirEntry>, bool) {
+    let mut hits = Vec::new();
+    let mut files = 0usize;
+    let mut scanned = 0usize;
+    let mut truncated = false;
+    let mut queue = VecDeque::new();
+    queue.push_back(root.to_path_buf());
+    'walk: while let Some(dir) = queue.pop_front() {
+        let Ok(read) = fs::read_dir(&dir) else {
+            continue;
+        };
+        let mut children = Vec::new();
+        for entry in read.flatten() {
+            scanned += 1;
+            if scanned > WALK_CAP {
+                truncated = true;
+                break 'walk;
+            }
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name == "." || name == ".." {
+                continue;
+            }
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            if file_type.is_symlink() {
+                continue;
+            }
+            children.push((entry.path(), name, file_type.is_dir()));
+        }
+        children.sort_by(|left, right| {
+            right
+                .2
+                .cmp(&left.2)
+                .then_with(|| generated_dir(&left.1).cmp(&generated_dir(&right.1)))
+                .then_with(|| left.1.to_lowercase().cmp(&right.1.to_lowercase()))
+        });
+        for (path, name, is_dir) in children {
+            let matched = name.to_lowercase().contains(needle);
+            if is_dir {
+                if generated_dir(&name) {
+                    if matched {
+                        hits.push(plain_dir(&name, &path));
+                    }
+                    continue;
+                }
+                if matched {
+                    hits.push(plain_dir(&name, &path));
+                }
+                queue.push_back(path);
+                continue;
+            }
+            if !matched {
+                continue;
+            }
+            if files >= FILE_MATCH_CAP {
+                truncated = true;
+                break 'walk;
+            }
+            files += 1;
+            hits.push(P4DirEntry {
+                name,
+                path: path.to_string_lossy().into_owned(),
+                dir: false,
+                status: String::new(),
+                detail: String::new(),
+            });
+        }
+    }
+    (hits, truncated)
+}
+
+fn plain_dir(name: &str, path: &Path) -> P4DirEntry {
+    P4DirEntry {
+        name: name.to_string(),
+        path: path.to_string_lossy().into_owned(),
+        dir: true,
+        status: String::new(),
+        detail: String::new(),
+    }
+}
+
+fn generated_dir(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        ".git"
+            | "node_modules"
+            | "intermediate"
+            | "saved"
+            | "deriveddatacache"
+            | "binaries"
+            | ".vs"
+            | "library"
+    )
+}
+
+fn annotate_paths(connection: &P4Connection, files: &mut [P4DirEntry]) {
+    if files.is_empty() {
+        return;
+    }
+    let env = env_for(connection);
+    let mut known = HashMap::<String, (String, String)>::new();
+    let paths: Vec<String> = files.iter().map(|file| file.path.clone()).collect();
+    for chunk in paths.chunks(40) {
+        for record in fstat_records(&env, chunk) {
+            let client_file = field(&record, "clientFile");
+            if client_file.is_empty() {
+                continue;
+            }
+            known.insert(fold_path(&client_file), status_of(&record));
+        }
+    }
+    if known.is_empty() {
+        return;
+    }
+    for file in files {
+        let Some((status, detail)) = known.get(&fold_path(&file.path)) else {
+            file.status = "local".to_string();
+            file.detail = "Not in the depot".to_string();
+            continue;
+        };
+        file.status.clone_from(status);
+        file.detail.clone_from(detail);
+    }
+}
+
+fn fold_path(path: &str) -> String {
+    strip_verbatim_prefix(path)
+        .replace('/', "\\")
+        .to_lowercase()
+}
+
 fn annotate_status(connection: &P4Connection, dir: &Path, entries: &mut [P4DirEntry]) {
     let env = env_for(connection);
-    let pattern = dir.join("*");
-    let pattern = pattern.to_string_lossy();
-    let Ok(output) = cli::run_p4(
-        &env,
-        &[
-            "-ztag",
-            "fstat",
-            "-T",
-            "clientFile haveRev headRev action otherOpen otherLock unresolved",
-            pattern.as_ref(),
-        ],
-        None,
-    ) else {
-        return;
-    };
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let pattern = dir.join("*").to_string_lossy().into_owned();
     let mut by_name = HashMap::<String, (String, String)>::new();
-    for record in parse_ztag(&stdout) {
+    for record in fstat_records(&env, &[pattern]) {
         let client_file = field(&record, "clientFile");
         let name = client_file
             .rsplit(['/', '\\'])
@@ -497,19 +793,7 @@ fn annotate_pending(connection: &P4Connection, changes: &mut [P4Changelist]) {
     paths.dedup();
     let mut known = HashMap::<String, (String, String)>::new();
     for chunk in paths.chunks(40) {
-        let mut args = vec![
-            "-ztag".to_string(),
-            "fstat".into(),
-            "-T".into(),
-            "depotFile haveRev headRev action otherOpen otherLock unresolved".into(),
-        ];
-        args.extend(chunk.iter().cloned());
-        let refs: Vec<&str> = args.iter().map(String::as_str).collect();
-        let Ok(output) = cli::run_p4(&env, &refs, None) else {
-            continue;
-        };
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        for record in parse_ztag(&stdout) {
+        for record in fstat_records(&env, chunk) {
             let depot = field(&record, "depotFile");
             if depot.is_empty() {
                 continue;
@@ -539,7 +823,7 @@ fn combine_status(fstat: Option<(String, String)>, action: &str) -> (String, Str
         && !fallback.1.is_empty()
         && !detail.contains(fallback.1.as_str())
     {
-        return (status, format!("{detail} · {}", fallback.1));
+        return (status, format!("{detail}\n{}", fallback.1));
     }
     (status, detail)
 }
@@ -559,34 +843,47 @@ fn action_status(action: &str) -> (String, String) {
     }
 }
 
+const FSTAT_FIELDS: &str = "clientFile depotFile haveRev headRev action change ourLock otherOpen otherLock unresolved otherOpen0 otherAction0 otherChange0 otherOpen1 otherAction1 otherChange1 otherOpen2 otherAction2 otherChange2 otherOpen3 otherAction3 otherChange3";
+const FSTAT_FIELDS_BASIC: &str =
+    "clientFile depotFile haveRev headRev action change otherOpen otherLock unresolved";
+
+fn fstat_records(env: &P4Env, paths: &[String]) -> Vec<ZtagRecord> {
+    if paths.is_empty() {
+        return Vec::new();
+    }
+    let stdout = fstat_stdout(env, FSTAT_FIELDS, paths)
+        .or_else(|| fstat_stdout(env, FSTAT_FIELDS_BASIC, paths))
+        .unwrap_or_default();
+    parse_ztag(&stdout)
+}
+
+fn fstat_stdout(env: &P4Env, fields: &str, paths: &[String]) -> Option<String> {
+    let mut args = vec![
+        "-ztag".to_string(),
+        "fstat".into(),
+        "-T".into(),
+        fields.to_string(),
+    ];
+    args.extend(paths.iter().cloned());
+    run_owned(env, &args, None).ok()
+}
+
+struct OtherOpen {
+    label: String,
+    change: String,
+    locked: bool,
+}
+
 fn status_of(record: &ZtagRecord) -> (String, String) {
     let action = field(record, "action").to_lowercase();
     let have = field(record, "haveRev").parse::<u64>().unwrap_or(0);
     let head = field(record, "headRev").parse::<u64>().unwrap_or(0);
     let others = field(record, "otherOpen").parse::<u64>().unwrap_or(0);
-    let locked = !field(record, "otherLock").is_empty();
+    let openers = other_opens(record);
+    let locked = !field(record, "otherLock").is_empty() || openers.iter().any(|item| item.locked);
     let unresolved = record.contains_key("unresolved");
-    let revs = if head == 0 {
-        String::new()
-    } else if have == 0 {
-        format!("head {head}")
-    } else if have == head {
-        format!("revision {have}")
-    } else {
-        format!("have {have}, head {head}")
-    };
-    let opened = if action.contains("delete") {
-        Some("Marked for delete")
-    } else if action.contains("add") {
-        Some("Marked for add")
-    } else if action.contains("edit") {
-        Some("Checked out for edit")
-    } else if action.contains("integrate") || action.contains("move") || action.contains("branch") {
-        Some("Opened for integrate")
-    } else {
-        None
-    };
-    let (status, mut label) = if unresolved {
+    let ours = action_phrase(&action);
+    let (status, headline) = if unresolved {
         ("conflict", "Needs resolve".to_string())
     } else if action.contains("delete") {
         ("delete", "Marked for delete".to_string())
@@ -605,31 +902,131 @@ fn status_of(record: &ZtagRecord) -> (String, String) {
         ("edit", "Checked out for edit".to_string())
     } else if action.contains("integrate") || action.contains("move") || action.contains("branch") {
         ("integrate", "Opened for integrate".to_string())
-    } else if others > 0 || locked {
-        (
-            "other",
-            if locked {
-                "Locked by another user".to_string()
-            } else {
-                "Opened by another user".to_string()
-            },
-        )
+    } else if others > 0 || locked || !openers.is_empty() {
+        let owner = openers
+            .iter()
+            .find(|item| item.locked)
+            .or_else(|| openers.first());
+        let headline = match owner {
+            Some(owner) if owner.locked => format!("Locked by {}", owner.label),
+            Some(owner) => format!("Opened by {}", owner.label),
+            None if locked => "Locked by another user".to_string(),
+            None => "Opened by another user".to_string(),
+        };
+        ("other", headline)
     } else if head > 0 {
         ("current", "Up to date".to_string())
     } else {
         ("local", "Not in the depot".to_string())
     };
-    if let Some(opened) = opened {
-        if (status == "stale" || status == "conflict") && !label.contains(opened) {
-            label = format!("{label} · {opened}");
+    let mut lines = vec![headline];
+    if let Some(ours) = ours {
+        push_line(&mut lines, ours.to_string());
+        let change = field(record, "change");
+        if !change.is_empty() && change != "default" {
+            push_line(&mut lines, format!("Changelist {change}"));
         }
     }
-    let detail = if revs.is_empty() {
-        label
+    for opener in &openers {
+        let line = if opener.locked {
+            format!("Locked by {}", opener.label)
+        } else {
+            format!("Opened by {}", opener.label)
+        };
+        push_line(&mut lines, line);
+        if !opener.change.is_empty() && opener.change != "default" {
+            push_line(&mut lines, format!("Changelist {}", opener.change));
+        }
+    }
+    let named = openers.len() as u64;
+    if named > 0 && others > named {
+        let extra = others - named;
+        let line = if extra == 1 {
+            "1 more user has this file open".to_string()
+        } else {
+            format!("{extra} more users have this file open")
+        };
+        push_line(&mut lines, line);
+    }
+    if head > 0 {
+        if have == 0 {
+            push_line(&mut lines, format!("Head revision {head}"));
+        } else if have == head {
+            push_line(&mut lines, format!("Revision {have}"));
+        } else {
+            push_line(&mut lines, format!("Have revision {have}"));
+            push_line(&mut lines, format!("Head revision {head}"));
+        }
+    }
+    (status.to_string(), lines.join("\n"))
+}
+
+fn action_phrase(action: &str) -> Option<&'static str> {
+    if action.contains("delete") {
+        Some("Marked for delete")
+    } else if action.contains("add") {
+        Some("Marked for add")
+    } else if action.contains("edit") {
+        Some("Checked out for edit")
+    } else if action.contains("integrate") || action.contains("move") || action.contains("branch") {
+        Some("Opened for integrate")
     } else {
-        format!("{label} · {revs}")
-    };
-    (status.to_string(), detail)
+        None
+    }
+}
+
+fn other_opens(record: &ZtagRecord) -> Vec<OtherOpen> {
+    let lock = split_user_client(&field(record, "otherLock"));
+    let mut openers = Vec::new();
+    for group in indexed_groups(record) {
+        let who = field(&group, "otherOpen");
+        if who.is_empty() {
+            continue;
+        }
+        let (user, client) = split_user_client(&who);
+        if user.is_empty() {
+            continue;
+        }
+        let locked = !lock.0.is_empty()
+            && user.eq_ignore_ascii_case(&lock.0)
+            && (lock.1.is_empty() || client.eq_ignore_ascii_case(&lock.1));
+        openers.push(OtherOpen {
+            label: person_label(&user, &client),
+            change: field(&group, "otherChange"),
+            locked,
+        });
+    }
+    if openers.is_empty() && !lock.0.is_empty() {
+        openers.push(OtherOpen {
+            label: person_label(&lock.0, &lock.1),
+            change: String::new(),
+            locked: true,
+        });
+    }
+    openers
+}
+
+fn split_user_client(value: &str) -> (String, String) {
+    let value = value.split_whitespace().next().unwrap_or("").trim();
+    match value.split_once('@') {
+        Some((user, client)) => (user.trim().to_string(), client.trim().to_string()),
+        None => (value.to_string(), String::new()),
+    }
+}
+
+fn person_label(user: &str, client: &str) -> String {
+    if client.is_empty() {
+        user.to_string()
+    } else {
+        format!("{user} on {client}")
+    }
+}
+
+fn push_line(lines: &mut Vec<String>, line: String) {
+    if line.is_empty() || lines.iter().any(|item| item == &line) {
+        return;
+    }
+    lines.push(line);
 }
 
 pub fn submit(connection: &P4Connection, change_id: &str, description: &str) -> AppResult<()> {
@@ -995,6 +1392,43 @@ pub fn prepare_client(auth: &P4Auth, name: &str) -> AppResult<String> {
     }
     update_config_file(&root, &env)?;
     Ok(root.to_string_lossy().into_owned())
+}
+
+pub fn save_workspace(
+    connection: &P4Connection,
+    root: &str,
+    stream: &str,
+) -> AppResult<P4Connection> {
+    let root_path = PathBuf::from(strip_verbatim_prefix(root.trim()));
+    if !root_path.is_absolute() {
+        return Err(AppError::msg(
+            "Choose an absolute folder for the workspace.",
+        ));
+    }
+    let stream = stream.trim();
+    if !stream.is_empty() && !valid_depot_path(stream) {
+        return Err(AppError::msg("Stream should look like //depot/main."));
+    }
+    fs::create_dir_all(&root_path)?;
+    let mut env = env_for(connection);
+    let current = run_ok(&env, &["client", "-o", &connection.client], None)?;
+    let current_stream = spec_field(&current, "Stream");
+    let mut spec = if !stream.is_empty() && stream != current_stream {
+        run_ok(
+            &env,
+            &["client", "-S", stream, "-o", &connection.client],
+            None,
+        )?
+    } else if stream.is_empty() && !current_stream.is_empty() {
+        remove_spec_field(&current, "Stream")
+    } else {
+        current
+    };
+    spec = set_spec_field(&spec, "Root", &root_path.to_string_lossy());
+    run_ok(&env, &["client", "-i"], Some(&spec))?;
+    env.cwd = root_path.clone();
+    update_config_file(&root_path, &env)?;
+    connection_after_create(&env, &root_path, stream)
 }
 
 fn prepare_auth(auth: &P4Auth) -> AppResult<P4Env> {
@@ -1715,4 +2149,141 @@ fn first_text(preferred: Option<&String>, fallback: &str) -> String {
         .filter(|value| known_p4_value(value))
         .unwrap_or(fallback)
         .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn record(pairs: &[(&str, &str)]) -> ZtagRecord {
+        pairs
+            .iter()
+            .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn other_open_names_the_user_and_puts_each_fact_on_its_own_line() {
+        let (status, detail) = status_of(&record(&[
+            ("haveRev", "3"),
+            ("headRev", "3"),
+            ("otherOpen", "1"),
+            ("otherOpen0", "alice@dev-pc"),
+            ("otherAction0", "edit"),
+            ("otherChange0", "44"),
+        ]));
+        assert_eq!(status, "other");
+        assert_eq!(
+            detail,
+            "Opened by alice on dev-pc\nChangelist 44\nRevision 3"
+        );
+    }
+
+    #[test]
+    fn a_lock_names_the_user_when_no_open_record_is_present() {
+        let (status, detail) = status_of(&record(&[
+            ("haveRev", "3"),
+            ("headRev", "3"),
+            ("otherOpen", "1"),
+            ("otherLock", "alice@dev-pc"),
+        ]));
+        assert_eq!(status, "other");
+        assert_eq!(
+            detail,
+            "Locked by alice on dev-pc\nRevision 3"
+        );
+    }
+
+    #[test]
+    fn stale_checkout_splits_status_changelist_and_revisions() {
+        let (status, detail) = status_of(&record(&[
+            ("haveRev", "3"),
+            ("headRev", "8"),
+            ("action", "edit"),
+            ("change", "42"),
+        ]));
+        assert_eq!(status, "stale");
+        assert_eq!(
+            detail,
+            "Not latest\nChecked out for edit\nChangelist 42\nHave revision 3\nHead revision 8"
+        );
+    }
+
+    #[test]
+    fn an_unnamed_open_still_splits_the_revision() {
+        let (status, detail) = status_of(&record(&[
+            ("haveRev", "3"),
+            ("headRev", "3"),
+            ("otherOpen", "1"),
+        ]));
+        assert_eq!(status, "other");
+        assert_eq!(detail, "Opened by another user\nRevision 3");
+    }
+
+    #[test]
+    fn description_search_matches_text_outside_the_loaded_page() {
+        let change = P4Changelist {
+            id: "900".to_string(),
+            user: "alice".to_string(),
+            client: "alice_main".to_string(),
+            status: "submitted".to_string(),
+            description: "Fix the stream switch".to_string(),
+            time: 0,
+            shelved: false,
+            files: Vec::new(),
+        };
+        assert!(change_matches(&change, "stream"));
+        assert!(change_matches(&change, "900"));
+        assert!(!change_matches(&change, "missing"));
+    }
+
+    #[test]
+    fn workspace_search_keeps_hierarchy_and_skips_generated_trees() {
+        let root = std::env::temp_dir().join(format!(
+            "rebasely-walk-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or(0)
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("client").join("src")).unwrap();
+        fs::write(
+            root.join("client")
+                .join("src")
+                .join("notes.bat"),
+            b"@echo off",
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("Intermediate").join("deep")).unwrap();
+        fs::write(
+            root.join("Intermediate").join("deep").join("secret.txt"),
+            b"x",
+        )
+        .unwrap();
+        fs::create_dir_all(root.join(".cache")).unwrap();
+
+        let (hits, truncated) = match_workspace_files(&root, "notes");
+        assert!(!truncated);
+        assert!(hits
+            .iter()
+            .any(|hit| !hit.dir && hit.name == "notes.bat"));
+        assert!(hits.iter().all(|hit| !hit.path.contains("secret.txt")));
+
+        let (folders, _) = match_workspace_files(&root, "cache");
+        assert!(folders
+            .iter()
+            .any(|hit| hit.dir && hit.name.eq_ignore_ascii_case(".cache")));
+
+        let (generated, _) = match_workspace_files(&root, "secret");
+        assert!(generated.is_empty());
+        let (named, _) = match_workspace_files(&root, "intermediate");
+        assert!(named
+            .iter()
+            .any(|hit| hit.dir && hit.name.eq_ignore_ascii_case("Intermediate")));
+        assert!(named.iter().all(|hit| hit.dir));
+
+        let _ = fs::remove_dir_all(&root);
+    }
 }

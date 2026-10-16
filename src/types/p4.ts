@@ -35,6 +35,7 @@ export interface P4Changelist {
 export interface P4ChangePage {
   changes: P4Changelist[];
   hasMore: boolean;
+  scannedThrough: number | null;
 }
 
 export interface P4Describe {
@@ -57,6 +58,11 @@ export interface P4DirEntry {
   dir: boolean;
   status: string;
   detail: string;
+}
+
+export interface P4FileSearch {
+  hits: P4DirEntry[];
+  truncated: boolean;
 }
 
 export interface P4Auth {

@@ -71,6 +71,22 @@ export function BranchSidebarSkeleton() {
   );
 }
 
+const treeWidths = ["w-2/5", "w-1/2", "w-1/3", "w-3/5", "w-2/5", "w-1/4"];
+
+export function FileTreeSkeleton({ rows = 14 }: { rows?: number }) {
+  return (
+    <div role="status" aria-label="Searching files" className="py-1">
+      {Array.from({ length: rows }, (_, index) => (
+        <div key={index} className="flex h-7 items-center gap-2 pr-2" style={{ paddingLeft: 8 + (index % 4) * 12 }}>
+          <Skeleton className="size-3.5 shrink-0 rounded-sm" />
+          <Skeleton className="size-3.5 shrink-0 rounded-sm" />
+          <Skeleton className={cn("h-3", treeWidths[index % treeWidths.length])} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function CommitFilesSkeleton() {
   return (
     <div role="status" aria-label="Loading files" className="flex h-full min-h-0 flex-col">

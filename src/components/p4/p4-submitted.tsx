@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type UIEvent } from "react";
 import { CheckIcon, ChevronDownIcon } from "lucide-react";
 import { toast } from "sonner";
 import { AuthorAvatar } from "@/components/author-avatar";
 import { ChangeBadge } from "@/components/p4/change-badge";
 import { P4Diff } from "@/components/p4/p4-diff";
+import { HistorySkeleton } from "@/components/skeletons";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -18,6 +19,7 @@ import { HoverTip } from "@/components/ui/tooltip";
 import { changeSummary, depotBase, p4ActionClass, p4ActionLetter } from "@/lib/p4";
 import { cn } from "@/lib/utils";
 import { useP4 } from "@/state/p4-context";
+import type { P4Changelist } from "@/types/p4";
 
 async function copyText(value: string, success: string) {
   if (!value) {
@@ -32,23 +34,42 @@ async function copyText(value: string, success: string) {
   }
 }
 
+interface SubmittedSearch {
+  query: string;
+  user: string;
+  client: string;
+  changes: P4Changelist[];
+  hasMore: boolean;
+  scannedThrough: number | null;
+}
+
 export function P4Submitted() {
   const p4 = useP4();
   const [query, setQuery] = useState("");
   const [picked, setPicked] = useState<string | null>(null);
   const [users, setUsers] = useState<string[]>([]);
   const [clients, setClients] = useState<string[]>([]);
+  const [search, setSearch] = useState<SubmittedSearch | null>(null);
+  const [searching, setSearching] = useState(false);
   const connection = p4.connection;
   const scope = connection ? `${connection.port}\n${connection.client}` : "";
   const needle = query.trim().toLowerCase();
-  const changes = p4.submitted.filter((change) => {
-    if (!needle) return true;
-    return (
-      change.id.includes(needle) ||
-      change.user.toLowerCase().includes(needle) ||
-      change.description.toLowerCase().includes(needle)
-    );
-  });
+  const localMatches = useMemo(() => {
+    if (!needle) return p4.submitted;
+    return p4.submitted.filter((change) => changeMatches(change, needle));
+  }, [needle, p4.submitted]);
+  const remoteReady =
+    needle.length > 0 &&
+    search?.query === needle &&
+    search.user === p4.submittedUser &&
+    search.client === p4.submittedClient;
+  const changes = useMemo(() => {
+    if (!needle || !remoteReady || !search) return localMatches;
+    return mergeById(search.changes, localMatches);
+  }, [localMatches, needle, remoteReady, search]);
+  const hasMore = needle ? Boolean(remoteReady && search?.hasMore) : p4.submittedHasMore;
+  const listRef = useRef<HTMLDivElement>(null);
+  const paging = useRef(false);
   const detail = p4.submittedDetail;
   const file =
     picked && detail?.files.some((item) => item.depotPath === picked)
@@ -88,6 +109,108 @@ export function P4Submitted() {
       });
   }
 
+  const searchSubmitted = p4.searchSubmitted;
+  const submittedUser = p4.submittedUser;
+  const submittedClient = p4.submittedClient;
+
+  useEffect(() => {
+    if (!connection || !needle) return;
+    let live = true;
+    const timer = window.setTimeout(() => {
+      setSearching(true);
+      void searchSubmitted(needle, null, 40, 500)
+        .then((page) => {
+          if (!live || !page) return;
+          setSearch({
+            query: needle,
+            user: submittedUser,
+            client: submittedClient,
+            changes: page.changes,
+            hasMore: page.hasMore,
+            scannedThrough: page.scannedThrough,
+          });
+        })
+        .finally(() => {
+          if (live) setSearching(false);
+        });
+    }, 250);
+    return () => {
+      live = false;
+      window.clearTimeout(timer);
+    };
+  }, [connection, needle, searchSubmitted, submittedClient, submittedUser]);
+
+  async function loadMore() {
+    if (paging.current) return;
+    if (needle) {
+      if (!remoteReady || !search?.hasMore || search.scannedThrough == null || searching) return;
+      paging.current = true;
+      setSearching(true);
+      try {
+        let cursor: number | null = search.scannedThrough;
+        let more = true;
+        let accumulated = search.changes;
+        let rounds = 0;
+        while (more && cursor != null && rounds < 6) {
+          rounds += 1;
+          const page = await searchSubmitted(needle, cursor, 40, 400);
+          if (!page) {
+            more = false;
+            break;
+          }
+          const beforeCount = accumulated.length;
+          accumulated = appendChanges(accumulated, page.changes);
+          more = page.hasMore;
+          cursor = page.scannedThrough;
+          if (accumulated.length > beforeCount) break;
+        }
+        setSearch((current) => {
+          if (!current || current.query !== needle || current.user !== submittedUser || current.client !== submittedClient) {
+            return current;
+          }
+          return { ...current, changes: accumulated, hasMore: more, scannedThrough: cursor };
+        });
+      } finally {
+        paging.current = false;
+        setSearching(false);
+      }
+      return;
+    }
+    if (!p4.submittedHasMore || p4.submittedLoading) return;
+    paging.current = true;
+    try {
+      await loadSubmitted(p4.submitted.length > 0);
+    } finally {
+      paging.current = false;
+    }
+  }
+
+  const loadMoreRef = useRef(loadMore);
+  const autoLoads = useRef({ key: "", count: 0 });
+  useEffect(() => {
+    loadMoreRef.current = loadMore;
+  });
+
+  useEffect(() => {
+    const node = listRef.current;
+    if (!node || !hasMore || searching || p4.submittedLoading) return;
+    if (!needle && changes.length === 0) return;
+    if (node.scrollHeight > node.clientHeight + 48) return;
+    const key = `${needle}\n${submittedUser}\n${submittedClient}`;
+    if (autoLoads.current.key !== key) autoLoads.current = { key, count: 0 };
+    if (autoLoads.current.count >= 4) return;
+    autoLoads.current.count += 1;
+    void loadMoreRef.current();
+  }, [changes.length, hasMore, needle, p4.submittedLoading, search?.scannedThrough, searching, submittedClient, submittedUser]);
+
+  function onScroll(event: UIEvent<HTMLDivElement>) {
+    const node = event.currentTarget;
+    if (node.scrollHeight - node.scrollTop - node.clientHeight > 240) return;
+    void loadMoreRef.current();
+  }
+
+  const listBusy = needle ? searching : p4.submittedLoading;
+
   return (
     <ResizablePanelGroup orientation="horizontal" className="min-h-0 min-w-0 flex-1">
       <ResizablePanel id="p4-submitted-list" defaultSize="32%" minSize="22%" maxSize="48%">
@@ -126,52 +249,51 @@ export function P4Submitted() {
               className="h-8"
             />
           </div>
-          <div className="min-h-0 flex-1 overflow-auto px-1 py-1">
-            {changes.length === 0 && !p4.submittedLoading ? (
-              <p className="p-4 text-sm text-muted-foreground">No submitted changelists.</p>
+          <div ref={listRef} className="min-h-0 flex-1 overflow-auto px-1 py-1" onScroll={onScroll}>
+            {changes.length === 0 ? (
+              listBusy ? (
+                <HistorySkeleton rows={8} label={needle ? "Searching changelists" : "Loading changelists"} />
+              ) : (
+                <p className="p-4 text-sm text-muted-foreground">
+                  {needle ? "No matching changelists." : "No submitted changelists."}
+                </p>
+              )
             ) : (
-              changes.map((change) => {
-                const active = change.id === p4.selectedSubmitted;
-                return (
-                  <button
-                    key={change.id}
-                    type="button"
-                    className={cn(
-                      "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-muted/70",
-                      active && "bg-muted",
-                    )}
-                    onClick={() => void p4.selectSubmitted(change.id)}
-                  >
-                    <ChangeBadge id={change.id} />
-                    <span className="min-w-0 flex-1 truncate text-xs">
-                      {changeSummary(change.description) || "No description"}
-                    </span>
-                    {change.time ? (
-                      <HoverTip label={formatExactTime(change.time)}>
-                        <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
-                          {formatAbsoluteTime(change.time)}
-                        </span>
-                      </HoverTip>
-                    ) : null}
-                  </button>
-                );
-              })
+              <>
+                {changes.map((change) => {
+                  const active = change.id === p4.selectedSubmitted;
+                  return (
+                    <button
+                      key={change.id}
+                      type="button"
+                      className={cn(
+                        "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-muted/70",
+                        active && "bg-muted",
+                      )}
+                      onClick={() => void p4.selectSubmitted(change.id)}
+                    >
+                      <ChangeBadge id={change.id} />
+                      <span className="min-w-0 flex-1 truncate text-xs">
+                        {changeSummary(change.description) || "No description"}
+                      </span>
+                      {change.time ? (
+                        <HoverTip label={formatExactTime(change.time)}>
+                          <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
+                            {formatAbsoluteTime(change.time)}
+                          </span>
+                        </HoverTip>
+                      ) : null}
+                    </button>
+                  );
+                })}
+                {listBusy ? (
+                  <p className="px-2 py-2 text-center text-xs text-muted-foreground">
+                    {needle ? "Searching older changelists" : "Loading"}
+                  </p>
+                ) : null}
+              </>
             )}
           </div>
-          {p4.submittedHasMore ? (
-            <div className="shrink-0 border-t p-2">
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                className="w-full"
-                disabled={p4.submittedLoading}
-                onClick={() => void p4.loadSubmitted(p4.submitted.length > 0)}
-              >
-                {p4.submittedLoading ? "Loading" : "Load more"}
-              </Button>
-            </div>
-          ) : null}
         </div>
       </ResizablePanel>
       <ResizableHandle />
@@ -255,6 +377,28 @@ export function P4Submitted() {
       </ResizablePanel>
     </ResizablePanelGroup>
   );
+}
+
+function changeMatches(change: P4Changelist, needle: string) {
+  return (
+    change.id.includes(needle) ||
+    change.user.toLowerCase().includes(needle) ||
+    change.description.toLowerCase().includes(needle)
+  );
+}
+
+function mergeById(remote: P4Changelist[], local: P4Changelist[]) {
+  const byId = new Map<string, P4Changelist>();
+  for (const change of remote) byId.set(change.id, change);
+  for (const change of local) {
+    if (!byId.has(change.id)) byId.set(change.id, change);
+  }
+  return [...byId.values()].sort((left, right) => Number(right.id) - Number(left.id));
+}
+
+function appendChanges(current: P4Changelist[], next: P4Changelist[]) {
+  const seen = new Set(current.map((change) => change.id));
+  return [...current, ...next.filter((change) => !seen.has(change.id))];
 }
 
 function withCurrent(options: string[], current: string) {

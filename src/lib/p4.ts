@@ -10,6 +10,7 @@ import type {
   P4StreamOption,
   P4Describe,
   P4DirEntry,
+  P4FileSearch,
   P4Executables,
   P4OpenResult,
   P4Revision,
@@ -39,6 +40,24 @@ export const p4Api = {
     limit = 50,
     before?: number | null,
   ) => call<P4ChangePage>("p4_submitted", { connection, user, client, limit, before: before ?? null }),
+  searchSubmitted: (
+    connection: P4Connection,
+    user: string,
+    client: string,
+    query: string,
+    before: number | null,
+    matchLimit: number,
+    scanLimit: number,
+  ) =>
+    call<P4ChangePage>("p4_search_submitted", {
+      connection,
+      user,
+      client,
+      query,
+      before,
+      matchLimit,
+      scanLimit,
+    }),
   listUsers: (connection: P4Connection) => call<string[]>("p4_list_users", { connection }),
   listClients: (connection: P4Connection, user: string) =>
     call<string[]>("p4_list_clients", { connection, user }),
@@ -54,6 +73,10 @@ export const p4Api = {
     call<P4Revision[]>("p4_filelog", { connection, path }),
   listDir: (connection: P4Connection, relative: string) =>
     call<P4DirEntry[]>("p4_list_dir", { connection, relative }),
+  searchFiles: (connection: P4Connection, query: string) =>
+    call<P4FileSearch>("p4_search_files", { connection, query }),
+  saveWorkspace: (connection: P4Connection, root: string, stream: string) =>
+    call<P4Connection>("p4_save_workspace", { connection, root, stream }),
   submit: (connection: P4Connection, changeId: string, description: string) =>
     call<void>("p4_submit", { connection, changeId, description }),
   saveChange: (connection: P4Connection, changeId: string, description: string) =>

@@ -71,7 +71,7 @@ function HoverTip({
         side={side}
         align="start"
         sideOffset={6}
-        className="max-w-sm text-left whitespace-pre-line wrap-break-word"
+        className="max-w-sm items-start text-left whitespace-pre-line wrap-break-word"
       >
         {label}
       </TooltipContent>
