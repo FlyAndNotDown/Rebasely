@@ -252,33 +252,6 @@ pub fn set_spec_field(spec: &str, field: &str, value: &str) -> String {
     out
 }
 
-pub fn view_depots(spec: &str) -> Vec<String> {
-    let mut depots = Vec::new();
-    let mut reading = false;
-    for raw in spec.split('\n') {
-        let line = raw.trim_end_matches('\r');
-        if reading {
-            if is_indented(line) {
-                if let Some(depot) = line.split_whitespace().next() {
-                    if depot.starts_with("//") && !depots.iter().any(|item: &String| item == depot)
-                    {
-                        depots.push(depot.to_string());
-                    }
-                }
-                continue;
-            }
-            if line.is_empty() {
-                continue;
-            }
-            break;
-        }
-        if is_field(line, "View") {
-            reading = true;
-        }
-    }
-    depots
-}
-
 pub fn depot_view(path: &str) -> String {
     let path = path.trim().trim_end_matches('/');
     if path.ends_with("/...") {
@@ -706,7 +679,7 @@ Files:
     }
 
     #[test]
-    fn root_field_and_view_depots_are_readable() {
+    fn root_field_and_depot_view_are_readable() {
         let spec = classic_client_spec("alice_main", "alice", r"D:\work", "//depot/game");
         let moved = set_spec_field(&spec, "Root", r"E:\work");
         assert_eq!(spec_field(&moved, "Root"), r"E:\work");
@@ -714,7 +687,6 @@ Files:
         let cleared = remove_spec_field(&moved, "Root");
         assert!(spec_field(&cleared, "Root").is_empty());
         assert!(!cleared.lines().any(|line| line.starts_with("Root:")));
-        assert_eq!(view_depots(&moved), vec!["//depot/game/...".to_string()]);
         assert_eq!(depot_view("//depot/main"), "//depot/main/...");
         assert_eq!(depot_view("//depot/main/..."), "//depot/main/...");
     }
