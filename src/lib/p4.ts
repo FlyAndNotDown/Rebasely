@@ -11,6 +11,7 @@ import type {
   P4Describe,
   P4DirEntry,
   P4FileSearch,
+  P4GetRevision,
   P4Executables,
   P4OpenResult,
   P4Revision,
@@ -95,6 +96,8 @@ export const p4Api = {
     call<void>("p4_delete_shelf", { connection, changeId }),
   sync: (connection: P4Connection, paths: string[], activityId?: string) =>
     call<string>("p4_sync", { connection, paths, activityId: activityId ?? null }),
+  getRevision: (connection: P4Connection, request: P4GetRevision, activityId?: string) =>
+    call<string>("p4_get_revision", { connection, request, activityId: activityId ?? null }),
   reconcile: (connection: P4Connection, activityId?: string) =>
     call<string>("p4_reconcile", { connection, activityId: activityId ?? null }),
   fileAction: (connection: P4Connection, action: "edit" | "add" | "delete", paths: string[]) =>

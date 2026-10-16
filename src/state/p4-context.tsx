@@ -19,7 +19,16 @@ import { sameRepoPath } from "@/lib/format";
 import { useGitPick } from "@/state/git-context";
 import { repoTabId, type RepoTab } from "@/state/session";
 import type { FileDiff } from "@/types/git";
-import type { P4Auth, P4ChangePage, P4Changelist, P4Connection, P4DirEntry, P4File, P4Revision } from "@/types/p4";
+import type {
+  P4Auth,
+  P4ChangePage,
+  P4Changelist,
+  P4Connection,
+  P4DirEntry,
+  P4File,
+  P4GetRevision,
+  P4Revision,
+} from "@/types/p4";
 
 export type P4View = "pending" | "submitted" | "workspace";
 
@@ -84,6 +93,8 @@ interface P4ContextValue {
   deleteSelectedShelf: () => Promise<void>;
   revertUnchanged: () => Promise<void>;
   sync: (paths?: string[]) => Promise<void>;
+  getRevision: (request: P4GetRevision) => Promise<string>;
+  filesEpoch: number;
   reconcile: () => Promise<void>;
   fileAction: (action: "edit" | "add" | "delete", paths: string[]) => Promise<void>;
   loadSubmitted: (more?: boolean) => Promise<void>;
@@ -130,6 +141,8 @@ export function P4Provider({ children }: { children: ReactNode }) {
   const [loginOpen, setLoginOpen] = useState(false);
   const [connectionOpen, setConnectionOpen] = useState(false);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
+  const [filesEpoch, setFilesEpoch] = useState(0);
+  const bumpFiles = useCallback(() => setFilesEpoch((value) => value + 1), []);
   const cache = useRef(new Map<string, Session>());
   const generation = useRef(0);
   const diffToken = useRef(0);
@@ -591,13 +604,39 @@ export function P4Provider({ children }: { children: ReactNode }) {
         const output = await guard(current.connection, () => p4Api.sync(current.connection, paths, id));
         toast.success(lastLine(output) || "Up to date");
         await reloadPending();
+        bumpFiles();
       } catch (caught) {
         report(caught);
       } finally {
         endActivity(id);
       }
     },
-    [beginActivity, endActivity, guard, reloadPending, report],
+    [beginActivity, bumpFiles, endActivity, guard, reloadPending, report],
+  );
+
+  const getRevision = useCallback(
+    async (request: P4GetRevision) => {
+      const current = sessionRef.current;
+      if (!current) return "";
+      const id = beginActivity(request.preview ? "Previewing revision" : "Getting revision");
+      try {
+        const output = await guard(current.connection, () =>
+          p4Api.getRevision(current.connection, request, id),
+        );
+        if (!request.preview) {
+          toast.success(lastLine(output) || "Got revision");
+          await reloadPending();
+          bumpFiles();
+        }
+        return output;
+      } catch (caught) {
+        report(caught);
+        throw caught;
+      } finally {
+        endActivity(id);
+      }
+    },
+    [beginActivity, bumpFiles, endActivity, guard, reloadPending, report],
   );
 
   const reconcile = useCallback(async () => {
@@ -608,12 +647,13 @@ export function P4Provider({ children }: { children: ReactNode }) {
       const output = await guard(current.connection, () => p4Api.reconcile(current.connection, id));
       toast.success(lastLine(output) || "Reconciled");
       await reloadPending("default");
+      bumpFiles();
     } catch (caught) {
       report(caught);
     } finally {
       endActivity(id);
     }
-  }, [beginActivity, endActivity, guard, reloadPending, report]);
+  }, [beginActivity, bumpFiles, endActivity, guard, reloadPending, report]);
 
   const fileAction = useCallback(
     async (action: "edit" | "add" | "delete", paths: string[]) => {
@@ -624,13 +664,14 @@ export function P4Provider({ children }: { children: ReactNode }) {
       try {
         await guard(current.connection, () => p4Api.fileAction(current.connection, action, paths));
         await reloadPending("default");
+        bumpFiles();
       } catch (caught) {
         report(caught);
       } finally {
         endActivity(id);
       }
     },
-    [beginActivity, endActivity, guard, reloadPending, report],
+    [beginActivity, bumpFiles, endActivity, guard, reloadPending, report],
   );
 
   const loadSubmitted = useCallback(
@@ -853,6 +894,8 @@ export function P4Provider({ children }: { children: ReactNode }) {
       deleteSelectedShelf,
       revertUnchanged,
       sync,
+      getRevision,
+      filesEpoch,
       reconcile,
       fileAction,
       loadSubmitted,
@@ -881,7 +924,9 @@ export function P4Provider({ children }: { children: ReactNode }) {
       diffLoading,
       error,
       fileAction,
+      filesEpoch,
       filelog,
+      getRevision,
       listClients,
       listDir,
       listUsers,

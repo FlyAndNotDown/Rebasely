@@ -565,9 +565,6 @@ pub fn list_dir(connection: &P4Connection, relative: &str) -> AppResult<Vec<P4Di
     Ok(entries)
 }
 
-const FILE_MATCH_CAP: usize = 400;
-const WALK_CAP: usize = 120_000;
-
 pub fn search_files(connection: &P4Connection, query: &str) -> AppResult<P4FileSearch> {
     let needle = query.trim().to_lowercase();
     if needle.is_empty() {
@@ -580,7 +577,7 @@ pub fn search_files(connection: &P4Connection, query: &str) -> AppResult<P4FileS
     if !root.is_dir() {
         return Err(AppError::msg("Workspace folder was not found."));
     }
-    let (mut hits, truncated) = match_workspace_files(&root, &needle);
+    let mut hits = match_workspace_files(&root, &needle);
     let files: Vec<String> = hits
         .iter()
         .filter(|entry| !entry.dir)
@@ -611,27 +608,22 @@ pub fn search_files(connection: &P4Connection, query: &str) -> AppResult<P4FileS
         }
         files_done += 1;
     }
-    Ok(P4FileSearch { hits, truncated })
+    Ok(P4FileSearch {
+        hits,
+        truncated: false,
+    })
 }
 
-fn match_workspace_files(root: &Path, needle: &str) -> (Vec<P4DirEntry>, bool) {
+fn match_workspace_files(root: &Path, needle: &str) -> Vec<P4DirEntry> {
     let mut hits = Vec::new();
-    let mut files = 0usize;
-    let mut scanned = 0usize;
-    let mut truncated = false;
     let mut queue = VecDeque::new();
     queue.push_back(root.to_path_buf());
-    'walk: while let Some(dir) = queue.pop_front() {
+    while let Some(dir) = queue.pop_front() {
         let Ok(read) = fs::read_dir(&dir) else {
             continue;
         };
         let mut children = Vec::new();
         for entry in read.flatten() {
-            scanned += 1;
-            if scanned > WALK_CAP {
-                truncated = true;
-                break 'walk;
-            }
             let name = entry.file_name().to_string_lossy().into_owned();
             if name == "." || name == ".." {
                 continue;
@@ -669,11 +661,6 @@ fn match_workspace_files(root: &Path, needle: &str) -> (Vec<P4DirEntry>, bool) {
             if !matched {
                 continue;
             }
-            if files >= FILE_MATCH_CAP {
-                truncated = true;
-                break 'walk;
-            }
-            files += 1;
             hits.push(P4DirEntry {
                 name,
                 path: path.to_string_lossy().into_owned(),
@@ -683,7 +670,7 @@ fn match_workspace_files(root: &Path, needle: &str) -> (Vec<P4DirEntry>, bool) {
             });
         }
     }
-    (hits, truncated)
+    hits
 }
 
 fn plain_dir(name: &str, path: &Path) -> P4DirEntry {
@@ -919,7 +906,12 @@ fn status_of(record: &ZtagRecord) -> (String, String) {
     } else {
         ("local", "Not in the depot".to_string())
     };
-    let mut lines = vec![headline];
+    let depot = field(record, "depotFile");
+    let mut lines = Vec::new();
+    if depot.starts_with("//") {
+        lines.push(depot);
+    }
+    lines.push(headline);
     if let Some(ours) = ours {
         push_line(&mut lines, ours.to_string());
         let change = field(record, "change");
@@ -1111,14 +1103,278 @@ pub fn delete_shelf(connection: &P4Connection, change_id: &str) -> AppResult<()>
     Ok(())
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct P4GetRevision {
+    pub paths: Vec<String>,
+    pub mode: String,
+    pub value: String,
+    pub force: bool,
+    pub safe: bool,
+    pub changelist_files_only: bool,
+    pub remove_not_in_label: bool,
+    pub preview: bool,
+}
+
+#[derive(Clone, Copy, Default)]
+struct SyncFlags {
+    force: bool,
+    safe: bool,
+    preview: bool,
+}
+
 pub fn sync(
     connection: &P4Connection,
     paths: &[String],
+    progress: impl FnMut(&str),
+) -> AppResult<String> {
+    sync_paths(&env_for(connection), paths, SyncFlags::default(), progress)
+}
+
+pub fn get_revision(
+    connection: &P4Connection,
+    request: &P4GetRevision,
+    progress: impl FnMut(&str),
+) -> AppResult<String> {
+    if request.paths.is_empty() {
+        return Err(AppError::msg("Choose a file."));
+    }
+    let env = env_for(connection);
+    let (paths, note) = revision_targets(&env, request)?;
+    if paths.is_empty() {
+        return Ok(if note.is_empty() {
+            "Up to date.".to_string()
+        } else {
+            note
+        });
+    }
+    let mut output = sync_paths(
+        &env,
+        &paths,
+        SyncFlags {
+            force: request.force,
+            safe: request.safe,
+            preview: request.preview,
+        },
+        progress,
+    )?;
+    if !note.is_empty() {
+        if !output.is_empty() && !output.ends_with('\n') {
+            output.push('\n');
+        }
+        output.push_str(&note);
+    }
+    if output.trim().is_empty() {
+        output = "Up to date.".to_string();
+    }
+    Ok(output)
+}
+
+fn revision_targets(env: &P4Env, request: &P4GetRevision) -> AppResult<(Vec<String>, String)> {
+    let suffix = revision_suffix(&request.mode, &request.value, request.changelist_files_only)?;
+    if request.mode != "label" || request.remove_not_in_label {
+        let paths = request
+            .paths
+            .iter()
+            .map(|path| file_at(path, &suffix))
+            .collect();
+        return Ok((paths, String::new()));
+    }
+    let label = request.value.trim();
+    let mut paths = Vec::new();
+    let mut skipped = 0usize;
+    for path in &request.paths {
+        match file_rev_at_label(env, path, label)? {
+            Some(rev) => paths.push(file_at(path, &format!("#{rev}"))),
+            None => skipped += 1,
+        }
+    }
+    let note = if skipped == 0 {
+        String::new()
+    } else if paths.is_empty() {
+        "The file is not in that label, so it stays in the workspace.".to_string()
+    } else {
+        format!("{skipped} files are not in that label and stay in the workspace.")
+    };
+    Ok((paths, note))
+}
+
+fn file_rev_at_label(env: &P4Env, path: &str, label: &str) -> AppResult<Option<String>> {
+    let spec = file_at(path, &format!("@{label}"));
+    match run_ok(env, &["-ztag", "files", &spec], None) {
+        Ok(stdout) => Ok(parse_ztag(&stdout).into_iter().find_map(|record| {
+            let rev = field(&record, "rev");
+            if rev.is_empty() || !rev.chars().all(|ch| ch.is_ascii_digit()) {
+                None
+            } else {
+                Some(rev)
+            }
+        })),
+        Err(err) => {
+            let message = err.to_string();
+            if message == P4_LOGIN || !missing_label_file(&message) {
+                return Err(err);
+            }
+            Ok(None)
+        }
+    }
+}
+
+fn missing_label_file(message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    lower.contains("no such file") || lower.contains("not in label")
+}
+
+fn revision_suffix(mode: &str, value: &str, files_only: bool) -> AppResult<String> {
+    let value = value.trim();
+    match mode {
+        "latest" => Ok(String::new()),
+        "revision" => {
+            let rev = require_revision_number(value, "Enter a revision number.")?;
+            Ok(format!("#{rev}"))
+        }
+        "changelist" => {
+            let change = require_revision_number(value, "Enter a changelist number.")?;
+            if files_only {
+                Ok(format!("@{change},@{change}"))
+            } else {
+                Ok(format!("@{change}"))
+            }
+        }
+        "datetime" => Ok(format!("@{}", require_p4_datetime(value)?)),
+        "label" => {
+            if !valid_label(value) {
+                return Err(AppError::msg("Enter a label name."));
+            }
+            Ok(format!("@{value}"))
+        }
+        "workspace" => {
+            if !valid_client_name(value) {
+                return Err(AppError::msg("Enter a workspace name."));
+            }
+            Ok(format!("@{value}"))
+        }
+        _ => Err(AppError::msg("Choose how to specify the revision.")),
+    }
+}
+
+fn require_revision_number(value: &str, message: &str) -> AppResult<u64> {
+    if value.is_empty() || !value.chars().all(|ch| ch.is_ascii_digit()) {
+        return Err(AppError::msg(message.to_string()));
+    }
+    let number = value
+        .parse::<u64>()
+        .map_err(|_| AppError::msg(message.to_string()))?;
+    if number == 0 {
+        return Err(AppError::msg(message.to_string()));
+    }
+    Ok(number)
+}
+
+fn require_p4_datetime(value: &str) -> AppResult<String> {
+    if p4_datetime_ok(value) {
+        Ok(value.to_string())
+    } else {
+        Err(AppError::msg(
+            "Enter a date as yyyy/mm/dd or yyyy/mm/dd:hh:mm:ss.",
+        ))
+    }
+}
+
+fn p4_datetime_ok(value: &str) -> bool {
+    let (date, time) = match value.split_once(':') {
+        Some((date, rest)) => (date, Some(rest)),
+        None => (value, None),
+    };
+    let mut parts = date.split('/');
+    let year = parts.next();
+    let month = parts.next();
+    let day = parts.next();
+    if parts.next().is_some() {
+        return false;
+    }
+    let (Some(year), Some(month), Some(day)) = (year, month, day) else {
+        return false;
+    };
+    if year.len() != 4 || month.len() != 2 || day.len() != 2 {
+        return false;
+    }
+    let Ok(year) = year.parse::<u16>() else {
+        return false;
+    };
+    let Ok(month) = month.parse::<u8>() else {
+        return false;
+    };
+    let Ok(day) = day.parse::<u8>() else {
+        return false;
+    };
+    if year == 0 || !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return false;
+    }
+    let Some(time) = time else {
+        return true;
+    };
+    let mut clock = time.split(':');
+    let hour = clock.next();
+    let minute = clock.next();
+    let second = clock.next();
+    if clock.next().is_some() {
+        return false;
+    }
+    let (Some(hour), Some(minute), Some(second)) = (hour, minute, second) else {
+        return false;
+    };
+    if hour.len() != 2 || minute.len() != 2 || second.len() != 2 {
+        return false;
+    }
+    let Ok(hour) = hour.parse::<u8>() else {
+        return false;
+    };
+    let Ok(minute) = minute.parse::<u8>() else {
+        return false;
+    };
+    let Ok(second) = second.parse::<u8>() else {
+        return false;
+    };
+    hour <= 23 && minute <= 59 && second <= 59
+}
+
+fn valid_label(name: &str) -> bool {
+    (1..=1024).contains(&name.len())
+        && !name.starts_with('.')
+        && !name.starts_with('-')
+        && name
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' || ch == '.')
+}
+
+fn file_at(path: &str, suffix: &str) -> String {
+    if suffix.is_empty() {
+        path.to_string()
+    } else {
+        format!("{}{suffix}", escape_p4_path(path))
+    }
+}
+
+fn escape_p4_path(path: &str) -> String {
+    path.replace('%', "%25")
+        .replace('#', "%23")
+        .replace('@', "%40")
+        .replace('*', "%2A")
+}
+
+fn sync_paths(
+    env: &P4Env,
+    paths: &[String],
+    flags: SyncFlags,
     mut progress: impl FnMut(&str),
 ) -> AppResult<String> {
-    let env = env_for(connection);
+    if flags.preview {
+        progress("Previewing");
+        return run_owned(env, &sync_args(paths, false, false, flags), None);
+    }
     progress("Counting files");
-    let total = run_owned(&env, &sync_args(paths, false, true), None)
+    let total = run_owned(env, &sync_args(paths, false, true, flags), None)
         .ok()
         .as_deref()
         .and_then(sync_estimate_files);
@@ -1130,10 +1386,24 @@ pub fn sync(
     // progress indicator turns parallel transfer off.
     let mut transferred = 0_u64;
     let mut progress = progress;
-    match run_sync(&env, paths, true, total, &mut transferred, &mut progress) {
-        Err(err) if transferred == 0 && parallel_rejected(&err.to_string()) => {
-            run_sync(&env, paths, false, total, &mut transferred, &mut progress)
-        }
+    match run_sync(
+        env,
+        paths,
+        true,
+        total,
+        flags,
+        &mut transferred,
+        &mut progress,
+    ) {
+        Err(err) if transferred == 0 && parallel_rejected(&err.to_string()) => run_sync(
+            env,
+            paths,
+            false,
+            total,
+            flags,
+            &mut transferred,
+            &mut progress,
+        ),
         result => result,
     }
 }
@@ -1143,10 +1413,11 @@ fn run_sync(
     paths: &[String],
     parallel: bool,
     total: Option<u64>,
+    flags: SyncFlags,
     transferred: &mut u64,
     progress: &mut dyn FnMut(&str),
 ) -> AppResult<String> {
-    let args = sync_args(paths, parallel, false);
+    let args = sync_args(paths, parallel, false, flags);
     let refs: Vec<&str> = args.iter().map(String::as_str).collect();
     cli::run_p4_stream(env, &refs, &mut |line: String| {
         progress(&sync_progress_line(&line, total, transferred));
@@ -1164,12 +1435,20 @@ fn sync_progress_line(line: &str, total: Option<u64>, transferred: &mut u64) -> 
     line.to_string()
 }
 
-fn sync_args(paths: &[String], parallel: bool, estimate: bool) -> Vec<String> {
+fn sync_args(paths: &[String], parallel: bool, estimate: bool, flags: SyncFlags) -> Vec<String> {
     let mut args = vec!["sync".to_string()];
-    if estimate {
+    if flags.preview {
+        args.push("-n".to_string());
+    } else if estimate {
         args.push("-N".to_string());
     } else if parallel {
         args.push("--parallel=threads=4".to_string());
+    }
+    if flags.force {
+        args.push("-f".to_string());
+    }
+    if flags.safe {
+        args.push("-s".to_string());
     }
     args.extend(paths.iter().cloned());
     args
@@ -2221,6 +2500,54 @@ mod tests {
     }
 
     #[test]
+    fn depot_path_is_the_first_status_line() {
+        let (status, detail) = status_of(&record(&[
+            ("depotFile", "//depot/main/notes.bat"),
+            ("haveRev", "1"),
+            ("headRev", "1"),
+        ]));
+        assert_eq!(status, "current");
+        assert_eq!(
+            detail,
+            "//depot/main/notes.bat\nUp to date\nRevision 1"
+        );
+    }
+
+    #[test]
+    fn revision_specifiers_match_the_get_revision_dialog() {
+        assert_eq!(revision_suffix("latest", "", false).unwrap(), "");
+        assert_eq!(revision_suffix("revision", "12", false).unwrap(), "#12");
+        assert_eq!(
+            revision_suffix("changelist", "1200", false).unwrap(),
+            "@1200"
+        );
+        assert_eq!(
+            revision_suffix("changelist", "1200", true).unwrap(),
+            "@1200,@1200"
+        );
+        assert_eq!(
+            revision_suffix("datetime", "2026/10/16:14:30:00", false).unwrap(),
+            "@2026/10/16:14:30:00"
+        );
+        assert_eq!(
+            revision_suffix("datetime", "2026/10/16", false).unwrap(),
+            "@2026/10/16"
+        );
+        assert_eq!(
+            revision_suffix("label", "rel-1.0", false).unwrap(),
+            "@rel-1.0"
+        );
+        assert_eq!(
+            revision_suffix("workspace", "dev-workspace", false).unwrap(),
+            "@dev-workspace"
+        );
+        assert!(revision_suffix("revision", "0", false).is_err());
+        assert!(revision_suffix("datetime", "2026-10-16", false).is_err());
+        assert!(revision_suffix("label", "bad label", false).is_err());
+        assert_eq!(file_at(r"C:\work\a#b.txt", "#3"), r"C:\work\a%23b.txt#3");
+    }
+
+    #[test]
     fn description_search_matches_text_outside_the_loaded_page() {
         let change = P4Changelist {
             id: "900".to_string(),
@@ -2264,21 +2591,20 @@ mod tests {
         .unwrap();
         fs::create_dir_all(root.join(".cache")).unwrap();
 
-        let (hits, truncated) = match_workspace_files(&root, "notes");
-        assert!(!truncated);
+        let hits = match_workspace_files(&root, "notes");
         assert!(hits
             .iter()
             .any(|hit| !hit.dir && hit.name == "notes.bat"));
         assert!(hits.iter().all(|hit| !hit.path.contains("secret.txt")));
 
-        let (folders, _) = match_workspace_files(&root, "cache");
+        let folders = match_workspace_files(&root, "cache");
         assert!(folders
             .iter()
             .any(|hit| hit.dir && hit.name.eq_ignore_ascii_case(".cache")));
 
-        let (generated, _) = match_workspace_files(&root, "secret");
+        let generated = match_workspace_files(&root, "secret");
         assert!(generated.is_empty());
-        let (named, _) = match_workspace_files(&root, "intermediate");
+        let named = match_workspace_files(&root, "intermediate");
         assert!(named
             .iter()
             .any(|hit| hit.dir && hit.name.eq_ignore_ascii_case("Intermediate")));

@@ -175,7 +175,6 @@ export function FilesBrowser() {
                   nodes={searchNodes}
                   toPath={(relative) => relative}
                   selected={path}
-                  truncated={fileQuery.result?.truncated}
                   onOpenFile={(next) => {
                     setPath(next);
                     setPin(null);

@@ -1170,6 +1170,23 @@ async fn p4_delete_shelf(connection: p4::P4Connection, change_id: String) -> App
 }
 
 #[tauri::command]
+async fn p4_get_revision(
+    connection: p4::P4Connection,
+    request: p4::P4GetRevision,
+    activity_id: Option<String>,
+    app: AppHandle,
+) -> AppResult<String> {
+    blocking(move || {
+        p4::get_revision(
+            &connection,
+            &request,
+            progress_sink(&app, activity_id.as_deref()),
+        )
+    })
+    .await
+}
+
+#[tauri::command]
 async fn p4_sync(
     connection: p4::P4Connection,
     paths: Vec<String>,
@@ -1578,6 +1595,7 @@ pub fn run() {
             p4_shelve,
             p4_unshelve,
             p4_delete_shelf,
+            p4_get_revision,
             p4_sync,
             p4_reconcile,
             p4_file_action,

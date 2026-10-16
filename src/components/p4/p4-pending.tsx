@@ -2,6 +2,7 @@ import { useState } from "react";
 import { ChevronDownIcon, PlusIcon } from "lucide-react";
 import { ChangeBadge } from "@/components/p4/change-badge";
 import { FileStatusIcon } from "@/components/p4/file-status-icon";
+import { FileStatusTip, fileStatusText } from "@/components/p4/file-status-tip";
 import { P4Diff } from "@/components/p4/p4-diff";
 import { Button } from "@/components/ui/button";
 import {
@@ -242,7 +243,11 @@ function FileGroup({
         ? files.map((file) => {
             const active = file.depotPath === selectedPath && file.shelved === selectedShelved;
             return (
-              <HoverTip key={`${file.depotPath}:${file.shelved ? "shelf" : "open"}`} label={fileTip(file)}>
+              <HoverTip
+                key={`${file.depotPath}:${file.shelved ? "shelf" : "open"}`}
+                className="max-w-lg"
+                label={fileTip(file) ? <FileStatusTip text={fileTip(file)} /> : undefined}
+              >
                 <button
                   type="button"
                   className={cn(
@@ -263,9 +268,7 @@ function FileGroup({
 }
 
 function fileTip(file: { depotPath: string; detail: string; action: string }) {
-  const detail = file.detail || file.action;
-  if (!detail) return file.depotPath;
-  return `${detail}\n${file.depotPath}`;
+  return fileStatusText(file.depotPath, file.detail, file.action);
 }
 
 function actionStatus(action: string) {

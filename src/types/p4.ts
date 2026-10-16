@@ -65,6 +65,19 @@ export interface P4FileSearch {
   truncated: boolean;
 }
 
+export type P4RevisionMode = "latest" | "revision" | "changelist" | "datetime" | "label" | "workspace";
+
+export interface P4GetRevision {
+  paths: string[];
+  mode: P4RevisionMode;
+  value: string;
+  force: boolean;
+  safe: boolean;
+  changelistFilesOnly: boolean;
+  removeNotInLabel: boolean;
+  preview: boolean;
+}
+
 export interface P4Auth {
   port: string;
   user: string;

@@ -12,7 +12,7 @@ export interface FileTreeEntry {
   dir: boolean;
   ignored?: boolean;
   icon?: ReactNode;
-  iconTitle?: string;
+  iconTitle?: ReactNode;
 }
 
 export function FileTree({
@@ -81,13 +81,13 @@ export function FileTree({
           <div key={item.path}>
             {menu && !item.dir ? (
               <ContextMenu>
-                <HoverTip label={tip}>
+                <HoverTip label={tip} className="max-w-lg">
                   <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
                 </HoverTip>
                 {menu(item)}
               </ContextMenu>
             ) : (
-              <HoverTip label={tip}>{row}</HoverTip>
+              <HoverTip label={tip} className="max-w-lg">{row}</HoverTip>
             )}
             {expanded ? (
               <FileTree
@@ -177,7 +177,6 @@ export function FilteredFileTree({
   onLoadDir,
   menu,
   decorate,
-  truncated,
 }: {
   nodes: SearchNode[];
   toPath: (relative: string) => string;
@@ -186,7 +185,6 @@ export function FilteredFileTree({
   onLoadDir?: (path: string) => Promise<FileTreeEntry[] | null>;
   menu?: (entry: FileTreeEntry) => ReactNode;
   decorate?: (node: SearchNode, entry: FileTreeEntry) => FileTreeEntry;
-  truncated?: boolean;
 }) {
   const [seen, setSeen] = useState(nodes);
   const [generation, setGeneration] = useState(0);
@@ -244,9 +242,6 @@ export function FilteredFileTree({
         onOpenFile={onOpenFile}
         menu={menu}
       />
-      {truncated ? (
-        <p className="px-3 py-2 text-xs text-muted-foreground">Showing the first 400 matches.</p>
-      ) : null}
     </>
   );
 }

@@ -57,10 +57,12 @@ function TooltipContent({
 function HoverTip({
   label,
   side,
+  className,
   children,
 }: {
   label?: ReactNode
   side?: "top" | "right" | "bottom" | "left"
+  className?: string
   children: ReactElement
 }) {
   if (label == null || label === false || label === "") return children
@@ -71,7 +73,10 @@ function HoverTip({
         side={side}
         align="start"
         sideOffset={6}
-        className="max-w-sm items-start text-left whitespace-pre-line wrap-break-word"
+        className={cn(
+          "max-w-sm items-start text-left whitespace-pre-line wrap-break-word",
+          className,
+        )}
       >
         {label}
       </TooltipContent>

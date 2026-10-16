@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { DownloadIcon, FilePenIcon, PlusIcon, Trash2Icon } from "lucide-react";
+import { DownloadIcon, FilePenIcon, HistoryIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { toast } from "sonner";
 import { AuthorAvatar } from "@/components/author-avatar";
 import { FileTree, FileTreeFilter, FilteredFileTree, type FileTreeEntry } from "@/components/file-tree";
 import { ChangeBadge } from "@/components/p4/change-badge";
 import { FileStatusIcon } from "@/components/p4/file-status-icon";
+import { FileStatusTip } from "@/components/p4/file-status-tip";
+import { P4GetRevisionDialog } from "@/components/p4/p4-get-revision-dialog";
 import { P4Diff } from "@/components/p4/p4-diff";
 import { ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from "@/components/ui/context-menu";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
@@ -50,6 +52,7 @@ export function P4Files() {
       }))
       .filter((node) => node.relative);
   }, [fileQuery.result, root]);
+  const [revisionPath, setRevisionPath] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [history, setHistory] = useState<P4Revision[] | null>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -112,8 +115,37 @@ export function P4Files() {
     }
   }
 
+  function fileMenu(path: string) {
+    return (
+      <ContextMenuContent className="w-48">
+        <ContextMenuItem onClick={() => void p4.sync([path])}>
+          <DownloadIcon />
+          Get latest
+        </ContextMenuItem>
+        <ContextMenuItem onClick={() => setRevisionPath(path)}>
+          <HistoryIcon />
+          Get revision
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem onClick={() => void p4.fileAction("edit", [path])}>
+          <FilePenIcon />
+          Check out
+        </ContextMenuItem>
+        <ContextMenuItem onClick={() => void p4.fileAction("add", [path])}>
+          <PlusIcon />
+          Mark for add
+        </ContextMenuItem>
+        <ContextMenuItem onClick={() => void p4.fileAction("delete", [path])}>
+          <Trash2Icon />
+          Mark for delete
+        </ContextMenuItem>
+      </ContextMenuContent>
+    );
+  }
+
   return (
-    <ResizablePanelGroup orientation="horizontal" className="min-h-0 min-w-0 flex-1">
+    <>
+      <ResizablePanelGroup orientation="horizontal" className="min-h-0 min-w-0 flex-1">
       <ResizablePanel id="p4-tree" defaultSize="28%" minSize="18%" maxSize="46%">
         <div className="flex h-full min-h-0 flex-col">
           <FileTreeFilter title="Workspace" query={query} onQuery={setQuery} />
@@ -125,27 +157,7 @@ export function P4Files() {
                     key={root}
                     selected={selected}
                     onSelect={choose}
-                    menu={(path) => (
-                  <ContextMenuContent className="w-48">
-                    <ContextMenuItem onClick={() => void p4.sync([path])}>
-                      <DownloadIcon />
-                      Get latest
-                    </ContextMenuItem>
-                    <ContextMenuSeparator />
-                    <ContextMenuItem onClick={() => void p4.fileAction("edit", [path])}>
-                      <FilePenIcon />
-                      Check out
-                    </ContextMenuItem>
-                    <ContextMenuItem onClick={() => void p4.fileAction("add", [path])}>
-                      <PlusIcon />
-                      Mark for add
-                    </ContextMenuItem>
-                    <ContextMenuItem onClick={() => void p4.fileAction("delete", [path])}>
-                      <Trash2Icon />
-                      Mark for delete
-                    </ContextMenuItem>
-                  </ContextMenuContent>
-                )}
+                    menu={fileMenu}
                   />
                 </div>
                 {fileQuery.active ? (
@@ -157,11 +169,10 @@ export function P4Files() {
                       toPath={(relative) => joinRoot(root, relative)}
                       selected={selected}
                       onOpenFile={choose}
-                      truncated={fileQuery.result?.truncated}
                       decorate={(node, entry) => ({
                         ...entry,
                         icon: node.dir ? undefined : <FileStatusIcon status={node.status} />,
-                        iconTitle: node.detail || undefined,
+                        iconTitle: node.detail ? <FileStatusTip text={node.detail} /> : undefined,
                       })}
                       onLoadDir={async (path) => {
                         try {
@@ -173,27 +184,7 @@ export function P4Files() {
                           return null;
                         }
                       }}
-                      menu={(entry) => (
-                        <ContextMenuContent className="w-48">
-                          <ContextMenuItem onClick={() => void p4.sync([entry.path])}>
-                            <DownloadIcon />
-                            Get latest
-                          </ContextMenuItem>
-                          <ContextMenuSeparator />
-                          <ContextMenuItem onClick={() => void p4.fileAction("edit", [entry.path])}>
-                            <FilePenIcon />
-                            Check out
-                          </ContextMenuItem>
-                          <ContextMenuItem onClick={() => void p4.fileAction("add", [entry.path])}>
-                            <PlusIcon />
-                            Mark for add
-                          </ContextMenuItem>
-                          <ContextMenuItem onClick={() => void p4.fileAction("delete", [entry.path])}>
-                            <Trash2Icon />
-                            Mark for delete
-                          </ContextMenuItem>
-                        </ContextMenuContent>
-                      )}
+                      menu={(entry) => fileMenu(entry.path)}
                     />
                   )
                 ) : null}
@@ -267,7 +258,9 @@ export function P4Files() {
           )}
         </div>
       </ResizablePanel>
-    </ResizablePanelGroup>
+      </ResizablePanelGroup>
+      <P4GetRevisionDialog path={revisionPath} onOpenChange={(open) => !open && setRevisionPath(null)} />
+    </>
   );
 }
 
@@ -280,11 +273,16 @@ function WorkspaceTree({
   onSelect: (path: string) => void;
   menu: (path: string) => ReactNode;
 }) {
-  const { connection, listDir } = useP4();
+  const { connection, listDir, filesEpoch } = useP4();
   const root = connection?.root ?? "";
   const [entries, setEntries] = useState<Record<string, FileTreeEntry[]>>({});
   const [open, setOpen] = useState<Set<string>>(() => new Set());
   const [failed, setFailed] = useState(false);
+  const openRef = useRef(open);
+  const epochRef = useRef(filesEpoch);
+  useEffect(() => {
+    openRef.current = open;
+  }, [open]);
 
   useEffect(() => {
     let live = true;
@@ -299,6 +297,36 @@ function WorkspaceTree({
       live = false;
     };
   }, [listDir]);
+
+  useEffect(() => {
+    if (epochRef.current === filesEpoch) return;
+    epochRef.current = filesEpoch;
+    let live = true;
+    const dirs = ["", ...openRef.current];
+    void Promise.all(
+      [...new Set(dirs)].map(async (dir) => {
+        try {
+          const next = await listDir(relativeToRoot(root, dir));
+          return [dir, next.map(presentFile)] as const;
+        } catch {
+          return null;
+        }
+      }),
+    ).then((pairs) => {
+      if (!live) return;
+      setEntries((current) => {
+        const next = { ...current };
+        for (const pair of pairs) {
+          if (!pair) continue;
+          next[pair[0]] = pair[1];
+        }
+        return next;
+      });
+    });
+    return () => {
+      live = false;
+    };
+  }, [filesEpoch, listDir, root]);
 
   async function toggle(path: string) {
     if (open.has(path)) {
@@ -343,6 +371,6 @@ function presentFile(entry: P4DirEntry): FileTreeEntry {
     name: entry.name,
     dir: entry.dir,
     icon: entry.dir ? undefined : <FileStatusIcon status={entry.status} />,
-    iconTitle: entry.detail || undefined,
+    iconTitle: entry.detail ? <FileStatusTip text={entry.detail} /> : undefined,
   };
 }

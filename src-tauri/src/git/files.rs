@@ -95,8 +95,6 @@ pub struct FileSearch {
     pub truncated: bool,
 }
 
-const FILE_MATCH_CAP: usize = 400;
-
 pub fn search_files(repo: &Repository, query: &str) -> AppResult<FileSearch> {
     let needle = query.trim().to_lowercase();
     if needle.is_empty() {
@@ -117,36 +115,30 @@ pub fn search_files(repo: &Repository, query: &str) -> AppResult<FileSearch> {
 fn hits_from_paths(paths: impl Iterator<Item = String>, needle: &str) -> FileSearch {
     let mut files = Vec::new();
     let mut dirs = BTreeSet::new();
-    let mut truncated = false;
     for path in paths {
         if path.is_empty() {
             continue;
         }
         let name = path.rsplit('/').next().unwrap_or(&path);
         if name.to_lowercase().contains(needle) {
-            if files.len() >= FILE_MATCH_CAP {
-                truncated = true;
-            } else {
-                files.push(FileSearchHit {
-                    path: path.clone(),
-                    dir: false,
-                });
-            }
+            files.push(FileSearchHit {
+                path: path.clone(),
+                dir: false,
+            });
         }
         collect_matching_dirs(&path, needle, &mut dirs);
     }
     let mut hits = files;
-    for (dir_count, dir) in dirs.into_iter().enumerate() {
-        if dir_count >= FILE_MATCH_CAP {
-            truncated = true;
-            break;
-        }
+    for dir in dirs {
         hits.push(FileSearchHit {
             path: dir,
             dir: true,
         });
     }
-    FileSearch { hits, truncated }
+    FileSearch {
+        hits,
+        truncated: false,
+    }
 }
 
 fn collect_matching_dirs(path: &str, needle: &str, dirs: &mut BTreeSet<String>) {
