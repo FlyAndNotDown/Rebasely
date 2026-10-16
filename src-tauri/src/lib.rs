@@ -14,9 +14,11 @@ mod watch;
 mod window_state;
 
 use std::path::Path;
+use std::sync::Once;
 
 use serde::Serialize;
 use tauri::image::Image;
+use tauri::webview::PageLoadEvent;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 const APP_ICON_PNG: &[u8] = include_bytes!("../icons/icon.png");
@@ -1452,6 +1454,35 @@ fn macos_menu<R: tauri::Runtime>(app: &AppHandle<R>) -> tauri::Result<tauri::men
     Menu::with_items(app, &[&app_menu, &edit_menu, &window_menu])
 }
 
+fn reveal_main_window(show: impl FnOnce()) {
+    static ONCE: Once = Once::new();
+    ONCE.call_once(show);
+}
+
+/// WebView2 opens its own find, print, and reload UI for Ctrl+F, Ctrl+P, F5,
+/// and the other browser accelerators. Those never reach the page, so the
+/// setting has to be turned off on the webview itself.
+#[cfg(windows)]
+fn silence_browser_shortcuts(window: &tauri::WebviewWindow) {
+    use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Settings3;
+    use windows_core::Interface;
+    let _ = window.with_webview(|webview| unsafe {
+        let Ok(core) = webview.controller().CoreWebView2() else {
+            return;
+        };
+        let Ok(settings) = core.Settings() else {
+            return;
+        };
+        let Ok(settings) = settings.cast::<ICoreWebView2Settings3>() else {
+            return;
+        };
+        let _ = settings.SetAreBrowserAcceleratorKeysEnabled(false);
+    });
+}
+
+#[cfg(not(windows))]
+fn silence_browser_shortcuts(_window: &tauri::WebviewWindow) {}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default()
@@ -1460,6 +1491,16 @@ pub fn run() {
     #[cfg(target_os = "macos")]
     let builder = builder.menu(|app| macos_menu(app));
     builder
+        .on_page_load(|webview, payload| {
+            if payload.event() != PageLoadEvent::Finished || payload.url().scheme() == "about" {
+                return;
+            }
+            let window = webview.window();
+            reveal_main_window(|| {
+                let _ = window.show();
+                let _ = window.set_focus();
+            });
+        })
         .setup(|app| {
             if let Ok(prefs) = prefs::load_prefs(app.handle()) {
                 git::set_git_executable(&prefs.git_path);
@@ -1473,8 +1514,18 @@ pub fn run() {
                 }
                 window_state::restore(&window, app.handle());
                 window_state::watch(&window, app.handle());
-                let _ = window.show();
-                let _ = window.set_focus();
+                silence_browser_shortcuts(&window);
+                // The page normally reveals the window. This covers a load that never finishes.
+                let app_handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_secs(12));
+                    if let Some(window) = app_handle.get_webview_window("main") {
+                        reveal_main_window(|| {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        });
+                    }
+                });
             }
             Ok(())
         })
