@@ -78,7 +78,7 @@ export function CommandCenter() {
     if (perforceOpen) {
       list.push(
         { id: "view-pending", label: "Go to Pending", group: "Navigate", shortcut: "viewChanges", run: () => p4.setView("pending") },
-        { id: "view-submitted", label: "Go to Submitted", group: "Navigate", shortcut: "viewHistory", run: () => p4.setView("submitted") },
+        { id: "view-submitted", label: "Go to History", group: "Navigate", shortcut: "viewHistory", run: () => p4.setView("submitted") },
         { id: "view-workspace", label: "Go to Workspace", group: "Navigate", shortcut: "viewStash", run: () => p4.setView("workspace") },
         { id: "sync", label: "Get latest", group: "Workspace", shortcut: "fetch", run: () => void p4.sync() },
         { id: "reconcile", label: "Reconcile offline work", group: "Workspace", run: () => void p4.reconcile() },

@@ -17,7 +17,7 @@ const itemMeta: Record<View, { label: string; icon: typeof CircleDotIcon }> = {
 
 const perforceItems: { id: P4View; label: string; icon: typeof CircleDotIcon }[] = [
   { id: "pending", label: "Pending", icon: CircleDotIcon },
-  { id: "submitted", label: "Submitted", icon: HistoryIcon },
+  { id: "submitted", label: "History", icon: HistoryIcon },
   { id: "workspace", label: "Workspace", icon: FolderTreeIcon },
 ];
 

@@ -255,7 +255,7 @@ export function P4Submitted() {
                 <HistorySkeleton rows={8} label={needle ? "Searching changelists" : "Loading changelists"} />
               ) : (
                 <p className="p-4 text-sm text-muted-foreground">
-                  {needle ? "No matching changelists." : "No submitted changelists."}
+                  {needle ? "No matching changelists." : "No changelists."}
                 </p>
               )
             ) : (

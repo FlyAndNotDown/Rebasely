@@ -28,6 +28,7 @@ import type {
   P4File,
   P4GetRevision,
   P4Revision,
+  P4StreamOption,
 } from "@/types/p4";
 
 export type P4View = "pending" | "submitted" | "workspace";
@@ -103,6 +104,7 @@ interface P4ContextValue {
   setSubmittedFilter: (user: string, client: string) => void;
   listUsers: () => Promise<string[]>;
   listClients: (user: string) => Promise<string[]>;
+  listStreams: () => Promise<P4StreamOption[]>;
   selectSubmitted: (id: string) => void;
   listDir: (relative: string) => Promise<P4DirEntry[]>;
   filelog: (path: string) => Promise<P4Revision[]>;
@@ -310,8 +312,8 @@ export function P4Provider({ children }: { children: ReactNode }) {
           selectedSubmitted: previous?.selectedSubmitted ?? null,
           submittedDetail: previous?.submittedDetail ?? null,
           submittedDiffs: previous?.submittedDiffs ?? [],
-          submittedUser: previous?.submittedUser ?? opened.connection.user,
-          submittedClient: previous?.submittedClient ?? opened.connection.client,
+          submittedUser: previous?.submittedUser ?? "",
+          submittedClient: previous?.submittedClient ?? "",
           view: previous?.view ?? "pending",
         };
         cache.current.set(tabId, next);
@@ -739,6 +741,19 @@ export function P4Provider({ children }: { children: ReactNode }) {
     return guard(current.connection, () => p4Api.listClients(current.connection, user));
   }, [guard]);
 
+  const listStreams = useCallback(async () => {
+    const current = sessionRef.current;
+    if (!current) return [];
+    return guard(current.connection, () =>
+      p4Api.listStreams({
+        port: current.connection.port,
+        user: current.connection.user,
+        password: "",
+        charset: current.connection.charset,
+      }),
+    );
+  }, [guard]);
+
   const selectSubmitted = useCallback(
     async (id: string) => {
       const current = sessionRef.current;
@@ -904,6 +919,7 @@ export function P4Provider({ children }: { children: ReactNode }) {
       setSubmittedFilter,
       listUsers,
       listClients,
+      listStreams,
       selectSubmitted,
       listDir,
       filelog,
@@ -929,6 +945,7 @@ export function P4Provider({ children }: { children: ReactNode }) {
       getRevision,
       listClients,
       listDir,
+      listStreams,
       listUsers,
       loadSubmitted,
       loading,

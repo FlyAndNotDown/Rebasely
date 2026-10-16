@@ -13,12 +13,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Textarea } from "@/components/ui/textarea";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { changeSummary, depotBase } from "@/lib/p4";
@@ -133,50 +127,6 @@ export function P4Pending() {
                     >
                       Revert
                     </Button>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button type="button" size="sm" variant="ghost">
-                          More
-                          <ChevronDownIcon />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="start">
-                        <DropdownMenuItem
-                          disabled={!p4.description.trim()}
-                          onClick={() => void p4.saveSelected()}
-                        >
-                          {numbered ? "Save description" : "Move to new changelist"}
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          disabled={!selected?.shelved}
-                          onClick={() => void p4.unshelveSelected()}
-                        >
-                          Unshelve
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          disabled={!selected?.shelved}
-                          onClick={() => void p4.deleteSelectedShelf()}
-                        >
-                          Delete shelf
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => void p4.revertUnchanged()}>
-                          Revert unchanged files
-                        </DropdownMenuItem>
-                        {p4.pending
-                          .filter((change) => change.id !== p4.selectedChange)
-                          .map((change) => (
-                            <DropdownMenuItem
-                              key={change.id}
-                              disabled={!p4.selectedFile || p4.selectedShelved}
-                              onClick={() =>
-                                p4.selectedFile && void p4.moveFiles([p4.selectedFile], change.id)
-                              }
-                            >
-                              Move file to {change.id === "default" ? "default" : `#${change.id}`}
-                            </DropdownMenuItem>
-                          ))}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
                   </div>
                 </div>
               </div>

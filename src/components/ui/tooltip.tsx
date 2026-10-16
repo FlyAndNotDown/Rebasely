@@ -7,12 +7,14 @@ import { Tooltip as TooltipPrimitive } from "radix-ui"
 
 function TooltipProvider({
   delayDuration = 0,
+  skipDelayDuration = 0,
   ...props
 }: React.ComponentProps<typeof TooltipPrimitive.Provider>) {
   return (
     <TooltipPrimitive.Provider
       data-slot="tooltip-provider"
       delayDuration={delayDuration}
+      skipDelayDuration={skipDelayDuration}
       {...props}
     />
   )
@@ -67,7 +69,7 @@ function HoverTip({
 }) {
   if (label == null || label === false || label === "") return children
   return (
-    <Tooltip>
+    <Tooltip delayDuration={1000}>
       <TooltipTrigger asChild>{children}</TooltipTrigger>
       <TooltipContent
         side={side}
