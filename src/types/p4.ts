@@ -71,6 +71,7 @@ export interface P4DirEntry {
 export interface P4FileSearch {
   hits: P4DirEntry[];
   truncated: boolean;
+  scope: string;
 }
 
 export type P4RevisionMode = "latest" | "revision" | "changelist" | "datetime" | "label" | "workspace";

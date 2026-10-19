@@ -75,6 +75,11 @@ export const p4Api = {
     call<P4Revision[]>("p4_filelog", { connection, path }),
   listDir: (connection: P4Connection, relative: string) =>
     call<P4DirEntry[]>("p4_list_dir", { connection, relative }),
+  listDepot: (connection: P4Connection, path: string) =>
+    call<P4DirEntry[]>("p4_list_depot", { connection, path }),
+  searchDepot: (connection: P4Connection, query: string) =>
+    call<P4FileSearch>("p4_search_depot", { connection, query }),
+  cancelDepotSearch: () => call<void>("p4_cancel_depot_search"),
   searchFiles: (connection: P4Connection, query: string) =>
     call<P4FileSearch>("p4_search_files", { connection, query }),
   saveWorkspace: (connection: P4Connection, root: string, stream: string) =>

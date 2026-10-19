@@ -53,7 +53,7 @@ export function FileStatusTip({ text }: { text: string }) {
 
 function iconFor(line: string): LucideIcon {
   if (line.startsWith("//")) return FolderTreeIcon;
-  if (line.startsWith("Changelist ")) return HashIcon;
+  if (line.startsWith("Changelist ") || line.startsWith("Your changelist ")) return HashIcon;
   if (line.startsWith("Have revision ")) return HardDriveIcon;
   if (line.startsWith("Head revision ")) return CloudIcon;
   if (line.startsWith("Revision ")) return HistoryIcon;

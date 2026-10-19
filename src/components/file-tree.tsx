@@ -113,14 +113,18 @@ export function FileTreeFilter({
   title,
   query,
   onQuery,
+  leading,
+  placeholder = "Filter files",
 }: {
   title: string;
   query: string;
   onQuery: (value: string) => void;
+  leading?: ReactNode;
+  placeholder?: string;
 }) {
   return (
     <div className="flex h-10 shrink-0 items-center gap-2 border-b px-2">
-      <span className="shrink-0 px-1 text-sm font-medium">{title}</span>
+      {leading ?? <span className="shrink-0 px-1 text-sm font-medium">{title}</span>}
       <div className="relative min-w-0 flex-1">
         <SearchIcon className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground" />
         <Input
@@ -132,7 +136,7 @@ export function FileTreeFilter({
               onQuery("");
             }
           }}
-          placeholder="Filter files"
+          placeholder={placeholder}
           aria-label={`Filter ${title}`}
           spellCheck={false}
           className="h-7 pl-7"

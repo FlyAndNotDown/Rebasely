@@ -26,6 +26,7 @@ import type {
   P4Connection,
   P4DirEntry,
   P4File,
+  P4FileSearch,
   P4GetRevision,
   P4ResolveView,
   P4Revision,
@@ -110,6 +111,8 @@ interface P4ContextValue {
   listStreams: () => Promise<P4StreamOption[]>;
   selectSubmitted: (id: string) => void;
   listDir: (relative: string) => Promise<P4DirEntry[]>;
+  listDepot: (path: string) => Promise<P4DirEntry[]>;
+  searchDepot: (query: string) => Promise<P4FileSearch | null>;
   filelog: (path: string) => Promise<P4Revision[]>;
   revisionDiff: (depotPath: string, rev: string) => Promise<FileDiff | null>;
   searchSubmitted: (
@@ -818,6 +821,24 @@ export function P4Provider({ children }: { children: ReactNode }) {
     [guard],
   );
 
+  const listDepot = useCallback(
+    async (path: string) => {
+      const current = sessionRef.current;
+      if (!current) return [];
+      return guard(current.connection, () => p4Api.listDepot(current.connection, path));
+    },
+    [guard],
+  );
+
+  const searchDepot = useCallback(
+    async (query: string) => {
+      const current = sessionRef.current;
+      if (!current) return null;
+      return guard(current.connection, () => p4Api.searchDepot(current.connection, query));
+    },
+    [guard],
+  );
+
   const filelog = useCallback(
     async (path: string) => {
       const current = sessionRef.current;
@@ -957,6 +978,8 @@ export function P4Provider({ children }: { children: ReactNode }) {
       listStreams,
       selectSubmitted,
       listDir,
+      listDepot,
+      searchDepot,
       filelog,
       revisionDiff,
       searchSubmitted,
@@ -982,6 +1005,8 @@ export function P4Provider({ children }: { children: ReactNode }) {
       getRevision,
       listClients,
       listDir,
+      listDepot,
+      searchDepot,
       listStreams,
       listUsers,
       loadSubmitted,

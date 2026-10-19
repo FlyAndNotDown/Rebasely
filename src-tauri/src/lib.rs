@@ -1074,6 +1074,27 @@ async fn p4_list_dir(
 }
 
 #[tauri::command]
+async fn p4_list_depot(
+    connection: p4::P4Connection,
+    path: String,
+) -> AppResult<Vec<p4::P4DirEntry>> {
+    blocking(move || p4::list_depot(&connection, &path)).await
+}
+
+#[tauri::command]
+async fn p4_search_depot(
+    connection: p4::P4Connection,
+    query: String,
+) -> AppResult<p4::P4FileSearch> {
+    blocking(move || p4::search_depot(&connection, &query)).await
+}
+
+#[tauri::command]
+async fn p4_cancel_depot_search() {
+    p4::cancel_depot_search();
+}
+
+#[tauri::command]
 async fn p4_search_files(
     connection: p4::P4Connection,
     query: String,
@@ -1651,6 +1672,9 @@ pub fn run() {
             p4_revision_diff,
             p4_filelog,
             p4_list_dir,
+            p4_list_depot,
+            p4_search_depot,
+            p4_cancel_depot_search,
             p4_search_files,
             p4_search_submitted,
             p4_save_workspace,

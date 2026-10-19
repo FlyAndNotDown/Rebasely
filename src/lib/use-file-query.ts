@@ -1,6 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 
-export function useFileQuery<T>(scope: string, query: string, run: (query: string) => Promise<T>) {
+export function useFileQuery<T>(
+  scope: string,
+  query: string,
+  run: (query: string) => Promise<T>,
+  delay = 200,
+) {
   const [result, setResult] = useState<{ scope: string; query: string; value: T } | null>(null);
   const [pending, setPending] = useState(false);
   const [settled, setSettled] = useState("");
@@ -26,12 +31,12 @@ export function useFileQuery<T>(scope: string, query: string, run: (query: strin
         .finally(() => {
           if (live) setPending(false);
         });
-    }, 200);
+    }, delay);
     return () => {
       live = false;
       window.clearTimeout(timer);
     };
-  }, [needle, scope]);
+  }, [needle, scope, delay]);
 
   const current = result?.query === needle && result.scope === scope;
   return {

@@ -8,6 +8,7 @@ import { FileStatusIcon } from "@/components/p4/file-status-icon";
 import { FileStatusTip } from "@/components/p4/file-status-tip";
 import { P4GetRevisionDialog } from "@/components/p4/p4-get-revision-dialog";
 import { P4Diff } from "@/components/p4/p4-diff";
+import { Button } from "@/components/ui/button";
 import { ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from "@/components/ui/context-menu";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { formatAbsoluteTime, formatExactTime } from "@/lib/format";
@@ -26,32 +27,39 @@ export function P4Files() {
   const p4 = useP4();
   const root = p4.connection?.root ?? "";
   const [query, setQuery] = useState("");
+  const [mode, setMode] = useState<"workspace" | "depot">("workspace");
   const connection = p4.connection;
   const searchFiles = useCallback(
     async (needle: string) => {
-      if (!connection) return { hits: [], truncated: false };
+      if (!connection) return { hits: [], truncated: false, scope: "" };
       try {
-        return await p4Api.searchFiles(connection, needle);
+        return mode === "depot"
+          ? await p4Api.searchDepot(connection, needle)
+          : await p4Api.searchFiles(connection, needle);
       } catch (caught) {
         const message = errorMessage(caught);
         if (message && message !== "Login cancelled") toast.error(message);
         throw caught;
       }
     },
-    [connection],
+    [connection, mode],
   );
-  const fileQuery = useFileQuery(connection?.root ?? "", query, searchFiles);
+  const fileQuery = useFileQuery(`${mode}:${root}`, query, searchFiles, mode === "depot" ? 450 : 200);
+  useEffect(() => {
+    if (mode === "depot" && query.trim()) return;
+    void p4Api.cancelDepotSearch();
+  }, [mode, query]);
   const searchNodes = useMemo<SearchNode[]>(() => {
     if (!fileQuery.result) return [];
     return fileQuery.result.hits
       .map((hit) => ({
-        relative: relativeToRoot(root, hit.path),
+        relative: mode === "depot" ? hit.path.replace(/^\/+/, "") : relativeToRoot(root, hit.path),
         dir: hit.dir,
         status: hit.status,
         detail: hit.detail,
       }))
       .filter((node) => node.relative);
-  }, [fileQuery.result, root]);
+  }, [fileQuery.result, mode, root]);
   const [revisionPath, setRevisionPath] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [history, setHistory] = useState<P4Revision[] | null>(null);
@@ -148,44 +156,76 @@ export function P4Files() {
       <ResizablePanelGroup orientation="horizontal" className="min-h-0 min-w-0 flex-1">
       <ResizablePanel id="p4-tree" defaultSize="28%" minSize="18%" maxSize="46%">
         <div className="flex h-full min-h-0 flex-col">
-          <FileTreeFilter title="Workspace" query={query} onQuery={setQuery} />
+          <FileTreeFilter
+            title={mode === "depot" ? "Depot" : "Workspace"}
+            query={query}
+            onQuery={setQuery}
+            placeholder={mode === "depot" ? "Name or //depot/name" : "Filter files"}
+            leading={<TreeMode mode={mode} onMode={setMode} />}
+          />
           <div className="min-h-0 flex-1 overflow-auto py-1">
             {root ? (
               <>
                 <div className={fileQuery.active ? "hidden" : undefined}>
-                  <WorkspaceTree
-                    key={root}
-                    selected={selected}
-                    onSelect={choose}
-                    menu={fileMenu}
-                  />
+                  {mode === "depot" ? (
+                    <DepotTree
+                      key={`${connection?.port ?? ""}:${connection?.client ?? ""}`}
+                      selected={selected}
+                      onSelect={choose}
+                      menu={fileMenu}
+                    />
+                  ) : (
+                    <WorkspaceTree
+                      key={root}
+                      selected={selected}
+                      onSelect={choose}
+                      menu={fileMenu}
+                    />
+                  )}
                 </div>
                 {fileQuery.active ? (
                   fileQuery.searching ? (
                     <FileTreeSkeleton />
                   ) : (
-                    <FilteredFileTree
-                      nodes={searchNodes}
-                      toPath={(relative) => joinRoot(root, relative)}
-                      selected={selected}
-                      onOpenFile={choose}
-                      decorate={(node, entry) => ({
-                        ...entry,
-                        icon: node.dir ? undefined : <FileStatusIcon status={node.status} />,
-                        iconTitle: node.detail ? <FileStatusTip text={node.detail} /> : undefined,
-                      })}
-                      onLoadDir={async (path) => {
-                        try {
-                          const next = await p4.listDir(relativeToRoot(root, path));
-                          return next.map(presentFile);
-                        } catch (caught) {
-                          const message = errorMessage(caught);
-                          if (message && message !== "Login cancelled") toast.error(message);
-                          return null;
-                        }
-                      }}
-                      menu={(entry) => fileMenu(entry.path)}
-                    />
+                    <>
+                      {fileQuery.result?.scope ? (
+                        <p className="px-3 py-1 text-[11px] text-muted-foreground">{fileQuery.result.scope}</p>
+                      ) : null}
+                      {fileQuery.result?.truncated ? (
+                        <p className="px-3 py-1 text-[11px] text-muted-foreground">Showing the first 200 matches.</p>
+                      ) : null}
+                      {fileQuery.result && fileQuery.result.hits.length === 0 ? (
+                        !fileQuery.result.scope || fileQuery.result.scope.startsWith("In ") ? (
+                          <p className="px-3 py-2 text-xs text-muted-foreground">No matching files.</p>
+                        ) : null
+                      ) : (
+                      <FilteredFileTree
+                        nodes={searchNodes}
+                        toPath={(relative) => (mode === "depot" ? depotPath(relative) : joinRoot(root, relative))}
+                        selected={selected}
+                        onOpenFile={choose}
+                        decorate={(node, entry) => ({
+                          ...entry,
+                          icon: node.dir ? undefined : <FileStatusIcon status={node.status} />,
+                          iconTitle: node.detail ? <FileStatusTip text={node.detail} /> : undefined,
+                        })}
+                        onLoadDir={async (path) => {
+                          try {
+                            const next =
+                              mode === "depot"
+                                ? await p4.listDepot(path)
+                                : await p4.listDir(relativeToRoot(root, path));
+                            return next.map(presentFile);
+                          } catch (caught) {
+                            const message = errorMessage(caught);
+                            if (message && message !== "Login cancelled") toast.error(message);
+                            return null;
+                          }
+                        }}
+                        menu={(entry) => fileMenu(entry.path)}
+                      />
+                      )}
+                    </>
                   )
                 ) : null}
               </>
@@ -197,9 +237,9 @@ export function P4Files() {
       <ResizablePanel id="p4-file-main" defaultSize="72%" minSize="40%">
         <div className="flex h-full min-h-0 flex-col">
           <div className="flex h-10 shrink-0 items-center border-b px-3">
-            <HoverTip label={selected ? relativeToRoot(root, selected) || selected : ""}>
+            <HoverTip label={selected ? shownPath(mode, root, selected) : ""}>
               <div className="min-w-0 flex-1 truncate font-mono text-xs">
-                {selected ? relativeToRoot(root, selected) || selected : "Select a file"}
+                {selected ? shownPath(mode, root, selected) : "Select a file"}
               </div>
             </HoverTip>
           </div>
@@ -363,6 +403,141 @@ function WorkspaceTree({
       menu={(entry) => menu(entry.path)}
     />
   );
+}
+
+function DepotTree({
+  selected,
+  onSelect,
+  menu,
+}: {
+  selected: string | null;
+  onSelect: (path: string) => void;
+  menu: (path: string) => ReactNode;
+}) {
+  const { listDepot, filesEpoch } = useP4();
+  const [entries, setEntries] = useState<Record<string, FileTreeEntry[]>>({});
+  const [open, setOpen] = useState<Set<string>>(() => new Set());
+  const [failed, setFailed] = useState(false);
+  const openRef = useRef(open);
+  const epochRef = useRef(filesEpoch);
+  useEffect(() => {
+    openRef.current = open;
+  }, [open]);
+
+  useEffect(() => {
+    let live = true;
+    void listDepot("")
+      .then((next) => {
+        if (live) setEntries({ "": next.map(presentFile) });
+      })
+      .catch(() => {
+        if (live) setFailed(true);
+      });
+    return () => {
+      live = false;
+    };
+  }, [listDepot]);
+
+  useEffect(() => {
+    if (epochRef.current === filesEpoch) return;
+    epochRef.current = filesEpoch;
+    let live = true;
+    const dirs = ["", ...openRef.current];
+    void Promise.all(
+      [...new Set(dirs)].map(async (dir) => {
+        try {
+          const next = await listDepot(dir);
+          return [dir, next.map(presentFile)] as const;
+        } catch {
+          return null;
+        }
+      }),
+    ).then((pairs) => {
+      if (!live) return;
+      setEntries((current) => {
+        const next = { ...current };
+        for (const pair of pairs) {
+          if (!pair) continue;
+          next[pair[0]] = pair[1];
+        }
+        return next;
+      });
+    });
+    return () => {
+      live = false;
+    };
+  }, [filesEpoch, listDepot]);
+
+  async function toggle(path: string) {
+    if (open.has(path)) {
+      setOpen((current) => {
+        const next = new Set(current);
+        next.delete(path);
+        return next;
+      });
+      return;
+    }
+    if (!entries[path]) {
+      try {
+        const next = await listDepot(path);
+        setEntries((current) => ({ ...current, [path]: next.map(presentFile) }));
+      } catch {
+        return;
+      }
+    }
+    setOpen((current) => new Set(current).add(path));
+  }
+
+  if (failed) {
+    return <p className="px-3 py-2 text-xs text-muted-foreground">Could not read the depot.</p>;
+  }
+  return (
+    <FileTree
+      dir=""
+      depth={0}
+      entries={entries}
+      open={open}
+      selected={selected}
+      onToggle={(path) => void toggle(path)}
+      onOpenFile={onSelect}
+      menu={(entry) => menu(entry.path)}
+    />
+  );
+}
+
+function TreeMode({
+  mode,
+  onMode,
+}: {
+  mode: "workspace" | "depot";
+  onMode: (mode: "workspace" | "depot") => void;
+}) {
+  return (
+    <div role="group" aria-label="File tree" className="flex h-7 shrink-0 rounded-md bg-muted p-0.5">
+      {(["workspace", "depot"] as const).map((id) => (
+        <Button
+          key={id}
+          type="button"
+          size="sm"
+          variant={mode === id ? "default" : "ghost"}
+          className={cn("h-6 px-2 text-xs", mode === id ? "shadow-sm" : "text-muted-foreground")}
+          aria-pressed={mode === id}
+          onClick={() => onMode(id)}
+        >
+          {id === "workspace" ? "Workspace" : "Depot"}
+        </Button>
+      ))}
+    </div>
+  );
+}
+
+function depotPath(relative: string) {
+  return relative ? `//${relative}` : "";
+}
+
+function shownPath(mode: "workspace" | "depot", root: string, path: string) {
+  if (mode === "depot" || path.startsWith("//")) return path;
+  return relativeToRoot(root, path) || path;
 }
 
 function presentFile(entry: P4DirEntry): FileTreeEntry {

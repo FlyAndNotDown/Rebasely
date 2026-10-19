@@ -6,6 +6,7 @@
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::{Mutex, OnceLock};
 use std::thread;
@@ -197,7 +198,7 @@ fn p4_version_output(path: &str) -> AppResult<std::process::Output> {
     }
 }
 
-fn kill_pid(pid: u32) {
+pub(crate) fn kill_pid(pid: u32) {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -218,6 +219,134 @@ fn kill_pid(pid: u32) {
             .status();
     }
 }
+
+/// One `p4` invocation that a newer call can cancel.
+///
+/// Depot filename search scans a large `db.rev` range. Typing again has to
+/// kill the previous child or several full scans pile up on the server.
+pub struct P4Job {
+    generation: AtomicU64,
+    pid: AtomicU32,
+}
+
+impl P4Job {
+    pub const fn new() -> Self {
+        Self {
+            generation: AtomicU64::new(0),
+            pid: AtomicU32::new(0),
+        }
+    }
+
+    pub fn cancel(&self) {
+        let _ = self.generation.fetch_add(1, Ordering::SeqCst);
+        self.kill_current();
+    }
+
+    pub fn begin(&self) -> u64 {
+        let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
+        self.kill_current();
+        generation
+    }
+
+    pub fn current(&self) -> u64 {
+        self.generation.load(Ordering::SeqCst)
+    }
+
+    pub fn run(&self, env: &P4Env, args: &[&str], generation: u64) -> AppResult<Option<String>> {
+        if self.current() != generation {
+            return Ok(None);
+        }
+        let Some(output) = self.spawn_wait(env, args, generation)? else {
+            return Ok(None);
+        };
+        if self.current() != generation {
+            return Ok(None);
+        }
+        let message = output_message(&output);
+        if !output.status.success() && needs_trust(&message) {
+            trust(env)?;
+            if self.current() != generation {
+                return Ok(None);
+            }
+            let Some(output) = self.spawn_wait(env, args, generation)? else {
+                return Ok(None);
+            };
+            if self.current() != generation {
+                return Ok(None);
+            }
+            return Ok(Some(finish(output)?));
+        }
+        match finish(output) {
+            Ok(text) if self.current() == generation => Ok(Some(text)),
+            Ok(_) => Ok(None),
+            Err(_) if self.current() != generation => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    fn kill_current(&self) {
+        let pid = self.pid.swap(0, Ordering::SeqCst);
+        if pid != 0 {
+            kill_pid(pid);
+        }
+    }
+
+    fn spawn_wait(
+        &self,
+        env: &P4Env,
+        args: &[&str],
+        generation: u64,
+    ) -> AppResult<Option<std::process::Output>> {
+        if self.current() != generation {
+            return Ok(None);
+        }
+        let program = require_p4()?;
+        let mut command = prepared(program, env, args);
+        command
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let mut child = command
+            .spawn()
+            .map_err(|err| AppError::msg(err.to_string()))?;
+        let pid = child.id();
+        if self.current() != generation {
+            kill_pid(pid);
+            let _ = child.wait();
+            return Ok(None);
+        }
+        self.pid.store(pid, Ordering::SeqCst);
+        if self.current() != generation {
+            self.kill_current();
+            let _ = child.wait();
+            return Ok(None);
+        }
+        match child.wait_with_output() {
+            Ok(output) => {
+                let _ = self
+                    .pid
+                    .compare_exchange(pid, 0, Ordering::SeqCst, Ordering::SeqCst);
+                if self.current() != generation {
+                    Ok(None)
+                } else {
+                    Ok(Some(output))
+                }
+            }
+            Err(err) => {
+                let _ = self
+                    .pid
+                    .compare_exchange(pid, 0, Ordering::SeqCst, Ordering::SeqCst);
+                if self.current() != generation {
+                    Ok(None)
+                } else {
+                    Err(AppError::msg(err.to_string()))
+                }
+            }
+        }
+    }
+}
+
+pub static DEPOT_FILE_SEARCH: P4Job = P4Job::new();
 
 fn p4_command(program: impl AsRef<std::ffi::OsStr>) -> Command {
     let mut command = crate::locate::command(program);

@@ -145,6 +145,8 @@ pub struct P4ChangePage {
 pub struct P4FileSearch {
     pub hits: Vec<P4DirEntry>,
     pub truncated: bool,
+    /// Depot search tells the user which path was scanned. Empty for a workspace search.
+    pub scope: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -552,12 +554,385 @@ pub fn list_dir(connection: &P4Connection, relative: &str) -> AppResult<Vec<P4Di
     Ok(entries)
 }
 
+/// One level of the depot, starting at the depot roots when `path` is empty.
+pub fn list_depot(connection: &P4Connection, path: &str) -> AppResult<Vec<P4DirEntry>> {
+    let env = env_for(connection);
+    let path = path.trim().trim_end_matches('/');
+    if path.is_empty() || path == "//" {
+        let stdout = run_ok(&env, &["-ztag", "depots"], None)?;
+        let mut entries = Vec::new();
+        for record in parse_ztag(&stdout) {
+            let name = field(&record, "name");
+            if name.is_empty() || name.contains([' ', '*', '?', '#', '@', '/']) {
+                continue;
+            }
+            entries.push(P4DirEntry {
+                name: name.clone(),
+                path: format!("//{name}"),
+                dir: true,
+                status: String::new(),
+                detail: String::new(),
+            });
+        }
+        sort_dir_entries(&mut entries);
+        return Ok(entries);
+    }
+    if !valid_depot_path(path) {
+        return Err(AppError::msg(
+            "Depot path should look like //depot/project.",
+        ));
+    }
+    let spec = format!("{path}/*");
+    let mut entries = Vec::new();
+    for record in depot_listing(&env, &["-ztag", "dirs", &spec])? {
+        let dir = field(&record, "dir");
+        if !valid_depot_path(&dir) {
+            continue;
+        }
+        entries.push(P4DirEntry {
+            name: depot_base(&dir),
+            path: dir,
+            dir: true,
+            status: String::new(),
+            detail: String::new(),
+        });
+    }
+    for record in depot_listing(&env, &["-ztag", "files", &spec])? {
+        let file = field(&record, "depotFile");
+        if !valid_depot_path(&file) {
+            continue;
+        }
+        entries.push(P4DirEntry {
+            name: depot_base(&file),
+            path: file,
+            dir: false,
+            status: String::new(),
+            detail: String::new(),
+        });
+    }
+    sort_dir_entries(&mut entries);
+    annotate_depot_files(connection, &mut entries);
+    Ok(entries)
+}
+
+pub fn cancel_depot_search() {
+    cli::DEPOT_FILE_SEARCH.cancel();
+}
+
+pub fn search_depot(connection: &P4Connection, query: &str) -> AppResult<P4FileSearch> {
+    let env = env_for(connection);
+    let plan = depot_search_plan(connection, &env, query)?;
+    if plan.roots.is_empty() {
+        return Ok(P4FileSearch {
+            hits: Vec::new(),
+            truncated: false,
+            scope: plan.scope,
+        });
+    }
+    // `//.../*name*` walks every depot, including engine depots that are not in
+    // this stream. Scan the stream (or an explicit //depot prefix) instead, and
+    // kill the previous scan when the query changes. Status comes from a later
+    // fstat, which would add another round trip on top of the scan.
+    let generation = cli::DEPOT_FILE_SEARCH.begin();
+    let mut hits = Vec::new();
+    let mut seen = BTreeSet::new();
+    let mut truncated = false;
+    for root in &plan.roots {
+        if hits.len() >= DEPOT_SEARCH_LIMIT {
+            truncated = true;
+            break;
+        }
+        let remaining = DEPOT_SEARCH_LIMIT - hits.len();
+        let spec = format!("{root}/.../*{}*", plan.needle);
+        let Some(records) = tracked_depot_files(&env, &spec, remaining, generation)? else {
+            return Ok(P4FileSearch {
+                hits: Vec::new(),
+                truncated: false,
+                scope: String::new(),
+            });
+        };
+        for record in records {
+            let file = field(&record, "depotFile");
+            if !valid_depot_path(&file) || !seen.insert(file.clone()) {
+                continue;
+            }
+            hits.push(P4DirEntry {
+                name: depot_base(&file),
+                path: file,
+                dir: false,
+                status: String::new(),
+                detail: String::new(),
+            });
+            if hits.len() >= DEPOT_SEARCH_LIMIT {
+                truncated = true;
+                break;
+            }
+        }
+    }
+    Ok(P4FileSearch {
+        hits,
+        truncated,
+        scope: plan.scope,
+    })
+}
+
+const DEPOT_SEARCH_LIMIT: usize = 200;
+
+struct DepotSearchPlan {
+    roots: Vec<String>,
+    needle: String,
+    scope: String,
+}
+
+fn depot_search_plan(
+    connection: &P4Connection,
+    env: &P4Env,
+    query: &str,
+) -> AppResult<DepotSearchPlan> {
+    let query = query.trim();
+    if query.is_empty() {
+        return Ok(DepotSearchPlan {
+            roots: Vec::new(),
+            needle: String::new(),
+            scope: String::new(),
+        });
+    }
+    if query.starts_with("//") || query.contains('/') {
+        let Some((root, needle)) = explicit_depot_query(query) else {
+            return Ok(DepotSearchPlan {
+                roots: Vec::new(),
+                needle: String::new(),
+                scope: "Use a file name, or //depot/name.".to_string(),
+            });
+        };
+        if needle.chars().count() < 2 {
+            return Ok(DepotSearchPlan {
+                roots: Vec::new(),
+                needle,
+                scope: "Type at least 2 characters.".to_string(),
+            });
+        }
+        let scope = format!("In {root}");
+        return Ok(DepotSearchPlan {
+            roots: vec![root],
+            needle,
+            scope,
+        });
+    }
+    if !plain_depot_name(query) {
+        return Err(AppError::msg(
+            "Search with a file name, or a path like //depot/name.",
+        ));
+    }
+    if query.chars().count() < 2 {
+        return Ok(DepotSearchPlan {
+            roots: Vec::new(),
+            needle: query.to_string(),
+            scope: "Type at least 2 characters.".to_string(),
+        });
+    }
+    if let Some(stream) = connection
+        .stream
+        .as_deref()
+        .map(str::trim)
+        .filter(|stream| valid_depot_path(stream))
+    {
+        let root = stream.trim_end_matches('/').to_string();
+        let scope = format!("In {root}");
+        return Ok(DepotSearchPlan {
+            roots: vec![root],
+            needle: query.to_string(),
+            scope,
+        });
+    }
+    let spec = run_ok(env, &["client", "-o", &connection.client], None)?;
+    let roots = client_view_roots(&spec);
+    if roots.is_empty() {
+        return Err(AppError::msg("This workspace has no depot view to search."));
+    }
+    let scope = if roots.len() == 1 {
+        format!("In {}", roots[0])
+    } else {
+        "In the client view".to_string()
+    };
+    Ok(DepotSearchPlan {
+        roots,
+        needle: query.to_string(),
+        scope,
+    })
+}
+
+/// `//depot/dir/name` or `depot/dir/name` searches that directory only.
+/// An unfinished path returns `None` so typing does not raise an error.
+fn explicit_depot_query(query: &str) -> Option<(String, String)> {
+    if !query.starts_with("//") && !query.contains('/') {
+        return None;
+    }
+    let scoped = if query.starts_with("//") {
+        query.to_string()
+    } else {
+        format!("//{query}")
+    };
+    let path = scoped.trim().trim_end_matches('/');
+    let (dir, name) = path.rsplit_once('/')?;
+    if !valid_depot_path(dir) || !plain_depot_name(name) {
+        return None;
+    }
+    Some((dir.to_string(), name.to_string()))
+}
+
+fn plain_depot_name(name: &str) -> bool {
+    !name.is_empty()
+        && !name
+            .chars()
+            .any(|ch| matches!(ch, ' ' | '\\' | '/' | '?' | '#' | '@' | '*' | '\n' | '\r'))
+}
+
+fn tracked_depot_files(
+    env: &P4Env,
+    spec: &str,
+    limit: usize,
+    generation: u64,
+) -> AppResult<Option<Vec<ZtagRecord>>> {
+    let limit = limit.to_string();
+    match cli::DEPOT_FILE_SEARCH.run(env, &["-ztag", "files", "-m", &limit, spec], generation) {
+        Ok(None) => Ok(None),
+        Ok(Some(stdout)) => Ok(Some(parse_ztag(&stdout))),
+        Err(error) => {
+            let message = error.to_string().to_lowercase();
+            if message.contains("no such file") || message.contains("no file(s)") {
+                Ok(Some(Vec::new()))
+            } else if cli::DEPOT_FILE_SEARCH.current() != generation {
+                Ok(None)
+            } else {
+                Err(error)
+            }
+        }
+    }
+}
+
+fn client_view_roots(spec: &str) -> Vec<String> {
+    let mut roots = Vec::new();
+    let mut in_view = false;
+    for raw in spec.split('\n') {
+        let line = raw.trim_end_matches('\r');
+        let trimmed = line.trim();
+        if !line.starts_with(' ') && !line.starts_with('\t') {
+            in_view = trimmed
+                .split_once(':')
+                .is_some_and(|(name, _)| name.trim().eq_ignore_ascii_case("View"));
+            continue;
+        }
+        if !in_view || trimmed.is_empty() || trimmed.starts_with('-') {
+            continue;
+        }
+        let mapping = trimmed.trim_start_matches('+');
+        let Some(depot) = mapping.split_whitespace().next() else {
+            continue;
+        };
+        let Some(root) = mapping_root(depot) else {
+            continue;
+        };
+        if roots
+            .iter()
+            .any(|item: &String| item.eq_ignore_ascii_case(&root))
+        {
+            continue;
+        }
+        roots.push(root);
+    }
+    roots
+}
+
+fn mapping_root(depot: &str) -> Option<String> {
+    let depot = depot.trim().trim_start_matches('+');
+    if !depot.starts_with("//") {
+        return None;
+    }
+    let mut parts = Vec::new();
+    for part in depot.trim_start_matches("//").split('/') {
+        if part.is_empty() || part == "..." || part.contains(['*', '%']) {
+            break;
+        }
+        parts.push(part);
+    }
+    if parts.is_empty() {
+        return None;
+    }
+    let root = format!("//{}", parts.join("/"));
+    valid_depot_path(&root).then_some(root)
+}
+
+fn depot_listing(env: &P4Env, args: &[&str]) -> AppResult<Vec<ZtagRecord>> {
+    match run_ok(env, args, None) {
+        Ok(stdout) => Ok(parse_ztag(&stdout)),
+        Err(error) => {
+            let message = error.to_string().to_lowercase();
+            if message.contains("no such file") {
+                Ok(Vec::new())
+            } else {
+                Err(error)
+            }
+        }
+    }
+}
+
+fn depot_base(path: &str) -> String {
+    path.trim_end_matches('/')
+        .rsplit('/')
+        .next()
+        .unwrap_or(path)
+        .to_string()
+}
+
+fn sort_dir_entries(entries: &mut [P4DirEntry]) {
+    entries.sort_by(|left, right| {
+        right
+            .dir
+            .cmp(&left.dir)
+            .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
+    });
+}
+
+fn annotate_depot_files(connection: &P4Connection, entries: &mut [P4DirEntry]) {
+    let env = env_for(connection);
+    let paths: Vec<String> = entries
+        .iter()
+        .filter(|entry| !entry.dir)
+        .map(|entry| entry.path.clone())
+        .collect();
+    if paths.is_empty() {
+        return;
+    }
+    let mut known = HashMap::<String, (String, String)>::new();
+    for chunk in paths.chunks(40) {
+        for record in fstat_records(&env, chunk) {
+            let depot = field(&record, "depotFile");
+            if depot.is_empty() {
+                continue;
+            }
+            known.insert(depot, status_of(&record));
+        }
+    }
+    for entry in entries.iter_mut() {
+        if entry.dir {
+            continue;
+        }
+        let Some((status, detail)) = known.get(&entry.path) else {
+            continue;
+        };
+        entry.status.clone_from(status);
+        entry.detail.clone_from(detail);
+    }
+}
+
 pub fn search_files(connection: &P4Connection, query: &str) -> AppResult<P4FileSearch> {
     let needle = query.trim().to_lowercase();
     if needle.is_empty() {
         return Ok(P4FileSearch {
             hits: Vec::new(),
             truncated: false,
+            scope: String::new(),
         });
     }
     let root = PathBuf::from(&connection.root);
@@ -598,6 +973,7 @@ pub fn search_files(connection: &P4Connection, query: &str) -> AppResult<P4FileS
     Ok(P4FileSearch {
         hits,
         truncated: false,
+        scope: String::new(),
     })
 }
 
@@ -903,19 +1279,11 @@ fn status_of(record: &ZtagRecord) -> (String, String) {
         push_line(&mut lines, ours.to_string());
         let change = field(record, "change");
         if !change.is_empty() && change != "default" {
-            push_line(&mut lines, format!("Changelist {change}"));
+            push_line(&mut lines, format!("Your changelist {change}"));
         }
     }
     for opener in &openers {
-        let line = if opener.locked {
-            format!("Locked by {}", opener.label)
-        } else {
-            format!("Opened by {}", opener.label)
-        };
-        push_line(&mut lines, line);
-        if !opener.change.is_empty() && opener.change != "default" {
-            push_line(&mut lines, format!("Changelist {}", opener.change));
-        }
+        note_opener(&mut lines, opener);
     }
     let named = openers.len() as u64;
     if named > 0 && others > named {
@@ -999,6 +1367,25 @@ fn person_label(user: &str, client: &str) -> String {
     } else {
         format!("{user} on {client}")
     }
+}
+
+fn note_opener(lines: &mut Vec<String>, opener: &OtherOpen) {
+    let verb = if opener.locked {
+        "Locked by"
+    } else {
+        "Opened by"
+    };
+    let short = format!("{verb} {}", opener.label);
+    let line = if opener.change.is_empty() || opener.change == "default" {
+        short.clone()
+    } else {
+        format!("{short} in changelist {}", opener.change)
+    };
+    if let Some(existing) = lines.iter_mut().find(|item| item.as_str() == short) {
+        *existing = line;
+        return;
+    }
+    push_line(lines, line);
 }
 
 fn push_line(lines: &mut Vec<String>, line: String) {
@@ -2709,7 +3096,7 @@ mod tests {
         assert_eq!(status, "other");
         assert_eq!(
             detail,
-            "Opened by alice on dev-pc\nChangelist 44\nRevision 3"
+            "Opened by alice on dev-pc in changelist 44\nRevision 3"
         );
     }
 
@@ -2739,7 +3126,36 @@ mod tests {
         assert_eq!(status, "stale");
         assert_eq!(
             detail,
-            "Not latest\nChecked out for edit\nChangelist 42\nHave revision 3\nHead revision 8"
+            "Not latest\nChecked out for edit\nYour changelist 42\nHave revision 3\nHead revision 8"
+        );
+    }
+
+    #[test]
+    fn your_changelist_is_not_the_same_line_as_someone_elses() {
+        let (status, detail) = status_of(&record(&[
+            ("depotFile", "//depot/main/settings.ini"),
+            ("haveRev", "39"),
+            ("headRev", "39"),
+            ("action", "edit"),
+            ("change", "42"),
+            ("otherOpen", "2"),
+            ("otherOpen0", "alice@dev-pc"),
+            ("otherAction0", "edit"),
+            ("otherChange0", "43"),
+            ("otherOpen1", "bob@build-pc"),
+            ("otherAction1", "edit"),
+            ("otherChange1", "43"),
+        ]));
+        assert_eq!(status, "edit");
+        assert_eq!(
+            detail,
+            "\
+//depot/main/settings.ini
+Checked out for edit
+Your changelist 42
+Opened by alice on dev-pc in changelist 43
+Opened by bob on build-pc in changelist 43
+Revision 39"
         );
     }
 
@@ -2752,6 +3168,41 @@ mod tests {
         ]));
         assert_eq!(status, "other");
         assert_eq!(detail, "Opened by another user\nRevision 3");
+    }
+
+    #[test]
+    fn depot_search_scopes_to_an_explicit_path() {
+        let (root, needle) = explicit_depot_query("//vendor/library/settings").unwrap();
+        assert_eq!(root, "//vendor/library");
+        assert_eq!(needle, "settings");
+        let (root, needle) = explicit_depot_query("depot/Player").unwrap();
+        assert_eq!(root, "//depot");
+        assert_eq!(needle, "Player");
+        assert!(explicit_depot_query("Player").is_none());
+        assert!(explicit_depot_query("//vendor").is_none());
+    }
+
+    #[test]
+    fn client_view_roots_keep_the_depot_side_and_skip_exclusions() {
+        let spec = "\
+Client:\tpc
+
+View:
+\t//depot/... //pc/...
+\t-//depot/Saved/... //pc/Saved/...
+\t+//vendor/library/... //pc/library/...
+\t//... //pc/everything/...
+
+Description:
+\tCreated by Rebasely.
+";
+        assert_eq!(
+            client_view_roots(spec),
+            vec![
+                "//depot".to_string(),
+                "//vendor/library".to_string(),
+            ]
+        );
     }
 
     #[test]
