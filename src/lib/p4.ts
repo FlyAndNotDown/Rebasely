@@ -14,6 +14,7 @@ import type {
   P4GetRevision,
   P4Executables,
   P4OpenResult,
+  P4ResolveView,
   P4Revision,
   RepoDetection,
 } from "@/types/p4";
@@ -94,6 +95,10 @@ export const p4Api = {
     call<void>("p4_unshelve", { connection, changeId }),
   deleteShelf: (connection: P4Connection, changeId: string) =>
     call<void>("p4_delete_shelf", { connection, changeId }),
+  resolveView: (connection: P4Connection, path: string) =>
+    call<P4ResolveView>("p4_resolve_view", { connection, path }),
+  resolveAccept: (connection: P4Connection, path: string, mode: "yours" | "theirs" | "merge") =>
+    call<void>("p4_resolve_accept", { connection, path, mode }),
   sync: (connection: P4Connection, paths: string[], activityId?: string) =>
     call<string>("p4_sync", { connection, paths, activityId: activityId ?? null }),
   getRevision: (connection: P4Connection, request: P4GetRevision, activityId?: string) =>

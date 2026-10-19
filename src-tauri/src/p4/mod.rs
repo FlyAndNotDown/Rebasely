@@ -8,8 +8,9 @@ pub use workspace::{
     check_connection, create_workspace, delete_shelf, describe, detect_repository, file_action,
     filelog, get_revision, list_depot_dirs, list_dir, list_streams, list_user_clients, list_users,
     login, new_change, open_workspace, opened_diff, prepare_client, reconcile, refresh_pending,
-    reopen, revert, revert_unchanged, revision_diff, save_change, save_workspace, search_files,
-    search_submitted, shelf_diff, shelve, submit, submitted, sync, unshelve, P4Auth, P4ChangePage,
-    P4Changelist, P4CheckedConnection, P4Connection, P4CreateRequest, P4DepotEntry, P4Describe,
-    P4DirEntry, P4FileSearch, P4GetRevision, P4Open, P4Revision, P4StreamOption, RepoDetection,
+    reopen, resolve_accept, resolve_view, revert, revert_unchanged, revision_diff, save_change,
+    save_workspace, search_files, search_submitted, shelf_diff, shelve, submit, submitted, sync,
+    unshelve, P4Auth, P4ChangePage, P4Changelist, P4CheckedConnection, P4Connection,
+    P4CreateRequest, P4DepotEntry, P4Describe, P4DirEntry, P4FileSearch, P4GetRevision, P4Open,
+    P4ResolveView, P4Revision, P4StreamOption, RepoDetection,
 };

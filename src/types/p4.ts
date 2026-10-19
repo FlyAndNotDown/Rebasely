@@ -43,6 +43,14 @@ export interface P4Describe {
   diffs: FileDiff[];
 }
 
+export interface P4ResolveView {
+  path: string;
+  summary: string;
+  content: boolean;
+  comparable: boolean;
+  diff: FileDiff;
+}
+
 export interface P4Revision {
   rev: string;
   change: string;

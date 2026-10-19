@@ -1,9 +1,10 @@
 import { useState, type ReactNode } from "react";
-import { ArchiveIcon, ArchiveRestoreIcon, ChevronDownIcon, PlusIcon, Trash2Icon } from "lucide-react";
+import { ArchiveIcon, ArchiveRestoreIcon, ChevronDownIcon, GitMergeIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { ChangeBadge } from "@/components/p4/change-badge";
 import { FileStatusIcon } from "@/components/p4/file-status-icon";
 import { FileStatusTip, fileStatusText } from "@/components/p4/file-status-tip";
 import { P4Diff } from "@/components/p4/p4-diff";
+import { P4Resolve } from "@/components/p4/p4-resolve";
 import { Button } from "@/components/ui/button";
 import {
   ContextMenu,
@@ -36,7 +37,9 @@ export function P4Pending() {
   const [groups, setGroups] = useState({ changes: true, shelved: false });
   const [revertPaths, setRevertPaths] = useState<string[] | null>(null);
   const [deletingShelf, setDeletingShelf] = useState(false);
+  const [resolving, setResolving] = useState<{ change: string; path: string } | null>(null);
   const numbered = p4.selectedChange !== "default";
+  const resolvingPath = resolving?.change === p4.selectedChange ? resolving.path : null;
 
   return (
     <>
@@ -62,7 +65,10 @@ export function P4Pending() {
                       "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-muted/70",
                       active && "bg-muted",
                     )}
-                    onClick={() => p4.selectChange(change.id)}
+                    onClick={() => {
+                      if (change.id !== p4.selectedChange) setResolving(null);
+                      p4.selectChange(change.id);
+                    }}
                   >
                     <ChangeBadge id={change.id} />
                     <span className="min-w-0 flex-1 truncate text-xs">{summary || "No description"}</span>
@@ -85,7 +91,14 @@ export function P4Pending() {
                     selectedPath={p4.selectedFile}
                     selectedShelved={p4.selectedShelved}
                     onToggle={() => setGroups((current) => ({ ...current, changes: !current.changes }))}
-                    onSelect={(path) => p4.selectFile(path, false)}
+                    onSelect={(path) => {
+                      setResolving((current) => (current?.path === path ? current : null));
+                      p4.selectFile(path, false);
+                    }}
+                    onResolve={(path) => {
+                      p4.selectFile(path, false);
+                      setResolving({ change: p4.selectedChange, path });
+                    }}
                     menu={
                       <ContextMenuContent className="w-36">
                         <ContextMenuItem disabled={!numbered} onClick={() => void p4.shelveSelected()}>
@@ -153,11 +166,15 @@ export function P4Pending() {
             </ResizablePanel>
             <ResizableHandle />
             <ResizablePanel id="p4-diff" defaultSize="62%" minSize="30%">
-              <P4Diff
-                diff={p4.diff}
-                loading={p4.diffLoading}
-                empty={p4.selectedFile ? "Loading diff" : "Select a file to see its diff"}
-              />
+              {resolvingPath ? (
+                <P4Resolve key={resolvingPath} path={resolvingPath} onResolved={() => setResolving(null)} />
+              ) : (
+                <P4Diff
+                  diff={p4.diff}
+                  loading={p4.diffLoading}
+                  empty={p4.selectedFile ? "Loading diff" : "Select a file to see its diff"}
+                />
+              )}
             </ResizablePanel>
           </ResizablePanelGroup>
         </ResizablePanel>
@@ -196,6 +213,7 @@ function FileGroup({
   selectedShelved,
   onToggle,
   onSelect,
+  onResolve,
   menu,
 }: {
   title: string;
@@ -205,6 +223,7 @@ function FileGroup({
   selectedShelved: boolean;
   onToggle: () => void;
   onSelect: (path: string) => void;
+  onResolve?: (path: string) => void;
   menu?: ReactNode;
 }) {
   const header = (
@@ -232,23 +251,43 @@ function FileGroup({
       {open
         ? files.map((file) => {
             const active = file.depotPath === selectedPath && file.shelved === selectedShelved;
+            const row = (
+              <button
+                type="button"
+                className={cn(
+                  "flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-xs hover:bg-muted/70",
+                  active && "bg-muted",
+                )}
+                onClick={() => onSelect(file.depotPath)}
+              >
+                <FileStatusIcon status={file.status || actionStatus(file.action)} className="mr-1" />
+                <span className="min-w-0 flex-1 truncate font-mono">{depotBase(file.depotPath)}</span>
+              </button>
+            );
+            const tip = fileTip(file) ? <FileStatusTip text={fileTip(file)} /> : undefined;
+            if (file.status === "conflict" && onResolve) {
+              const resolve = onResolve;
+              return (
+                <ContextMenu key={`${file.depotPath}:open`}>
+                  <HoverTip className="max-w-lg" label={tip}>
+                    <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
+                  </HoverTip>
+                  <ContextMenuContent className="w-36">
+                    <ContextMenuItem onClick={() => resolve(file.depotPath)}>
+                      <GitMergeIcon />
+                      Resolve
+                    </ContextMenuItem>
+                  </ContextMenuContent>
+                </ContextMenu>
+              );
+            }
             return (
               <HoverTip
                 key={`${file.depotPath}:${file.shelved ? "shelf" : "open"}`}
                 className="max-w-lg"
-                label={fileTip(file) ? <FileStatusTip text={fileTip(file)} /> : undefined}
+                label={tip}
               >
-                <button
-                  type="button"
-                  className={cn(
-                    "flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-xs hover:bg-muted/70",
-                    active && "bg-muted",
-                  )}
-                  onClick={() => onSelect(file.depotPath)}
-                >
-                  <FileStatusIcon status={file.status || actionStatus(file.action)} className="mr-1" />
-                  <span className="min-w-0 flex-1 truncate font-mono">{depotBase(file.depotPath)}</span>
-                </button>
+                {row}
               </HoverTip>
             );
           })

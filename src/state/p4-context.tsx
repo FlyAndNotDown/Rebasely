@@ -14,7 +14,7 @@ import { P4ConnectionDialog } from "@/components/p4/p4-connection-dialog";
 import { P4LoginDialog } from "@/components/p4/p4-login-dialog";
 import { P4WorkspaceDialog } from "@/components/p4/p4-workspace-dialog";
 import { errorMessage } from "@/lib/git";
-import { P4_LOGIN, P4_MISSING, p4Api } from "@/lib/p4";
+import { depotBase, P4_LOGIN, P4_MISSING, p4Api } from "@/lib/p4";
 import { sameRepoPath } from "@/lib/format";
 import { useGitPick } from "@/state/git-context";
 import { repoTabId, type RepoTab } from "@/state/session";
@@ -27,6 +27,7 @@ import type {
   P4DirEntry,
   P4File,
   P4GetRevision,
+  P4ResolveView,
   P4Revision,
   P4StreamOption,
 } from "@/types/p4";
@@ -92,6 +93,8 @@ interface P4ContextValue {
   shelveSelected: () => Promise<void>;
   unshelveSelected: () => Promise<void>;
   deleteSelectedShelf: () => Promise<void>;
+  resolveView: (path: string) => Promise<P4ResolveView | null>;
+  resolveAccept: (path: string, mode: "yours" | "theirs" | "merge") => Promise<boolean>;
   revertUnchanged: () => Promise<void>;
   sync: (paths?: string[]) => Promise<void>;
   getRevision: (request: P4GetRevision) => Promise<string>;
@@ -586,6 +589,36 @@ export function P4Provider({ children }: { children: ReactNode }) {
     }
   }, [beginActivity, endActivity, guard, reloadPending, report]);
 
+  const resolveView = useCallback(
+    async (path: string) => {
+      const current = sessionRef.current;
+      if (!current) return null;
+      return guard(current.connection, () => p4Api.resolveView(current.connection, path));
+    },
+    [guard],
+  );
+
+  const resolveAccept = useCallback(
+    async (path: string, mode: "yours" | "theirs" | "merge") => {
+      const current = sessionRef.current;
+      if (!current) return false;
+      const label = mode === "yours" ? "Accepting yours" : mode === "theirs" ? "Accepting theirs" : "Merging";
+      const id = beginActivity(label, depotBase(path));
+      try {
+        await guard(current.connection, () => p4Api.resolveAccept(current.connection, path, mode));
+        toast.success(mode === "merge" ? "Merged" : mode === "yours" ? "Accepted yours" : "Accepted theirs");
+        await reloadPending(current.selectedChange);
+        return true;
+      } catch (caught) {
+        report(caught);
+        return false;
+      } finally {
+        endActivity(id);
+      }
+    },
+    [beginActivity, endActivity, guard, reloadPending, report],
+  );
+
   const revertUnchanged = useCallback(async () => {
     const current = sessionRef.current;
     if (!current) return;
@@ -907,6 +940,8 @@ export function P4Provider({ children }: { children: ReactNode }) {
       shelveSelected,
       unshelveSelected,
       deleteSelectedShelf,
+      resolveView,
+      resolveAccept,
       revertUnchanged,
       sync,
       getRevision,
@@ -937,6 +972,8 @@ export function P4Provider({ children }: { children: ReactNode }) {
       connection,
       createChange,
       deleteSelectedShelf,
+      resolveAccept,
+      resolveView,
       diffLoading,
       error,
       fileAction,

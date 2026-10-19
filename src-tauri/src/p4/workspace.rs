@@ -14,11 +14,11 @@ use crate::error::{AppError, AppResult, P4_LOGIN, P4_MISSING};
 use crate::git::{strip_verbatim_prefix, FileDiff};
 use crate::p4::cli::{self, P4Env};
 use crate::p4::parse::{
-    blank_change_spec, classic_client_spec, created_change_id, file_type_is_binary,
-    indexed_groups, known_p4_value, normalize_charset, parse_describe_diffs, parse_p4_set,
-    parse_p4config, parse_single_diff, parse_ztag, path_depth, path_is_within, read_description,
-    remove_spec_field, set_description, set_spec_field, spec_field, sync_estimate_files,
-    sync_reports_a_file, valid_client_name, valid_depot_path, ZtagRecord,
+    blank_change_spec, classic_client_spec, created_change_id, file_type_is_binary, indexed_groups,
+    known_p4_value, normalize_charset, parse_describe_diffs, parse_p4_set, parse_p4config,
+    parse_single_diff, parse_ztag, path_depth, path_is_within, read_description, remove_spec_field,
+    set_description, set_spec_field, spec_field, sync_estimate_files, sync_reports_a_file,
+    valid_client_name, valid_depot_path, ZtagRecord,
 };
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1088,6 +1088,285 @@ pub fn delete_shelf(connection: &P4Connection, change_id: &str) -> AppResult<()>
     let env = env_for(connection);
     run_ok(&env, &["shelve", "-d", "-c", &id], None)?;
     Ok(())
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct P4ResolveView {
+    pub path: String,
+    pub summary: String,
+    /// A text merge can accept the merged result. Branch and delete resolves cannot.
+    pub content: bool,
+    /// False when the two sides could not be diffed. The choices still work.
+    pub comparable: bool,
+    pub diff: FileDiff,
+}
+
+pub fn resolve_view(connection: &P4Connection, path: &str) -> AppResult<P4ResolveView> {
+    let path = path.trim();
+    if path.is_empty() {
+        return Err(AppError::msg("Choose a file to resolve."));
+    }
+    let env = env_for(connection);
+    let stdout = run_ok(&env, &["-ztag", "fstat", "-Or", path], None)?;
+    let record = parse_ztag(&stdout).into_iter().next().unwrap_or_default();
+    let mut facts = facts_from_fstat(&record, path);
+    if facts.from_file.is_empty() {
+        let preview = run_ok(&env, &["resolve", "-n", "-o", path], None).unwrap_or_default();
+        if let Some(parsed) = parse_resolve_preview(&preview) {
+            facts = parsed;
+        }
+    }
+    if facts.from_file.is_empty() && facts.action.is_empty() {
+        return Err(AppError::msg("This file does not need resolve."));
+    }
+    let (diff, comparable) = resolve_diff(&env, &facts);
+    Ok(P4ResolveView {
+        path: facts.depot.clone(),
+        summary: resolve_summary(&facts),
+        content: resolve_can_merge(&facts.action, &facts.kind),
+        comparable,
+        diff,
+    })
+}
+
+pub fn resolve_accept(connection: &P4Connection, path: &str, mode: &str) -> AppResult<()> {
+    let flag = match mode {
+        "yours" => "-ay",
+        "theirs" => "-at",
+        "merge" => "-am",
+        _ => return Err(AppError::msg("Choose yours, theirs, or merge.")),
+    };
+    let path = path.trim();
+    if path.is_empty() {
+        return Err(AppError::msg("Choose a file to resolve."));
+    }
+    let env = env_for(connection);
+    run_ok(&env, &["resolve", flag, path], None)?;
+    if mode == "merge" && resolve_still_open(&env, path)? {
+        return Err(AppError::msg(
+            "The merge has conflicts. Accept yours or theirs.",
+        ));
+    }
+    Ok(())
+}
+
+struct ResolveFacts {
+    depot: String,
+    action: String,
+    kind: String,
+    from_file: String,
+    start_rev: String,
+    end_rev: String,
+    base_file: String,
+    base_rev: String,
+}
+
+fn facts_from_fstat(record: &ZtagRecord, fallback_path: &str) -> ResolveFacts {
+    let depot = field(record, "depotFile");
+    ResolveFacts {
+        depot: if depot.starts_with("//") {
+            depot
+        } else {
+            fallback_path.to_string()
+        },
+        action: first_field(record, &["resolveAction0", "resolveAction"]),
+        kind: first_field(record, &["resolveType0", "resolveType"]),
+        from_file: first_field(record, &["resolveFromFile0", "resolveFromFile"]),
+        start_rev: first_field(record, &["resolveStartFromRev0", "resolveStartFromRev"]),
+        end_rev: first_field(record, &["resolveEndFromRev0", "resolveEndFromRev"]),
+        base_file: first_field(record, &["resolveBaseFile0", "resolveBaseFile"]),
+        base_rev: first_field(record, &["resolveBaseRev0", "resolveBaseRev"]),
+    }
+}
+
+fn first_field(record: &ZtagRecord, keys: &[&str]) -> String {
+    keys.iter()
+        .map(|key| field(record, key))
+        .find(|value| !value.is_empty())
+        .unwrap_or_default()
+}
+
+fn parse_resolve_preview(text: &str) -> Option<ResolveFacts> {
+    let line = text
+        .lines()
+        .map(str::trim)
+        .find(|line| line.contains(" - "))?;
+    let (path, rest) = line.split_once(" - ")?;
+    let path = path.trim();
+    if path.is_empty() {
+        return None;
+    }
+    let lower = rest.to_lowercase();
+    let (action, kind) = if lower.contains("delete") {
+        ("delete", "delete")
+    } else if lower.contains("branch") || lower.contains("copy") {
+        ("branch", "branch")
+    } else if lower.contains("move") || lower.contains("rename") {
+        ("move", "move")
+    } else if lower.contains("filetype") || lower.contains("type change") {
+        ("filetype", "filetype")
+    } else {
+        ("merge", "content")
+    };
+    let specs = depot_revs(rest);
+    let (from_file, start_rev, end_rev) = specs
+        .first()
+        .cloned()
+        .unwrap_or_else(|| (String::new(), String::new(), String::new()));
+    let (base_file, _, base_rev) = if lower.contains("using base") {
+        specs
+            .get(1)
+            .cloned()
+            .unwrap_or_else(|| (String::new(), String::new(), String::new()))
+    } else {
+        (String::new(), String::new(), String::new())
+    };
+    Some(ResolveFacts {
+        depot: path.to_string(),
+        action: action.to_string(),
+        kind: kind.to_string(),
+        from_file,
+        start_rev,
+        end_rev,
+        base_file,
+        base_rev,
+    })
+}
+
+fn depot_revs(text: &str) -> Vec<(String, String, String)> {
+    let mut specs = Vec::new();
+    let bytes = text.as_bytes();
+    let mut index = 0;
+    while index + 1 < bytes.len() {
+        if bytes[index] == b'/' && bytes[index + 1] == b'/' {
+            let start = index;
+            index += 2;
+            while index < bytes.len() && !bytes[index].is_ascii_whitespace() && bytes[index] != b'#'
+            {
+                index += 1;
+            }
+            let file = text[start..index].to_string();
+            if index < bytes.len() && bytes[index] == b'#' {
+                index += 1;
+                let rev_start = index;
+                while index < bytes.len() && bytes[index].is_ascii_digit() {
+                    index += 1;
+                }
+                let first = text[rev_start..index].to_string();
+                if index + 1 < bytes.len() && bytes[index] == b',' && bytes[index + 1] == b'#' {
+                    index += 2;
+                    let rev_start = index;
+                    while index < bytes.len() && bytes[index].is_ascii_digit() {
+                        index += 1;
+                    }
+                    specs.push((file, first, text[rev_start..index].to_string()));
+                } else {
+                    specs.push((file, String::new(), first));
+                }
+            } else if !file.is_empty() {
+                specs.push((file, String::new(), String::new()));
+            }
+        } else {
+            index += 1;
+        }
+    }
+    specs
+}
+
+fn resolve_summary(facts: &ResolveFacts) -> String {
+    let source = revision_span(&facts.from_file, &facts.start_rev, &facts.end_rev);
+    if source.is_empty() {
+        return "Needs resolve".to_string();
+    }
+    let action = facts.action.to_lowercase();
+    let kind = facts.kind.to_lowercase();
+    let verb = if kind.contains("delete") || action == "delete" {
+        "Deleting"
+    } else if kind.contains("branch") || action == "branch" || action == "copy" {
+        "Branching"
+    } else if kind.contains("move") || action.contains("move") {
+        "Moving"
+    } else if kind.contains("filetype") || kind.contains("type") {
+        "Changing type from"
+    } else {
+        "Merging"
+    };
+    let mut text = format!("{verb} {source}");
+    if verb == "Merging" && !facts.base_file.is_empty() {
+        text.push_str(" using base ");
+        text.push_str(&revision_span(&facts.base_file, "", &facts.base_rev));
+    }
+    text
+}
+
+fn revision_span(file: &str, start: &str, end: &str) -> String {
+    if file.is_empty() {
+        return String::new();
+    }
+    if end.is_empty() {
+        return if start.is_empty() {
+            file.to_string()
+        } else {
+            format!("{file}#{start}")
+        };
+    }
+    if start.is_empty() || start == end {
+        format!("{file}#{end}")
+    } else {
+        format!("{file}#{start},#{end}")
+    }
+}
+
+fn resolve_can_merge(action: &str, kind: &str) -> bool {
+    let action = action.to_lowercase();
+    let kind = kind.to_lowercase();
+    if kind.contains("binary") || kind.contains("delete") || action == "delete" {
+        return false;
+    }
+    kind.contains("content") || action == "merge" || action == "edit"
+}
+
+fn resolve_diff(env: &P4Env, facts: &ResolveFacts) -> (FileDiff, bool) {
+    let depot = facts.depot.clone();
+    let end = if facts.end_rev.is_empty() {
+        facts.start_rev.clone()
+    } else {
+        facts.end_rev.clone()
+    };
+    if !depot.starts_with("//") || facts.from_file.is_empty() || end.is_empty() {
+        return (empty_diff(&depot), false);
+    }
+    let yours = format!("{depot}#have");
+    let theirs = format!("{}#{end}", facts.from_file);
+    match cli::run_p4_diff(env, &["diff2", "-du", &yours, &theirs]) {
+        Ok(text) => (parse_single_diff(&text, &depot), true),
+        Err(_) => (empty_diff(&depot), false),
+    }
+}
+
+fn resolve_still_open(env: &P4Env, path: &str) -> AppResult<bool> {
+    match run_ok(env, &["resolve", "-n", path], None) {
+        Ok(text) => Ok(text.lines().any(|line| !line.trim().is_empty())),
+        Err(error) => {
+            let message = error.to_string().to_lowercase();
+            if message.contains("no file") {
+                Ok(false)
+            } else {
+                Err(error)
+            }
+        }
+    }
+}
+
+fn empty_diff(path: &str) -> FileDiff {
+    FileDiff {
+        path: path.to_string(),
+        old_path: None,
+        binary: false,
+        truncated: false,
+        lines: Vec::new(),
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -2598,5 +2877,37 @@ mod tests {
         assert!(args.is_empty());
         push_history_range(&mut args, Some(1200));
         assert_eq!(args, vec!["@1,@1199".to_string()]);
+    }
+
+    #[test]
+    fn resolve_summary_names_the_source_and_base() {
+        let facts = facts_from_fstat(
+            &record(&[
+                ("depotFile", "//depot/main/app.ini"),
+                ("resolveAction0", "merge"),
+                ("resolveType0", "content"),
+                ("resolveFromFile0", "//depot/dev/app.ini"),
+                ("resolveStartFromRev0", "4"),
+                ("resolveEndFromRev0", "7"),
+                ("resolveBaseFile0", "//depot/dev/app.ini"),
+                ("resolveBaseRev0", "3"),
+            ]),
+            "//depot/main/app.ini",
+        );
+        assert!(resolve_can_merge(&facts.action, &facts.kind));
+        assert_eq!(
+            resolve_summary(&facts),
+            "Merging //depot/dev/app.ini#4,#7 using base //depot/dev/app.ini#3"
+        );
+    }
+
+    #[test]
+    fn a_delete_resolve_cannot_merge() {
+        let facts =
+            parse_resolve_preview("//depot/main/Old.ini - delete from //depot/dev/Old.ini#1,#2")
+                .unwrap();
+        assert_eq!(facts.action, "delete");
+        assert!(!resolve_can_merge(&facts.action, &facts.kind));
+        assert_eq!(resolve_summary(&facts), "Deleting //depot/dev/Old.ini#1,#2");
     }
 }

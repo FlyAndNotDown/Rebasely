@@ -1172,6 +1172,23 @@ async fn p4_delete_shelf(connection: p4::P4Connection, change_id: String) -> App
 }
 
 #[tauri::command]
+async fn p4_resolve_view(
+    connection: p4::P4Connection,
+    path: String,
+) -> AppResult<p4::P4ResolveView> {
+    blocking(move || p4::resolve_view(&connection, &path)).await
+}
+
+#[tauri::command]
+async fn p4_resolve_accept(
+    connection: p4::P4Connection,
+    path: String,
+    mode: String,
+) -> AppResult<()> {
+    blocking(move || p4::resolve_accept(&connection, &path, &mode)).await
+}
+
+#[tauri::command]
 async fn p4_get_revision(
     connection: p4::P4Connection,
     request: p4::P4GetRevision,
@@ -1646,6 +1663,8 @@ pub fn run() {
             p4_shelve,
             p4_unshelve,
             p4_delete_shelf,
+            p4_resolve_view,
+            p4_resolve_accept,
             p4_get_revision,
             p4_sync,
             p4_reconcile,

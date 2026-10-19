@@ -25,12 +25,19 @@ export function P4Diff({
   diff,
   loading,
   empty,
+  split,
+  captions,
+  chrome = true,
 }: {
   diff: FileDiff | null;
   loading: boolean;
   empty: string;
+  split?: boolean;
+  captions?: [string, string];
+  chrome?: boolean;
 }) {
   const { prefs, setDiffOptions } = useGitPick(["prefs", "setDiffOptions"]);
+  const sideBySide = split ?? prefs.diffSplit;
   if (loading && !diff) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
@@ -46,39 +53,47 @@ export function P4Diff({
     );
   }
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="flex h-10 shrink-0 items-center justify-between gap-3 border-b px-3">
-        <button
-          type="button"
-          className="min-w-0 truncate text-left font-mono text-sm hover:underline"
-          onClick={() => void copyPath(diff.path)}
-        >
-          {diff.path || "Diff"}
-        </button>
-        {diff.binary ? null : (
-          <HoverTip label="Side by side">
-            <Button
-              type="button"
-              size="icon-xs"
-              variant={prefs.diffSplit ? "secondary" : "ghost"}
-              aria-pressed={prefs.diffSplit}
-              aria-label="Side by side"
-              onClick={() => void setDiffOptions({ split: !prefs.diffSplit })}
-            >
-              <Columns2Icon />
-            </Button>
-          </HoverTip>
-        )}
-      </div>
+    <div className={cn("flex min-h-0 min-w-0 flex-col", chrome ? "h-full" : "flex-1")}>
+      {chrome ? (
+        <div className="flex h-10 shrink-0 items-center justify-between gap-3 border-b px-3">
+          <button
+            type="button"
+            className="min-w-0 truncate text-left font-mono text-sm hover:underline"
+            onClick={() => void copyPath(diff.path)}
+          >
+            {diff.path || "Diff"}
+          </button>
+          {diff.binary ? null : (
+            <HoverTip label="Side by side">
+              <Button
+                type="button"
+                size="icon-xs"
+                variant={sideBySide ? "secondary" : "ghost"}
+                aria-pressed={sideBySide}
+                aria-label="Side by side"
+                onClick={() => void setDiffOptions({ split: !sideBySide })}
+              >
+                <Columns2Icon />
+              </Button>
+            </HoverTip>
+          )}
+        </div>
+      ) : null}
+      {captions && sideBySide && !diff.binary ? (
+        <div className="grid shrink-0 grid-cols-2 border-b text-xs text-muted-foreground">
+          <div className="px-3 py-1.5">{captions[0]}</div>
+          <div className="border-l px-3 py-1.5">{captions[1]}</div>
+        </div>
+      ) : null}
       {diff.binary ? (
         <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
           Binary file
         </div>
       ) : diff.lines.every((line) => line.kind === "hunk") ? (
         <div className="flex flex-1 items-center justify-center p-6 text-center text-sm text-muted-foreground">
-          No differences against the have revision
+          {captions ? empty : "No differences against the have revision"}
         </div>
-      ) : prefs.diffSplit ? (
+      ) : sideBySide ? (
         <SplitDiff lines={diff.lines.filter((line) => line.kind !== "hunk")} />
       ) : (
         <InlineDiff lines={diff.lines.filter((line) => line.kind !== "hunk")} />
