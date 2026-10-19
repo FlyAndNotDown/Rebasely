@@ -1,10 +1,17 @@
-import { useState } from "react";
-import { ChevronDownIcon, PlusIcon } from "lucide-react";
+import { useState, type ReactNode } from "react";
+import { ArchiveIcon, ArchiveRestoreIcon, ChevronDownIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { ChangeBadge } from "@/components/p4/change-badge";
 import { FileStatusIcon } from "@/components/p4/file-status-icon";
 import { FileStatusTip, fileStatusText } from "@/components/p4/file-status-tip";
 import { P4Diff } from "@/components/p4/p4-diff";
 import { Button } from "@/components/ui/button";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
 import {
   Dialog,
   DialogContent,
@@ -28,6 +35,7 @@ export function P4Pending() {
   const [creating, setCreating] = useState(false);
   const [groups, setGroups] = useState({ changes: true, shelved: false });
   const [revertPaths, setRevertPaths] = useState<string[] | null>(null);
+  const [deletingShelf, setDeletingShelf] = useState(false);
   const numbered = p4.selectedChange !== "default";
 
   return (
@@ -78,6 +86,14 @@ export function P4Pending() {
                     selectedShelved={p4.selectedShelved}
                     onToggle={() => setGroups((current) => ({ ...current, changes: !current.changes }))}
                     onSelect={(path) => p4.selectFile(path, false)}
+                    menu={
+                      <ContextMenuContent className="w-36">
+                        <ContextMenuItem disabled={!numbered} onClick={() => void p4.shelveSelected()}>
+                          <ArchiveIcon />
+                          Shelve
+                        </ContextMenuItem>
+                      </ContextMenuContent>
+                    }
                   />
                   <FileGroup
                     title="Shelved"
@@ -87,6 +103,23 @@ export function P4Pending() {
                     selectedShelved={p4.selectedShelved}
                     onToggle={() => setGroups((current) => ({ ...current, shelved: !current.shelved }))}
                     onSelect={(path) => p4.selectFile(path, true)}
+                    menu={
+                      <ContextMenuContent className="w-36">
+                        <ContextMenuItem disabled={shelved.length === 0} onClick={() => void p4.unshelveSelected()}>
+                          <ArchiveRestoreIcon />
+                          Unshelve
+                        </ContextMenuItem>
+                        <ContextMenuSeparator />
+                        <ContextMenuItem
+                          variant="destructive"
+                          disabled={shelved.length === 0}
+                          onClick={() => setDeletingShelf(true)}
+                        >
+                          <Trash2Icon />
+                          Delete
+                        </ContextMenuItem>
+                      </ContextMenuContent>
+                    }
                   />
                 </div>
                 <div className="shrink-0 border-t p-3">
@@ -105,19 +138,6 @@ export function P4Pending() {
                     >
                       Submit
                     </Button>
-                    <HoverTip label={numbered ? "Shelve on the server" : "Save as a numbered changelist before shelving"}>
-                      <span className="inline-flex">
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          disabled={!numbered}
-                          onClick={() => void p4.shelveSelected()}
-                        >
-                          Shelve
-                        </Button>
-                      </span>
-                    </HoverTip>
                     <Button
                       type="button"
                       size="sm"
@@ -156,6 +176,14 @@ export function P4Pending() {
           void p4.revertPaths(paths);
         }}
       />
+      <DeleteShelfDialog
+        open={deletingShelf}
+        onOpenChange={setDeletingShelf}
+        onConfirm={() => {
+          setDeletingShelf(false);
+          void p4.deleteSelectedShelf();
+        }}
+      />
     </>
   );
 }
@@ -168,6 +196,7 @@ function FileGroup({
   selectedShelved,
   onToggle,
   onSelect,
+  menu,
 }: {
   title: string;
   open: boolean;
@@ -176,19 +205,30 @@ function FileGroup({
   selectedShelved: boolean;
   onToggle: () => void;
   onSelect: (path: string) => void;
+  menu?: ReactNode;
 }) {
+  const header = (
+    <button
+      type="button"
+      className="flex h-7 w-full items-center gap-1.5 rounded-md px-2 text-left hover:bg-muted/70"
+      onClick={onToggle}
+      aria-expanded={open}
+    >
+      <ChevronDownIcon className={cn("size-3.5 text-muted-foreground transition-transform", !open && "-rotate-90")} />
+      <span className="text-xs font-medium">{title}</span>
+      <span className="tabular-nums text-xs text-muted-foreground">{files.length}</span>
+    </button>
+  );
   return (
     <div>
-      <button
-        type="button"
-        className="flex h-7 w-full items-center gap-1.5 rounded-md px-2 text-left hover:bg-muted/70"
-        onClick={onToggle}
-        aria-expanded={open}
-      >
-        <ChevronDownIcon className={cn("size-3.5 text-muted-foreground transition-transform", !open && "-rotate-90")} />
-        <span className="text-xs font-medium">{title}</span>
-        <span className="tabular-nums text-xs text-muted-foreground">{files.length}</span>
-      </button>
+      {menu ? (
+        <ContextMenu>
+          <ContextMenuTrigger asChild>{header}</ContextMenuTrigger>
+          {menu}
+        </ContextMenu>
+      ) : (
+        header
+      )}
       {open
         ? files.map((file) => {
             const active = file.depotPath === selectedPath && file.shelved === selectedShelved;
@@ -273,6 +313,37 @@ function NewChangeDialog({
             }}
           >
             Create
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function DeleteShelfDialog({
+  open,
+  onOpenChange,
+  onConfirm,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Delete shelf?</DialogTitle>
+          <DialogDescription>
+            This removes the shelved files for this changelist from the server. Opened files stay in the workspace.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button type="button" variant="destructive" onClick={onConfirm}>
+            Delete
           </Button>
         </DialogFooter>
       </DialogContent>

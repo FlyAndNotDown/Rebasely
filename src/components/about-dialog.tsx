@@ -34,7 +34,7 @@ export function AboutDialog({
             </div>
           </div>
           <DialogDescription className="mt-4 text-sm leading-relaxed">
-            A refined version control client.
+            A uniform version control client.
           </DialogDescription>
           <div className="mt-7">
             <p className="text-sm font-medium tracking-tight">{AUTHOR}</p>
