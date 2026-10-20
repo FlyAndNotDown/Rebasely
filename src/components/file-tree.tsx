@@ -79,7 +79,7 @@ export function FileTree({
         );
         return (
           <div key={item.path}>
-            {menu && !item.dir ? (
+            {menu ? (
               <ContextMenu>
                 <HoverTip label={tip} className="max-w-lg">
                   <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>

@@ -123,7 +123,8 @@ export function P4Files() {
     }
   }
 
-  function fileMenu(path: string) {
+  function fileMenu(entry: FileTreeEntry) {
+    const path = p4TreeTarget(entry.path, entry.dir);
     return (
       <ContextMenuContent className="w-48">
         <ContextMenuItem onClick={() => void p4.sync([path])}>
@@ -222,7 +223,7 @@ export function P4Files() {
                             return null;
                           }
                         }}
-                        menu={(entry) => fileMenu(entry.path)}
+                        menu={fileMenu}
                       />
                       )}
                     </>
@@ -311,7 +312,7 @@ function WorkspaceTree({
 }: {
   selected: string | null;
   onSelect: (path: string) => void;
-  menu: (path: string) => ReactNode;
+  menu: (entry: FileTreeEntry) => ReactNode;
 }) {
   const { connection, listDir, filesEpoch } = useP4();
   const root = connection?.root ?? "";
@@ -400,7 +401,7 @@ function WorkspaceTree({
       selected={selected}
       onToggle={(path) => void toggle(path)}
       onOpenFile={onSelect}
-      menu={(entry) => menu(entry.path)}
+      menu={menu}
     />
   );
 }
@@ -412,7 +413,7 @@ function DepotTree({
 }: {
   selected: string | null;
   onSelect: (path: string) => void;
-  menu: (path: string) => ReactNode;
+  menu: (entry: FileTreeEntry) => ReactNode;
 }) {
   const { listDepot, filesEpoch } = useP4();
   const [entries, setEntries] = useState<Record<string, FileTreeEntry[]>>({});
@@ -500,9 +501,16 @@ function DepotTree({
       selected={selected}
       onToggle={(path) => void toggle(path)}
       onOpenFile={onSelect}
-      menu={(entry) => menu(entry.path)}
+      menu={menu}
     />
   );
+}
+
+function p4TreeTarget(path: string, dir: boolean) {
+  if (!dir) return path;
+  const trimmed = path.replace(/[/\\]+$/, "");
+  if (trimmed.endsWith("...")) return trimmed;
+  return trimmed.startsWith("//") ? `${trimmed}/...` : `${trimmed}${trimmed.includes("\\") ? "\\" : "/"}...`;
 }
 
 function TreeMode({
