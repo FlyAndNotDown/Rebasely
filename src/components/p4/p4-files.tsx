@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { DownloadIcon, FilePenIcon, FolderIcon, FolderOpenIcon, FolderSearchIcon, FolderTreeIcon, HistoryIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { toast } from "sonner";
-import { AuthorName, ExactTime } from "@/components/revision-meta";
+import { AuthorName, ExactTime, RevisionDot } from "@/components/revision-meta";
 import { FileTree, FileTreeFilter, FilteredFileTree, type FileTreeEntry } from "@/components/file-tree";
 import { ChangeBadge } from "@/components/p4/change-badge";
 import { FileStatusIcon } from "@/components/p4/file-status-icon";
@@ -344,6 +344,7 @@ export function P4Files() {
                         )}
                         onClick={() => void showRevision(selected, revision.rev)}
                       >
+                        <RevisionDot />
                         <ChangeBadge id={revision.rev} />
                         <span className="min-w-0 flex-1 truncate text-xs">
                           {changeSummary(revision.description) || "No description"}

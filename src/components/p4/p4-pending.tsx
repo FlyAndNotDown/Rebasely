@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type MouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { ArchiveIcon, ArchiveRestoreIcon, ChevronDownIcon, GitMergeIcon, PlusIcon, Trash2Icon } from "lucide-react";
+import { ArchiveIcon, ArchiveRestoreIcon, ChevronDownIcon, GitMergeIcon, PlusIcon, Trash2Icon, Undo2Icon } from "lucide-react";
 import { ChangeBadge } from "@/components/p4/change-badge";
 import { FileStatusIcon } from "@/components/p4/file-status-icon";
 import { FileStatusTip, fileStatusText } from "@/components/p4/file-status-tip";
@@ -35,7 +35,7 @@ export function P4Pending() {
   const [creating, setCreating] = useState(false);
   const [expanded, setExpanded] = useState<Set<string> | null>(null);
   const [shelvedOpen, setShelvedOpen] = useState<Set<string>>(() => new Set());
-  const [revertPaths, setRevertPaths] = useState<string[] | null>(null);
+  const [revertRequest, setRevertRequest] = useState<RevertRequest | null>(null);
   const [deletingShelf, setDeletingShelf] = useState(false);
   const [resolving, setResolving] = useState<{ change: string; path: string } | null>(null);
   const [picked, setPicked] = useState<string[]>([]);
@@ -193,6 +193,72 @@ export function P4Pending() {
     window.addEventListener("pointercancel", finish, true);
   }
 
+  function openedMenu(entry: PendingFile, file: PendingDragFile) {
+    const targets = openedSelection(p4.pending, picked, file);
+    const canShelve = targets.some((item) => item.change !== "default");
+    return (
+      <ContextMenuContent className="w-36">
+        {entry.status === "conflict" ? (
+          <>
+            <ContextMenuItem
+              onClick={() => {
+                chooseFile(file.change, file.path, false);
+                setResolving({ change: file.change, path: file.path });
+              }}
+            >
+              <GitMergeIcon />
+              Resolve
+            </ContextMenuItem>
+            <ContextMenuSeparator />
+          </>
+        ) : null}
+        <ContextMenuItem
+          variant="destructive"
+          onClick={() => {
+            const next = openedSelection(p4.pending, picked, file);
+            setRevertRequest({
+              paths: next.filter((item) => p4ActionStatus(item.action) !== "add").map((item) => item.path),
+              wipe: next.filter((item) => p4ActionStatus(item.action) === "add").map((item) => item.path),
+            });
+          }}
+        >
+          <Undo2Icon />
+          Revert
+        </ContextMenuItem>
+        {canShelve ? (
+          <ContextMenuItem
+            onClick={() => {
+              void shelveOpened(openedSelection(p4.pending, picked, file));
+            }}
+          >
+            <ArchiveIcon />
+            Shelve
+          </ContextMenuItem>
+        ) : null}
+      </ContextMenuContent>
+    );
+  }
+
+  async function shelveOpened(files: { change: string; path: string }[]) {
+    const ok = await p4.shelveFiles(files);
+    if (!ok) return;
+    setShelvedOpen((current) => {
+      const next = new Set(current);
+      for (const file of files) {
+        if (file.change !== "default") next.add(file.change);
+      }
+      return next;
+    });
+    setExpanded((current) => {
+      const next = new Set(current ?? openChanges);
+      for (const file of files) {
+        if (file.change !== "default") next.add(file.change);
+      }
+      return next;
+    });
+    setPicked([]);
+  }
+
   return (
     <>
       <ResizablePanelGroup orientation="horizontal" className="min-h-0 min-w-0 flex-1">
@@ -290,6 +356,14 @@ export function P4Pending() {
                               setResolving({ change: change.id, path });
                             }}
                             onPointerDown={beginPointer}
+                            onContextMenu={(file) => {
+                              const key = rowKey(file);
+                              if (picked.includes(key)) return;
+                              setPicked([key]);
+                              anchor.current = key;
+                              chooseFile(file.change, file.path, false);
+                            }}
+                            menu={openedMenu}
                           />
                         </div>
                         {showShelf ? (
@@ -370,7 +444,7 @@ export function P4Pending() {
                   size="sm"
                   variant="outline"
                   disabled={opened.length === 0}
-                  onClick={() => setRevertPaths(opened.map((file) => file.depotPath))}
+                  onClick={() => setRevertRequest({ paths: opened.map((file) => file.depotPath), wipe: [] })}
                 >
                   Revert
                 </Button>
@@ -397,12 +471,14 @@ export function P4Pending() {
         onCreate={(description) => void p4.createChange(description)}
       />
       <RevertDialog
-        paths={revertPaths}
-        onOpenChange={(open) => !open && setRevertPaths(null)}
+        request={revertRequest}
+        onOpenChange={(open) => !open && setRevertRequest(null)}
         onConfirm={() => {
-          const paths = revertPaths ?? [];
-          setRevertPaths(null);
-          void p4.revertPaths(paths);
+          const request = revertRequest;
+          setRevertRequest(null);
+          if (!request) return;
+          setPicked([]);
+          void p4.revertPaths(request.paths, request.wipe);
         }}
       />
       <DeleteShelfDialog
@@ -426,6 +502,27 @@ type PendingFile = {
 };
 
 type PendingDragFile = { change: string; path: string; shelved: boolean };
+
+type RevertRequest = { paths: string[]; wipe: string[] };
+
+function openedSelection(
+  pending: { id: string; files: PendingFile[] }[],
+  picked: string[],
+  file: PendingDragFile,
+) {
+  const key = rowKey(file);
+  const keys = new Set(picked.includes(key) ? picked : [key]);
+  const found: { change: string; path: string; action: string }[] = [];
+  for (const change of pending) {
+    for (const item of change.files) {
+      if (item.shelved) continue;
+      const row = { change: change.id, path: item.depotPath, shelved: false };
+      if (!keys.has(rowKey(row))) continue;
+      found.push({ change: change.id, path: item.depotPath, action: item.action });
+    }
+  }
+  return found.length > 0 ? found : [{ change: file.change, path: file.path, action: "" }];
+}
 
 function FileGroup({
   title,
@@ -500,6 +597,8 @@ function PendingFiles({
   onSelect,
   onResolve,
   onPointerDown,
+  onContextMenu,
+  menu,
 }: {
   changeId: string;
   files: PendingFile[];
@@ -510,6 +609,8 @@ function PendingFiles({
   onSelect: (event: MouseEvent, path: string) => void;
   onResolve?: (path: string) => void;
   onPointerDown: (event: ReactPointerEvent, file: PendingDragFile) => void;
+  onContextMenu?: (file: PendingDragFile) => void;
+  menu?: (entry: PendingFile, file: PendingDragFile) => ReactNode;
 }) {
   return files.map((file) => {
     const drag = { change: changeId, path: file.depotPath, shelved: file.shelved };
@@ -527,16 +628,28 @@ function PendingFiles({
         )}
         onClick={(event) => onSelect(event, file.depotPath)}
         onPointerDown={(event) => onPointerDown(event, drag)}
+        onContextMenu={() => onContextMenu?.(drag)}
       >
         <FileStatusIcon status={file.status || p4ActionStatus(file.action)} className="mr-1" />
         <span className="min-w-0 flex-1 truncate font-mono">{depotBase(file.depotPath)}</span>
       </button>
     );
     const tip = fileTip(file) ? <FileStatusTip text={fileTip(file)} /> : undefined;
+    const key = `${file.depotPath}:${file.shelved ? "shelf" : "open"}`;
+    if (menu) {
+      return (
+        <ContextMenu key={key}>
+          <HoverTip className="max-w-lg" label={tip}>
+            <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
+          </HoverTip>
+          {menu(file, drag)}
+        </ContextMenu>
+      );
+    }
     if (file.status === "conflict" && onResolve) {
       const resolve = onResolve;
       return (
-        <ContextMenu key={`${file.depotPath}:open`}>
+        <ContextMenu key={key}>
           <HoverTip className="max-w-lg" label={tip}>
             <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
           </HoverTip>
@@ -550,7 +663,7 @@ function PendingFiles({
       );
     }
     return (
-      <HoverTip key={`${file.depotPath}:${file.shelved ? "shelf" : "open"}`} className="max-w-lg" label={tip}>
+      <HoverTip key={key} className="max-w-lg" label={tip}>
         {row}
       </HoverTip>
     );
@@ -673,22 +786,28 @@ function DeleteShelfDialog({
 }
 
 function RevertDialog({
-  paths,
+  request,
   onOpenChange,
   onConfirm,
 }: {
-  paths: string[] | null;
+  request: RevertRequest | null;
   onOpenChange: (open: boolean) => void;
   onConfirm: () => void;
 }) {
-  const count = paths?.length ?? 0;
+  const restored = request?.paths.length ?? 0;
+  const wiped = request?.wipe.length ?? 0;
+  const count = restored + wiped;
   return (
-    <Dialog open={paths !== null} onOpenChange={onOpenChange}>
+    <Dialog open={request !== null} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Revert {count === 1 ? "file" : `${count} files`}?</DialogTitle>
           <DialogDescription>
-            This discards the opened changes and restores the have revision. A shelf on the server is left in place.
+            {wiped === 0
+              ? "This discards the opened changes and restores the have revision. A shelf on the server is left in place."
+              : restored === 0
+                ? "This removes the added files from the changelist and deletes them from disk."
+                : "Added files are deleted from disk. Other opened files go back to the revision you have."}
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>

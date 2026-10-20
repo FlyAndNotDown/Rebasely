@@ -1439,14 +1439,26 @@ pub fn reopen(connection: &P4Connection, change_id: &str, files: &[String]) -> A
     Ok(())
 }
 
-pub fn revert(connection: &P4Connection, files: &[String]) -> AppResult<()> {
-    if files.is_empty() {
+pub fn revert(connection: &P4Connection, files: &[String], wipe: &[String]) -> AppResult<()> {
+    if files.is_empty() && wipe.is_empty() {
         return Err(AppError::msg("Choose a file to revert."));
     }
     let env = env_for(connection);
+    revert_with(&env, files, false)?;
+    revert_with(&env, wipe, true)?;
+    Ok(())
+}
+
+fn revert_with(env: &P4Env, files: &[String], wipe: bool) -> AppResult<()> {
+    if files.is_empty() {
+        return Ok(());
+    }
     let mut args = vec!["revert".to_string()];
+    if wipe {
+        args.push("-w".into());
+    }
     args.extend(files.iter().cloned());
-    run_owned(&env, &args, None)?;
+    run_owned(env, &args, None)?;
     Ok(())
 }
 

@@ -95,7 +95,8 @@ export const p4Api = {
     call<string>("p4_new_change", { connection, description }),
   reopen: (connection: P4Connection, changeId: string, files: string[]) =>
     call<void>("p4_reopen", { connection, changeId, files }),
-  revert: (connection: P4Connection, files: string[]) => call<void>("p4_revert", { connection, files }),
+  revert: (connection: P4Connection, files: string[], wipe?: string[]) =>
+    call<void>("p4_revert", { connection, files, wipe: wipe ?? null }),
   revertUnchanged: (connection: P4Connection) => call<void>("p4_revert_unchanged", { connection }),
   shelve: (connection: P4Connection, changeId: string, files?: string[]) =>
     call<void>("p4_shelve", { connection, changeId, files: files ?? null }),

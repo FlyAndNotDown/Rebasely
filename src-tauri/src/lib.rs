@@ -1173,8 +1173,12 @@ async fn p4_reopen(
 }
 
 #[tauri::command]
-async fn p4_revert(connection: p4::P4Connection, files: Vec<String>) -> AppResult<()> {
-    blocking(move || p4::revert(&connection, &files)).await
+async fn p4_revert(
+    connection: p4::P4Connection,
+    files: Vec<String>,
+    wipe: Option<Vec<String>>,
+) -> AppResult<()> {
+    blocking(move || p4::revert(&connection, &files, wipe.as_deref().unwrap_or(&[]))).await
 }
 
 #[tauri::command]

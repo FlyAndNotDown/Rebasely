@@ -95,7 +95,8 @@ interface P4ContextValue {
     targetChange: string,
     shelf: boolean,
   ) => Promise<void>;
-  revertPaths: (paths: string[]) => Promise<void>;
+  revertPaths: (paths: string[], wipe?: string[]) => Promise<void>;
+  shelveFiles: (files: { change: string; path: string }[]) => Promise<boolean>;
   shelveSelected: () => Promise<void>;
   unshelveSelected: () => Promise<void>;
   deleteSelectedShelf: () => Promise<void>;
@@ -590,16 +591,42 @@ export function P4Provider({ children }: { children: ReactNode }) {
   );
 
   const revertPaths = useCallback(
-    async (paths: string[]) => {
+    async (paths: string[], wipe: string[] = []) => {
       const current = sessionRef.current;
-      if (!current || paths.length === 0) return;
+      if (!current || (paths.length === 0 && wipe.length === 0)) return;
       const id = beginActivity("Reverting");
       try {
-        await guard(current.connection, () => p4Api.revert(current.connection, paths));
+        await guard(current.connection, () => p4Api.revert(current.connection, paths, wipe));
         toast.success("Reverted");
         await reloadPending();
       } catch (caught) {
         report(caught);
+      } finally {
+        endActivity(id);
+      }
+    },
+    [beginActivity, endActivity, guard, reloadPending, report],
+  );
+
+  const shelveFiles = useCallback(
+    async (files: { change: string; path: string }[]) => {
+      const current = sessionRef.current;
+      const numbered = files.filter((file) => file.change !== "default");
+      if (!current || numbered.length === 0) return false;
+      const id = beginActivity("Shelving");
+      try {
+        await guard(current.connection, async () => {
+          for (const [change, paths] of groupPaths(numbered)) {
+            await p4Api.shelve(current.connection, change, paths);
+          }
+        });
+        const skipped = files.length - numbered.length;
+        toast.success(skipped > 0 ? "Shelved the files in numbered changelists." : "Shelved");
+        await reloadPending(numbered[0]?.change);
+        return true;
+      } catch (caught) {
+        report(caught);
+        return false;
       } finally {
         endActivity(id);
       }
@@ -1019,6 +1046,7 @@ export function P4Provider({ children }: { children: ReactNode }) {
       moveFiles,
       placeFiles,
       revertPaths,
+      shelveFiles,
       shelveSelected,
       unshelveSelected,
       deleteSelectedShelf,
@@ -1083,6 +1111,7 @@ export function P4Provider({ children }: { children: ReactNode }) {
       searchSubmitted,
       workspaceOpen,
       revertPaths,
+      shelveFiles,
       revertUnchanged,
       revisionDiff,
       saveSelected,
