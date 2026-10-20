@@ -1066,6 +1066,11 @@ async fn p4_filelog(connection: p4::P4Connection, path: String) -> AppResult<Vec
 }
 
 #[tauri::command]
+async fn p4_locate(connection: p4::P4Connection, path: String) -> AppResult<p4::P4Location> {
+    blocking(move || p4::locate(&connection, &path)).await
+}
+
+#[tauri::command]
 async fn p4_list_dir(
     connection: p4::P4Connection,
     relative: String,
@@ -1682,6 +1687,7 @@ pub fn run() {
             p4_shelf_diff,
             p4_revision_diff,
             p4_filelog,
+            p4_locate,
             p4_list_dir,
             p4_list_depot,
             p4_search_depot,

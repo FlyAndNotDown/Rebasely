@@ -273,12 +273,7 @@ export function P4Pending() {
                     {open ? (
                       <>
                         <div
-                          className={cn(
-                            dropTarget === `open:${change.id}` && "rounded-md bg-accent/60",
-                            changeOpened.length === 0 &&
-                              dragKind === "shelf" &&
-                              "mx-2 my-0.5 min-h-7 rounded-md border border-dashed border-foreground/20",
-                          )}
+                          className={cn(dropTarget === `open:${change.id}` && "rounded-md bg-accent/60")}
                           data-drop="open"
                           data-change={change.id}
                         >

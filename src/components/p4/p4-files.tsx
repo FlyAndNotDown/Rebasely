@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { DownloadIcon, FilePenIcon, HistoryIcon, PlusIcon, Trash2Icon } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
+import { DownloadIcon, FilePenIcon, FolderIcon, FolderOpenIcon, FolderSearchIcon, FolderTreeIcon, HistoryIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { toast } from "sonner";
 import { AuthorName, ExactTime } from "@/components/revision-meta";
 import { FileTree, FileTreeFilter, FilteredFileTree, type FileTreeEntry } from "@/components/file-tree";
@@ -9,11 +9,18 @@ import { FileStatusTip } from "@/components/p4/file-status-tip";
 import { P4GetRevisionDialog } from "@/components/p4/p4-get-revision-dialog";
 import { P4Diff } from "@/components/p4/p4-diff";
 import { SegmentedControl } from "@/components/ui/segmented-control";
-import { ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from "@/components/ui/context-menu";
+import {
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
+} from "@/components/ui/context-menu";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { HoverTip } from "@/components/ui/tooltip";
 import { FileTreeSkeleton } from "@/components/skeletons";
-import { errorMessage } from "@/lib/git";
+import { errorMessage, gitApi } from "@/lib/git";
 import { joinRoot, type SearchNode } from "@/lib/file-search";
 import { changeSummary, p4Api, relativeToRoot } from "@/lib/p4";
 import { useFileQuery } from "@/lib/use-file-query";
@@ -68,6 +75,8 @@ export function P4Files() {
   const [revisionLoading, setRevisionLoading] = useState(false);
   const request = useRef(0);
   const diffRequest = useRef(0);
+  const revealId = useRef(0);
+  const [reveal, setReveal] = useState<TreeReveal | null>(null);
 
   function choose(path: string) {
     if (path === selected && history) return;
@@ -122,6 +131,51 @@ export function P4Files() {
     }
   }
 
+  async function revealLocation(entry: FileTreeEntry, target: "workspace" | "depot") {
+    if (!connection) return;
+    try {
+      const located = await p4Api.locate(connection, entry.path);
+      const path = target === "depot" ? located.depot : located.local;
+      if (!path) {
+        toast.error("That path is not in this workspace.");
+        return;
+      }
+      setQuery("");
+      setMode(target);
+      setReveal({ id: ++revealId.current, mode: target, path, dir: entry.dir });
+      if (entry.dir) {
+        ++request.current;
+        ++diffRequest.current;
+        setSelected(path);
+        setHistory(null);
+        setSelectedRev(null);
+        setRevisionDiff(null);
+        setHistoryLoading(false);
+        return;
+      }
+      choose(path);
+    } catch (caught) {
+      const message = errorMessage(caught);
+      if (message && message !== "Login cancelled") toast.error(message);
+    }
+  }
+
+  async function showInExplorer(entry: FileTreeEntry) {
+    if (!connection) return;
+    try {
+      const local = entry.path.startsWith("//") ? (await p4Api.locate(connection, entry.path)).local : entry.path;
+      if (!local) {
+        toast.error("That path is not in this workspace.");
+        return;
+      }
+      if (entry.dir) await gitApi.openInFileManager(local);
+      else await gitApi.revealInFileManager(local);
+    } catch (caught) {
+      const message = errorMessage(caught);
+      if (message && message !== "Login cancelled") toast.error(message);
+    }
+  }
+
   function fileMenu(entry: FileTreeEntry) {
     const path = p4TreeTarget(entry.path, entry.dir);
     return (
@@ -147,6 +201,30 @@ export function P4Files() {
           <Trash2Icon />
           Mark for delete
         </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuSub>
+          <ContextMenuSubTrigger>
+            <FolderSearchIcon />
+            Show in
+          </ContextMenuSubTrigger>
+          <ContextMenuSubContent className="w-40">
+            {mode === "workspace" ? (
+              <ContextMenuItem onClick={() => void revealLocation(entry, "depot")}>
+                <FolderTreeIcon />
+                Depot
+              </ContextMenuItem>
+            ) : (
+              <ContextMenuItem onClick={() => void revealLocation(entry, "workspace")}>
+                <FolderIcon />
+                Workspace
+              </ContextMenuItem>
+            )}
+            <ContextMenuItem onClick={() => void showInExplorer(entry)}>
+              <FolderOpenIcon />
+              File Explorer
+            </ContextMenuItem>
+          </ContextMenuSubContent>
+        </ContextMenuSub>
       </ContextMenuContent>
     );
   }
@@ -172,6 +250,8 @@ export function P4Files() {
                       key={`${connection?.port ?? ""}:${connection?.client ?? ""}`}
                       selected={selected}
                       onSelect={choose}
+                      onResolved={setSelected}
+                      reveal={reveal?.mode === "depot" ? reveal : null}
                       menu={fileMenu}
                     />
                   ) : (
@@ -179,6 +259,8 @@ export function P4Files() {
                       key={root}
                       selected={selected}
                       onSelect={choose}
+                      onResolved={setSelected}
+                      reveal={reveal?.mode === "workspace" ? reveal : null}
                       menu={fileMenu}
                     />
                   )}
@@ -298,10 +380,14 @@ export function P4Files() {
 function WorkspaceTree({
   selected,
   onSelect,
+  onResolved,
+  reveal,
   menu,
 }: {
   selected: string | null;
   onSelect: (path: string) => void;
+  onResolved: (path: string) => void;
+  reveal: TreeReveal | null;
   menu: (entry: FileTreeEntry) => ReactNode;
 }) {
   const { connection, listDir, filesEpoch } = useP4();
@@ -319,7 +405,7 @@ function WorkspaceTree({
     let live = true;
     void listDir("")
       .then((next) => {
-        if (live) setEntries({ "": next.map(presentFile) });
+        if (live) setEntries((current) => ({ ...current, "": next.map(presentFile) }));
       })
       .catch(() => {
         if (live) setFailed(true);
@@ -358,6 +444,12 @@ function WorkspaceTree({
       live = false;
     };
   }, [filesEpoch, listDir, root]);
+
+  const loadWorkspace = useCallback(
+    (dir: string) => listDir(dir ? relativeToRoot(root, dir) : ""),
+    [listDir, root],
+  );
+  useRevealTree(reveal, loadWorkspace, setEntries, setOpen, onResolved);
 
   async function toggle(path: string) {
     if (open.has(path)) {
@@ -399,10 +491,14 @@ function WorkspaceTree({
 function DepotTree({
   selected,
   onSelect,
+  onResolved,
+  reveal,
   menu,
 }: {
   selected: string | null;
   onSelect: (path: string) => void;
+  onResolved: (path: string) => void;
+  reveal: TreeReveal | null;
   menu: (entry: FileTreeEntry) => ReactNode;
 }) {
   const { listDepot, filesEpoch } = useP4();
@@ -419,7 +515,7 @@ function DepotTree({
     let live = true;
     void listDepot("")
       .then((next) => {
-        if (live) setEntries({ "": next.map(presentFile) });
+        if (live) setEntries((current) => ({ ...current, "": next.map(presentFile) }));
       })
       .catch(() => {
         if (live) setFailed(true);
@@ -458,6 +554,8 @@ function DepotTree({
       live = false;
     };
   }, [filesEpoch, listDepot]);
+
+  useRevealTree(reveal, listDepot, setEntries, setOpen, onResolved);
 
   async function toggle(path: string) {
     if (open.has(path)) {
@@ -530,6 +628,97 @@ function depotPath(relative: string) {
 function shownPath(mode: "workspace" | "depot", root: string, path: string) {
   if (mode === "depot" || path.startsWith("//")) return path;
   return relativeToRoot(root, path) || path;
+}
+
+type TreeReveal = {
+  id: number;
+  mode: "workspace" | "depot";
+  path: string;
+  dir: boolean;
+};
+
+function useRevealTree(
+  reveal: TreeReveal | null,
+  load: (dir: string) => Promise<P4DirEntry[]>,
+  setEntries: Dispatch<SetStateAction<Record<string, FileTreeEntry[]>>>,
+  setOpen: Dispatch<SetStateAction<Set<string>>>,
+  onResolved: (path: string) => void,
+) {
+  const resolvedRef = useRef(onResolved);
+  useEffect(() => {
+    resolvedRef.current = onResolved;
+  }, [onResolved]);
+  useEffect(() => {
+    if (!reveal) return;
+    let live = true;
+    void expandTree(async (dir) => (await load(dir)).map(presentFile), reveal.path, reveal.dir)
+      .then((result) => {
+        if (!live) return;
+        setEntries((current) => ({ ...current, ...result.entries }));
+        setOpen((current) => {
+          const next = new Set(current);
+          for (const dir of result.open) next.add(dir);
+          return next;
+        });
+        if (result.path !== reveal.path) resolvedRef.current(result.path);
+        scrollTreePath(result.path);
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [reveal, load, setEntries, setOpen]);
+}
+
+function normalizeTreePath(path: string) {
+  return path.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+}
+
+async function expandTree(
+  load: (dir: string) => Promise<FileTreeEntry[]>,
+  target: string,
+  openTarget: boolean,
+) {
+  const entries: Record<string, FileTreeEntry[]> = {};
+  const open: string[] = [];
+  const wanted = normalizeTreePath(target);
+  let current = "";
+  for (let depth = 0; depth < 40; depth += 1) {
+    let children: FileTreeEntry[];
+    try {
+      children = await load(current);
+    } catch {
+      return { entries, open, path: target };
+    }
+    entries[current] = children;
+    const exact = children.find((child) => normalizeTreePath(child.path) === wanted);
+    if (exact) {
+      if (openTarget && exact.dir) {
+        open.push(exact.path);
+        try {
+          entries[exact.path] = await load(exact.path);
+        } catch {
+          // The folder stays selected even if its contents cannot be read.
+        }
+      }
+      return { entries, open, path: exact.path };
+    }
+    const next = children.find(
+      (child) => child.dir && wanted.startsWith(`${normalizeTreePath(child.path)}/`),
+    );
+    if (!next || next.path === current) return { entries, open, path: target };
+    open.push(next.path);
+    current = next.path;
+  }
+  return { entries, open, path: target };
+}
+
+function scrollTreePath(path: string) {
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      document.querySelector(`[data-tree-path="${CSS.escape(path)}"]`)?.scrollIntoView({ block: "nearest" });
+    });
+  });
 }
 
 function presentFile(entry: P4DirEntry): FileTreeEntry {

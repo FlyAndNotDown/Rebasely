@@ -2677,6 +2677,57 @@ fn change_from_record(record: &ZtagRecord, files: Vec<P4File>, shelved: bool) ->
     }
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct P4Location {
+    pub depot: String,
+    pub local: String,
+}
+
+/// Map a workspace or depot path to the other side of the client view.
+pub fn locate(connection: &P4Connection, path: &str) -> AppResult<P4Location> {
+    let spec = path.trim().trim_end_matches(['/', '\\']);
+    if spec.is_empty() || spec == "//" {
+        return Err(AppError::msg("Choose a file or folder."));
+    }
+    let env = env_for(connection);
+    let stdout = run_ok(&env, &["-ztag", "where", spec], None)?;
+    let wanted = normalize_location(spec);
+    let mut fallback = None;
+    for record in parse_ztag(&stdout) {
+        if record.contains_key("unmap") {
+            continue;
+        }
+        let depot = mapped_location(&field(&record, "depotFile"));
+        let local = mapped_location(&field(&record, "path"));
+        if depot.is_empty() || local.is_empty() {
+            continue;
+        }
+        let location = P4Location { depot, local };
+        if same_location(&location.depot, &wanted) || same_location(&location.local, &wanted) {
+            return Ok(location);
+        }
+        if fallback.is_none() {
+            fallback = Some(location);
+        }
+    }
+    fallback.ok_or_else(|| AppError::msg("That path is not in this workspace."))
+}
+
+fn mapped_location(value: &str) -> String {
+    let value = value.trim().trim_end_matches(['/', '\\']);
+    let value = value.strip_suffix("...").unwrap_or(value);
+    value.trim_end_matches(['/', '\\']).to_string()
+}
+
+fn normalize_location(value: &str) -> String {
+    mapped_location(value).replace('\\', "/").to_ascii_lowercase()
+}
+
+fn same_location(left: &str, right: &str) -> bool {
+    normalize_location(left) == right || normalize_location(left) == normalize_location(right)
+}
+
 fn where_paths(env: &P4Env, files: &[String]) -> BTreeMap<String, String> {
     let mut map = BTreeMap::new();
     for chunk in files.chunks(80) {

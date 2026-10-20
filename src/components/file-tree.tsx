@@ -46,8 +46,9 @@ export function FileTree({
         const row = (
             <button
               type="button"
+              data-tree-path={item.path}
               className={cn(
-                "flex h-7 w-full items-center gap-1.5 pr-2 text-left text-xs hover:bg-muted/70",
+                "flex h-7 w-full items-center pr-2 text-left text-xs hover:bg-muted/70",
                 selected === item.path && "bg-muted",
                 item.ignored && "text-muted-foreground",
               )}
@@ -57,37 +58,39 @@ export function FileTree({
                 if (!item.dir) onOpenFile(item.path);
               }}
             >
-              {item.dir ? (
-                <ChevronRightIcon className={cn("size-3.5 shrink-0 transition-transform", expanded && "rotate-90")} />
-              ) : (
-                <span className="size-3.5 shrink-0" />
-              )}
-              {item.dir ? (
-                expanded ? (
-                  <FolderOpenIcon className="mr-1 size-3.5 shrink-0" />
-                ) : (
-                  <FolderIcon className="mr-1 size-3.5 shrink-0" />
-                )
-              ) : item.icon ? (
-                <span className="mr-1 inline-flex shrink-0">{item.icon}</span>
-              ) : (
-                <FileIcon className="mr-1 size-3.5 shrink-0 text-muted-foreground" />
-              )}
-              <span className="min-w-0 flex-1 truncate font-mono">{item.name}</span>
-              {trailing ? trailing(item) : null}
+              <HoverTip label={tip} className="max-w-lg">
+                <span className="inline-flex w-fit min-w-0 max-w-full items-center gap-1.5 overflow-hidden">
+                  {item.dir ? (
+                    <ChevronRightIcon className={cn("size-3.5 shrink-0 transition-transform", expanded && "rotate-90")} />
+                  ) : (
+                    <span className="size-3.5 shrink-0" />
+                  )}
+                  {item.dir ? (
+                    expanded ? (
+                      <FolderOpenIcon className="size-3.5 shrink-0" />
+                    ) : (
+                      <FolderIcon className="size-3.5 shrink-0" />
+                    )
+                  ) : item.icon ? (
+                    <span className="inline-flex shrink-0">{item.icon}</span>
+                  ) : (
+                    <FileIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                  )}
+                  <span className="min-w-0 truncate font-mono">{item.name}</span>
+                </span>
+              </HoverTip>
+              {trailing ? <span className="ml-auto pl-2">{trailing(item)}</span> : null}
             </button>
         );
         return (
           <div key={item.path}>
             {menu ? (
               <ContextMenu>
-                <HoverTip label={tip} className="max-w-lg">
-                  <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
-                </HoverTip>
+                <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
                 {menu(item)}
               </ContextMenu>
             ) : (
-              <HoverTip label={tip} className="max-w-lg">{row}</HoverTip>
+              row
             )}
             {expanded ? (
               <FileTree

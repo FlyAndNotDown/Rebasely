@@ -60,6 +60,11 @@ export interface P4Revision {
   description: string;
 }
 
+export interface P4Location {
+  depot: string;
+  local: string;
+}
+
 export interface P4DirEntry {
   name: string;
   path: string;

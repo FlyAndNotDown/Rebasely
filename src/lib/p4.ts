@@ -12,6 +12,7 @@ import type {
   P4DirEntry,
   P4FileSearch,
   P4GetRevision,
+  P4Location,
   P4Executables,
   P4OpenResult,
   P4ResolveView,
@@ -73,6 +74,8 @@ export const p4Api = {
     call<FileDiff>("p4_revision_diff", { connection, depotPath, rev }),
   filelog: (connection: P4Connection, path: string) =>
     call<P4Revision[]>("p4_filelog", { connection, path }),
+  locate: (connection: P4Connection, path: string) =>
+    call<P4Location>("p4_locate", { connection, path }),
   listDir: (connection: P4Connection, relative: string) =>
     call<P4DirEntry[]>("p4_list_dir", { connection, relative }),
   listDepot: (connection: P4Connection, path: string) =>
