@@ -1456,17 +1456,30 @@ pub fn revert_unchanged(connection: &P4Connection) -> AppResult<()> {
     Ok(())
 }
 
-pub fn shelve(connection: &P4Connection, change_id: &str) -> AppResult<()> {
+pub fn shelve(connection: &P4Connection, change_id: &str, files: &[String]) -> AppResult<()> {
     let id = require_numbered(change_id)?;
     let env = env_for(connection);
-    run_ok(&env, &["shelve", "-f", "-c", &id], None)?;
+    let mut args = vec!["shelve".to_string(), "-f".into(), "-c".into(), id];
+    args.extend(files.iter().cloned());
+    run_owned(&env, &args, None)?;
     Ok(())
 }
 
-pub fn unshelve(connection: &P4Connection, change_id: &str) -> AppResult<()> {
-    let id = require_numbered(change_id)?;
+pub fn unshelve(
+    connection: &P4Connection,
+    change_id: &str,
+    target: Option<&str>,
+    files: &[String],
+) -> AppResult<()> {
+    let source = require_numbered(change_id)?;
     let env = env_for(connection);
-    run_ok(&env, &["unshelve", "-s", &id], None)?;
+    let mut args = vec!["unshelve".to_string(), "-s".into(), source];
+    if let Some(target) = target.filter(|target| *target != "default") {
+        args.push("-c".into());
+        args.push(require_numbered(target)?);
+    }
+    args.extend(files.iter().cloned());
+    run_owned(&env, &args, None)?;
     Ok(())
 }
 

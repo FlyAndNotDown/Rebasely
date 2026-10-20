@@ -1178,13 +1178,24 @@ async fn p4_revert_unchanged(connection: p4::P4Connection) -> AppResult<()> {
 }
 
 #[tauri::command]
-async fn p4_shelve(connection: p4::P4Connection, change_id: String) -> AppResult<()> {
-    blocking(move || p4::shelve(&connection, &change_id)).await
+async fn p4_shelve(
+    connection: p4::P4Connection,
+    change_id: String,
+    files: Option<Vec<String>>,
+) -> AppResult<()> {
+    let files = files.unwrap_or_default();
+    blocking(move || p4::shelve(&connection, &change_id, &files)).await
 }
 
 #[tauri::command]
-async fn p4_unshelve(connection: p4::P4Connection, change_id: String) -> AppResult<()> {
-    blocking(move || p4::unshelve(&connection, &change_id)).await
+async fn p4_unshelve(
+    connection: p4::P4Connection,
+    change_id: String,
+    target: Option<String>,
+    files: Option<Vec<String>>,
+) -> AppResult<()> {
+    let files = files.unwrap_or_default();
+    blocking(move || p4::unshelve(&connection, &change_id, target.as_deref(), &files)).await
 }
 
 #[tauri::command]

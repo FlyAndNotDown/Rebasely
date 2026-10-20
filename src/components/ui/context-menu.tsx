@@ -59,6 +59,34 @@ function ContextMenuRadioGroup({
   )
 }
 
+function compactMenu(children: React.ReactNode) {
+  const visible = React.Children.toArray(children).filter((child) => {
+    if (!React.isValidElement(child)) return Boolean(child)
+    if (child.type === ContextMenuItem && Boolean((child.props as { disabled?: boolean }).disabled)) {
+      return false
+    }
+    return true
+  })
+  const kept: React.ReactNode[] = []
+  for (const child of visible) {
+    const separator = React.isValidElement(child) && child.type === ContextMenuSeparator
+    if (separator) {
+      const previous = kept[kept.length - 1]
+      if (!previous || (React.isValidElement(previous) && previous.type === ContextMenuSeparator)) continue
+    }
+    kept.push(child)
+  }
+  while (kept.length > 0) {
+    const last = kept[kept.length - 1]
+    if (React.isValidElement(last) && last.type === ContextMenuSeparator) kept.pop()
+    else break
+  }
+  const hasItem = kept.some(
+    (child) => !(React.isValidElement(child) && child.type === ContextMenuSeparator),
+  )
+  return hasItem ? kept : []
+}
+
 function ContextMenuContent({
   className,
   children,
@@ -66,6 +94,8 @@ function ContextMenuContent({
 }: React.ComponentProps<typeof ContextMenuPrimitive.Content> & {
   side?: "top" | "right" | "bottom" | "left"
 }) {
+  const items = compactMenu(children)
+  if (items.length === 0) return null
   return (
     <ContextMenuPrimitive.Portal>
       <ContextMenuPrimitive.Content
@@ -81,7 +111,7 @@ function ContextMenuContent({
           className="max-h-(--radix-context-menu-content-available-height)"
           viewportClassName="h-auto max-h-(--radix-context-menu-content-available-height) [&>div]:h-auto! [&>div]:min-h-0!"
         >
-          <div className="p-1">{children}</div>
+          <div className="p-1">{items}</div>
         </ScrollArea>
       </ContextMenuPrimitive.Content>
     </ContextMenuPrimitive.Portal>
@@ -92,11 +122,13 @@ function ContextMenuItem({
   className,
   inset,
   variant = "default",
+  disabled,
   ...props
 }: React.ComponentProps<typeof ContextMenuPrimitive.Item> & {
   inset?: boolean
   variant?: "default" | "destructive"
 }) {
+  if (disabled) return null
   return (
     <ContextMenuPrimitive.Item
       data-slot="context-menu-item"

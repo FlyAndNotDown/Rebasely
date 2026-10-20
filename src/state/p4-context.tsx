@@ -90,6 +90,11 @@ interface P4ContextValue {
   saveSelected: () => Promise<void>;
   createChange: (description: string) => Promise<void>;
   moveFiles: (depotPaths: string[], changeId: string) => Promise<void>;
+  placeFiles: (
+    files: { change: string; path: string; shelved: boolean }[],
+    targetChange: string,
+    shelf: boolean,
+  ) => Promise<void>;
   revertPaths: (paths: string[]) => Promise<void>;
   shelveSelected: () => Promise<void>;
   unshelveSelected: () => Promise<void>;
@@ -529,6 +534,61 @@ export function P4Provider({ children }: { children: ReactNode }) {
     [guard, reloadPending, report],
   );
 
+  const placeFiles = useCallback(
+    async (
+      files: { change: string; path: string; shelved: boolean }[],
+      targetChange: string,
+      shelf: boolean,
+    ) => {
+      const current = sessionRef.current;
+      if (!current || files.length === 0) return;
+      const shelved = files[0].shelved;
+      if (files.some((file) => file.shelved !== shelved)) return;
+      if (shelf && targetChange === "default") return;
+      if (shelf && shelved && files.every((file) => file.change === targetChange)) return;
+      if (!shelf && !shelved && files.every((file) => file.change === targetChange)) return;
+      const label = !shelved && !shelf ? "Moving" : shelved && !shelf ? "Unshelving" : "Shelving";
+      const id = beginActivity(label, targetChange);
+      try {
+        await guard(current.connection, async () => {
+          if (!shelved && !shelf) {
+            const paths = files.filter((file) => file.change !== targetChange).map((file) => file.path);
+            await p4Api.reopen(current.connection, targetChange, paths);
+            return;
+          }
+          if (!shelved && shelf) {
+            const moving = files.filter((file) => file.change !== targetChange).map((file) => file.path);
+            if (moving.length > 0) await p4Api.reopen(current.connection, targetChange, moving);
+            await p4Api.shelve(
+              current.connection,
+              targetChange,
+              files.map((file) => file.path),
+            );
+            return;
+          }
+          const moving = shelf ? files.filter((file) => file.change !== targetChange) : files;
+          for (const [source, paths] of groupPaths(moving)) {
+            await p4Api.unshelve(current.connection, source, targetChange, paths);
+          }
+          if (shelf) {
+            await p4Api.shelve(
+              current.connection,
+              targetChange,
+              moving.map((file) => file.path),
+            );
+          }
+        });
+        toast.success(!shelved && !shelf ? "Moved" : shelved && !shelf ? "Unshelved" : "Shelved");
+        await reloadPending(targetChange);
+      } catch (caught) {
+        report(caught);
+      } finally {
+        endActivity(id);
+      }
+    },
+    [beginActivity, endActivity, guard, reloadPending, report],
+  );
+
   const revertPaths = useCallback(
     async (paths: string[]) => {
       const current = sessionRef.current;
@@ -957,6 +1017,7 @@ export function P4Provider({ children }: { children: ReactNode }) {
       saveSelected,
       createChange,
       moveFiles,
+      placeFiles,
       revertPaths,
       shelveSelected,
       unshelveSelected,
@@ -1012,6 +1073,7 @@ export function P4Provider({ children }: { children: ReactNode }) {
       loadSubmitted,
       loading,
       moveFiles,
+      placeFiles,
       reconcile,
       reconnect,
       refresh,
@@ -1062,6 +1124,16 @@ export function useP4() {
   const value = useContext(P4Context);
   if (!value) throw new Error("useP4 must be used within P4Provider");
   return value;
+}
+
+function groupPaths(files: { change: string; path: string }[]) {
+  const groups = new Map<string, string[]>();
+  for (const file of files) {
+    const paths = groups.get(file.change) ?? [];
+    paths.push(file.path);
+    groups.set(file.change, paths);
+  }
+  return groups;
 }
 
 function fileKey(change: string, file: string | null, shelved: boolean) {
