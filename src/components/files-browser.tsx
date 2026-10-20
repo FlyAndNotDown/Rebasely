@@ -1,7 +1,7 @@
 import { memo, startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { SquarePenIcon, XIcon } from "lucide-react";
 import { toast } from "sonner";
-import { AuthorAvatar } from "@/components/author-avatar";
+import { AuthorName, ExactTime } from "@/components/revision-meta";
 import { avatarColor, avatarInitial, avatarSeed } from "@/lib/avatar";
 import { DiffLines } from "@/components/diff-viewer";
 import { FileTree, FileTreeFilter, FilteredFileTree } from "@/components/file-tree";
@@ -849,13 +849,8 @@ function FileHistory({
         >
           <span className="shrink-0 whitespace-nowrap font-mono text-[11px] text-muted-foreground">{commit.shortId}</span>
           <span className="min-w-0 flex-1 truncate text-sm">{commit.summary || "(no message)"}</span>
-          <span className="flex w-28 shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground">
-            <AuthorAvatar name={commit.authorName} email={commit.authorEmail} />
-            <span className="truncate">{commit.authorName}</span>
-          </span>
-          <span className="w-[7.25rem] shrink-0 text-right text-[11px] tabular-nums text-muted-foreground">
-            {formatAbsoluteTime(commit.timestamp)}
-          </span>
+          <AuthorName name={commit.authorName} email={commit.authorEmail} />
+          <ExactTime time={commit.timestamp} />
         </button>
       ))}
       {hasMore ? (

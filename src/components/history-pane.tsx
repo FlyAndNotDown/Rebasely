@@ -26,7 +26,7 @@ import {
   UndoDotIcon,
   UserIcon,
 } from "lucide-react";
-import { AuthorAvatar } from "@/components/author-avatar";
+import { AuthorName, ExactTime } from "@/components/revision-meta";
 import { CommitLine, CreateBranchDialog, CreateTagDialog } from "@/components/create-ref-dialogs";
 import { Button } from "@/components/ui/button";
 import { HoverTip } from "@/components/ui/tooltip";
@@ -53,7 +53,6 @@ import { InteractiveRebaseDialog } from "@/components/lazy-dialogs";
 import { MergeDialog, RebaseOntoDialog } from "@/components/rebase-dialog";
 import { HistorySkeleton } from "@/components/skeletons";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { formatAbsoluteTime } from "@/lib/format";
 import { errorMessage, expandHistoryRevs, gitApi } from "@/lib/git";
 import { graphWidth, laneColor, layoutCommitGraph, type GraphRow } from "@/lib/commit-graph";
 import { useWindowedRows } from "@/lib/use-windowed-rows";
@@ -779,18 +778,8 @@ const CommitRow = memo(function CommitRow({
               {commit.summary || "(no message)"}
             </span>
           </span>
-          <span className="flex w-28 shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground">
-            <AuthorAvatar
-              name={commit.authorName}
-              email={commit.authorEmail}
-            />
-            <span className="truncate">{commit.authorName}</span>
-          </span>
-          <HoverTip label={formatAbsoluteTime(commit.timestamp)}>
-            <span className="w-[7.25rem] shrink-0 text-right text-[11px] tabular-nums text-muted-foreground">
-              {formatAbsoluteTime(commit.timestamp)}
-            </span>
-          </HoverTip>
+          <AuthorName name={commit.authorName} email={commit.authorEmail} />
+          <ExactTime time={commit.timestamp} />
         </button>
       </ContextMenuTrigger>
       <ContextMenuContent className="w-48">

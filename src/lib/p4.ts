@@ -133,23 +133,15 @@ export function changeSummary(description: string): string {
     .find((line) => line.length > 0) ?? "";
 }
 
-export function p4ActionLetter(action: string): string {
+export function p4ActionStatus(action: string): string {
   const value = action.toLowerCase();
-  if (value.includes("add")) return "A";
-  if (value.includes("delete")) return "D";
-  if (value.includes("edit")) return "E";
-  if (value.includes("move") || value.includes("rename")) return "R";
-  if (value.includes("branch")) return "B";
-  if (value.includes("integrate")) return "I";
-  return (value.slice(0, 1) || "?").toUpperCase();
-}
-
-export function p4ActionClass(action: string): string {
-  const value = action.toLowerCase();
-  if (value.includes("add") || value.includes("branch")) return "text-diff-add";
-  if (value.includes("delete")) return "text-diff-del";
-  if (value.includes("integrate") || value.includes("move") || value.includes("rename")) return "text-diff-hunk";
-  return "text-amber-600 dark:text-amber-400";
+  if (value.includes("delete")) return "delete";
+  if (value.includes("integrate") || value.includes("move") || value.includes("rename") || value.includes("branch")) {
+    return "integrate";
+  }
+  if (value.includes("add")) return "add";
+  if (value.includes("edit")) return "edit";
+  return "";
 }
 
 export function depotBase(path: string): string {

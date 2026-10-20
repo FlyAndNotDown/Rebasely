@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { DownloadIcon, FilePenIcon, HistoryIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { toast } from "sonner";
-import { AuthorAvatar } from "@/components/author-avatar";
+import { AuthorName, ExactTime } from "@/components/revision-meta";
 import { FileTree, FileTreeFilter, FilteredFileTree, type FileTreeEntry } from "@/components/file-tree";
 import { ChangeBadge } from "@/components/p4/change-badge";
 import { FileStatusIcon } from "@/components/p4/file-status-icon";
@@ -11,7 +11,6 @@ import { P4Diff } from "@/components/p4/p4-diff";
 import { Button } from "@/components/ui/button";
 import { ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from "@/components/ui/context-menu";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
-import { formatAbsoluteTime, formatExactTime } from "@/lib/format";
 import { HoverTip } from "@/components/ui/tooltip";
 import { FileTreeSkeleton } from "@/components/skeletons";
 import { errorMessage } from "@/lib/git";
@@ -267,17 +266,8 @@ export function P4Files() {
                         <span className="min-w-0 flex-1 truncate text-xs">
                           {changeSummary(revision.description) || "No description"}
                         </span>
-                        <span className="flex w-36 shrink-0 items-center gap-1.5 text-[11px]">
-                          <AuthorAvatar name={revision.user} email="" className="size-4" />
-                          <span className="truncate font-medium text-foreground">{revision.user}</span>
-                        </span>
-                        {revision.time ? (
-                          <HoverTip label={formatExactTime(revision.time)}>
-                            <span className="w-[7.25rem] shrink-0 text-right text-[11px] tabular-nums text-muted-foreground">
-                              {formatAbsoluteTime(revision.time)}
-                            </span>
-                          </HoverTip>
-                        ) : null}
+                        <AuthorName name={revision.user} />
+                        <ExactTime time={revision.time} />
                       </button>
                     ))
                   )}
@@ -527,8 +517,13 @@ function TreeMode({
           key={id}
           type="button"
           size="sm"
-          variant={mode === id ? "default" : "ghost"}
-          className={cn("h-6 px-2 text-xs", mode === id ? "shadow-sm" : "text-muted-foreground")}
+          variant="ghost"
+          className={cn(
+            "h-6 px-2 text-xs shadow-none",
+            mode === id
+              ? "bg-background text-foreground ring-1 ring-foreground/20"
+              : "text-muted-foreground hover:text-foreground",
+          )}
           aria-pressed={mode === id}
           onClick={() => onMode(id)}
         >

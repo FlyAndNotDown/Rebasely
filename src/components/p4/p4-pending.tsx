@@ -23,7 +23,7 @@ import {
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
-import { changeSummary, depotBase } from "@/lib/p4";
+import { changeSummary, depotBase, p4ActionStatus } from "@/lib/p4";
 import { HoverTip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { useP4 } from "@/state/p4-context";
@@ -533,7 +533,7 @@ function PendingFiles({
         onClick={(event) => onSelect(event, file.depotPath)}
         onPointerDown={(event) => onPointerDown(event, drag)}
       >
-        <FileStatusIcon status={file.status || actionStatus(file.action)} className="mr-1" />
+        <FileStatusIcon status={file.status || p4ActionStatus(file.action)} className="mr-1" />
         <span className="min-w-0 flex-1 truncate font-mono">{depotBase(file.depotPath)}</span>
       </button>
     );
@@ -594,15 +594,6 @@ function acceptsDrop(files: PendingDragFile[] | null, targetChange: string, shel
 
 function fileTip(file: { depotPath: string; detail: string; action: string }) {
   return fileStatusText(file.depotPath, file.detail, file.action);
-}
-
-function actionStatus(action: string) {
-  const value = action.toLowerCase();
-  if (value.includes("delete")) return "delete";
-  if (value.includes("add")) return "add";
-  if (value.includes("edit")) return "edit";
-  if (value.includes("integrate") || value.includes("move") || value.includes("branch")) return "integrate";
-  return "";
 }
 
 function NewChangeDialog({

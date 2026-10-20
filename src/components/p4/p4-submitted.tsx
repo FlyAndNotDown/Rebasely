@@ -2,7 +2,9 @@ import { useEffect, useMemo, useRef, useState, type UIEvent } from "react";
 import { CheckIcon, ChevronDownIcon } from "lucide-react";
 import { toast } from "sonner";
 import { AuthorAvatar } from "@/components/author-avatar";
+import { AuthorName, ExactTime, RevisionDot } from "@/components/revision-meta";
 import { ChangeBadge } from "@/components/p4/change-badge";
+import { FileStatusIcon } from "@/components/p4/file-status-icon";
 import { P4Diff } from "@/components/p4/p4-diff";
 import { HistorySkeleton } from "@/components/skeletons";
 import { Button } from "@/components/ui/button";
@@ -16,7 +18,7 @@ import { Input } from "@/components/ui/input";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { formatAbsoluteTime, formatExactTime } from "@/lib/format";
 import { HoverTip } from "@/components/ui/tooltip";
-import { changeSummary, depotBase, p4ActionClass, p4ActionLetter } from "@/lib/p4";
+import { changeSummary, depotBase, p4ActionStatus } from "@/lib/p4";
 import { cn } from "@/lib/utils";
 import { useP4 } from "@/state/p4-context";
 import type { P4Changelist } from "@/types/p4";
@@ -229,7 +231,7 @@ export function P4Submitted() {
 
   return (
     <ResizablePanelGroup orientation="horizontal" className="min-h-0 min-w-0 flex-1">
-      <ResizablePanel id="p4-submitted-list" defaultSize="32%" minSize="22%" maxSize="48%">
+      <ResizablePanel id="p4-submitted-list" defaultSize="40%" minSize="28%" maxSize="56%">
         <div className="flex h-full min-h-0 flex-col">
           <div className="grid shrink-0 gap-1.5 border-b p-2">
             <div className="grid grid-cols-2 gap-1.5">
@@ -237,10 +239,11 @@ export function P4Submitted() {
                 label="User"
                 value={p4.submittedUser}
                 emptyLabel="All users"
+                pinned={currentUser ? { label: "Me", value: currentUser } : undefined}
                 options={withCurrent(users, p4.submittedUser || currentUser)}
                 onOpen={ensureUsers}
                 onChange={(user) => {
-                  const client = user === currentUser ? (connection?.client ?? "") : "";
+                  const client = user && user === p4.submittedUser ? p4.submittedClient : "";
                   p4.setSubmittedFilter(user, client);
                   if (user) ensureClients(user);
                   else setClients([]);
@@ -288,17 +291,13 @@ export function P4Submitted() {
                       )}
                       onClick={() => void p4.selectSubmitted(change.id)}
                     >
+                      <RevisionDot />
                       <ChangeBadge id={change.id} />
                       <span className="min-w-0 flex-1 truncate text-xs">
                         {changeSummary(change.description) || "No description"}
                       </span>
-                      {change.time ? (
-                        <HoverTip label={formatExactTime(change.time)}>
-                          <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
-                            {formatAbsoluteTime(change.time)}
-                          </span>
-                        </HoverTip>
-                      ) : null}
+                      <AuthorName name={change.user} />
+                      <ExactTime time={change.time} />
                     </button>
                   );
                 })}
@@ -313,7 +312,7 @@ export function P4Submitted() {
         </div>
       </ResizablePanel>
       <ResizableHandle />
-      <ResizablePanel id="p4-submitted-main" defaultSize="68%" minSize="40%">
+      <ResizablePanel id="p4-submitted-main" defaultSize="60%" minSize="36%">
         <ResizablePanelGroup orientation="vertical" className="min-h-0 min-w-0">
           <ResizablePanel id="p4-submitted-files" defaultSize="32%" minSize="16%">
             <div className="flex h-full min-h-0 flex-col">
@@ -365,9 +364,7 @@ export function P4Submitted() {
                     )}
                     onClick={() => setPicked(item.depotPath)}
                   >
-                    <span className={cn("w-3 shrink-0 text-center font-mono text-[11px] font-medium", p4ActionClass(item.action))}>
-                      {p4ActionLetter(item.action)}
-                    </span>
+                    <FileStatusIcon status={item.status || p4ActionStatus(item.action)} />
                     <span className="min-w-0 flex-1 truncate font-mono">{depotBase(item.depotPath)}</span>
                     {item.binary || p4.submittedDiffs.some((diff) => diff.binary && diff.path === item.depotPath) ? (
                       <span className="shrink-0 text-muted-foreground">binary</span>
@@ -422,6 +419,7 @@ function FilterMenu({
   label,
   value,
   emptyLabel,
+  pinned,
   options,
   onOpen,
   onChange,
@@ -429,15 +427,22 @@ function FilterMenu({
   label: string;
   value: string;
   emptyLabel: string;
+  pinned?: { label: string; value: string };
   options: string[];
   onOpen: () => void;
   onChange: (value: string) => void;
 }) {
   const [query, setQuery] = useState("");
   const needle = query.trim().toLowerCase();
-  const shown = (needle ? options.filter((option) => option.toLowerCase().includes(needle)) : options).slice(0, 80);
+  const listed = pinned ? options.filter((option) => option !== pinned.value) : options;
+  const shown = (needle ? listed.filter((option) => option.toLowerCase().includes(needle)) : listed).slice(0, 80);
   const typed = query.trim();
   const canUseTyped = typed.length > 0 && !options.some((option) => option.toLowerCase() === typed.toLowerCase());
+  const showPinned =
+    pinned != null &&
+    pinned.value.length > 0 &&
+    (!needle || pinned.label.toLowerCase().includes(needle) || pinned.value.toLowerCase().includes(needle));
+  const buttonLabel = pinned && value === pinned.value ? pinned.label : value || emptyLabel;
   return (
     <DropdownMenu
       onOpenChange={(open) => {
@@ -447,7 +452,9 @@ function FilterMenu({
     >
       <DropdownMenuTrigger asChild>
         <Button type="button" variant="outline" size="sm" className="w-full justify-between px-2 font-normal">
-          <span className="min-w-0 truncate font-mono text-xs">{value || emptyLabel}</span>
+          <span className={cn("min-w-0 truncate text-xs", value && value !== pinned?.value && "font-mono")}>
+            {buttonLabel}
+          </span>
           <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground" />
         </Button>
       </DropdownMenuTrigger>
@@ -465,6 +472,12 @@ function FilterMenu({
             <DropdownMenuItem onClick={() => onChange("")}>
               <span className="min-w-4">{value === "" ? <CheckIcon className="size-3.5" /> : null}</span>
               {emptyLabel}
+            </DropdownMenuItem>
+          ) : null}
+          {showPinned && pinned ? (
+            <DropdownMenuItem onClick={() => onChange(pinned.value)}>
+              <span className="min-w-4">{value === pinned.value ? <CheckIcon className="size-3.5" /> : null}</span>
+              {pinned.label}
             </DropdownMenuItem>
           ) : null}
           {shown.map((option) => (

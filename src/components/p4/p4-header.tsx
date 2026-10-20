@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { CableIcon, DownloadIcon, FolderPenIcon, FolderSyncIcon, RefreshCwIcon } from "lucide-react";
+import { CableIcon, DownloadIcon, FolderPenIcon, RefreshCwIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { HoverTip, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
@@ -9,7 +9,7 @@ const actionClass =
   "h-[calc(1.75rem-2px)]! w-[calc(1.75rem-2px)]! rounded-[6px] text-foreground hover:bg-background dark:hover:bg-background";
 
 export function P4Header() {
-  const { connection, refresh, sync, reconcile, setConnectionOpen, setWorkspaceOpen } = useP4();
+  const { connection, refresh, sync, setConnectionOpen, setWorkspaceOpen } = useP4();
   const client = connection?.client ?? "";
 
   return (
@@ -29,9 +29,6 @@ export function P4Header() {
         </HeaderButton>
         <HeaderButton label="Get latest" onClick={() => void sync()}>
           <DownloadIcon className="size-4" />
-        </HeaderButton>
-        <HeaderButton label="Reconcile" onClick={() => void reconcile()}>
-          <FolderSyncIcon className="size-4" />
         </HeaderButton>
         <span className="h-3.5 w-px self-center bg-foreground/20" />
         <HeaderButton label="Edit connection" onClick={() => setConnectionOpen(true)}>
