@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { HoverTip } from "@/components/ui/tooltip";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -660,32 +661,19 @@ export function ChangesPane() {
             ? `${totalSelected} selected`
             : plural(new Set([...files.unstaged, ...files.staged].map((file) => file.path)).size, "changed file")}
         </span>
-        <div role="group" aria-label="Changed files layout" className="flex shrink-0 rounded-md bg-muted p-0.5">
-            <HoverTip label="Show as list">
-              <Button
-                type="button"
-                variant={tree ? "ghost" : "secondary"}
-                size="icon-xs"
-                aria-pressed={!tree}
-                aria-label="Show as list"
-                onClick={() => tree && void updatePrefs({ ...prefs, changesTree: false })}
-              >
-                <ListIcon />
-              </Button>
-            </HoverTip>
-            <HoverTip label="Group by folder">
-              <Button
-                type="button"
-                variant={tree ? "secondary" : "ghost"}
-                size="icon-xs"
-                aria-pressed={tree}
-                aria-label="Group by folder"
-                onClick={() => !tree && void updatePrefs({ ...prefs, changesTree: true })}
-              >
-                <FolderTreeIcon />
-              </Button>
-            </HoverTip>
-        </div>
+        <SegmentedControl
+          label="Changed files layout"
+          dense
+          value={tree ? "tree" : "list"}
+          onChange={(value) => {
+            const next = value === "tree";
+            if (next !== tree) void updatePrefs({ ...prefs, changesTree: next });
+          }}
+          options={[
+            { value: "list", label: <ListIcon />, tip: "Show as list" },
+            { value: "tree", label: <FolderTreeIcon />, tip: "Group by folder" },
+          ]}
+        />
       </div>
       <ScrollArea className="min-h-0 flex-1" viewportRef={windowed.viewportRef}>
         <div

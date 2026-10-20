@@ -3,6 +3,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { ChevronDownIcon, FolderOpenIcon, Loader2Icon } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { HoverTip } from "@/components/ui/tooltip";
 import {
   DropdownMenu,
@@ -85,28 +86,17 @@ function CloneForm({
   const [kind, setKind] = useState<"git" | "perforce">("git");
   return (
     <div>
-      <div className="mb-4 flex w-fit rounded-md bg-muted p-0.5">
-        <Button
-          type="button"
-          size="sm"
-          variant={kind === "git" ? "secondary" : "ghost"}
-          className="h-7 px-3"
-          disabled={cloning}
-          onClick={() => setKind("git")}
-        >
-          Git
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant={kind === "perforce" ? "secondary" : "ghost"}
-          className="h-7 px-3"
-          disabled={cloning}
-          onClick={() => setKind("perforce")}
-        >
-          Perforce
-        </Button>
-      </div>
+      <SegmentedControl
+        label="Repository kind"
+        value={kind}
+        disabled={cloning}
+        className="mb-4 w-fit"
+        onChange={setKind}
+        options={[
+          { value: "git", label: "Git" },
+          { value: "perforce", label: "Perforce" },
+        ]}
+      />
       {kind === "git" ? (
         <GitCloneForm cloning={cloning} setCloning={setCloning} onOpenChange={onOpenChange} />
       ) : (

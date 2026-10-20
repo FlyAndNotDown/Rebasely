@@ -8,7 +8,7 @@ import { FileStatusIcon } from "@/components/p4/file-status-icon";
 import { FileStatusTip } from "@/components/p4/file-status-tip";
 import { P4GetRevisionDialog } from "@/components/p4/p4-get-revision-dialog";
 import { P4Diff } from "@/components/p4/p4-diff";
-import { Button } from "@/components/ui/button";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from "@/components/ui/context-menu";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { HoverTip } from "@/components/ui/tooltip";
@@ -511,26 +511,15 @@ function TreeMode({
   onMode: (mode: "workspace" | "depot") => void;
 }) {
   return (
-    <div role="group" aria-label="File tree" className="flex h-7 shrink-0 rounded-md bg-muted p-0.5">
-      {(["workspace", "depot"] as const).map((id) => (
-        <Button
-          key={id}
-          type="button"
-          size="sm"
-          variant="ghost"
-          className={cn(
-            "h-6 px-2 text-xs shadow-none",
-            mode === id
-              ? "bg-background text-foreground ring-1 ring-foreground/20"
-              : "text-muted-foreground hover:text-foreground",
-          )}
-          aria-pressed={mode === id}
-          onClick={() => onMode(id)}
-        >
-          {id === "workspace" ? "Workspace" : "Depot"}
-        </Button>
-      ))}
-    </div>
+    <SegmentedControl
+      label="File tree"
+      value={mode}
+      onChange={onMode}
+      options={[
+        { value: "workspace", label: "Workspace" },
+        { value: "depot", label: "Depot" },
+      ]}
+    />
   );
 }
 
