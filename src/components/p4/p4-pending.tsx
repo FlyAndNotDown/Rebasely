@@ -1,4 +1,4 @@
-import { useRef, useState, type DragEvent, type MouseEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type MouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { ArchiveIcon, ArchiveRestoreIcon, ChevronDownIcon, GitMergeIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { ChangeBadge } from "@/components/p4/change-badge";
 import { FileStatusIcon } from "@/components/p4/file-status-icon";
@@ -44,6 +44,7 @@ export function P4Pending() {
   const dragFiles = useRef<PendingDragFile[] | null>(null);
   const anchor = useRef<string | null>(null);
   const didDrag = useRef(false);
+  const pointerDrag = useRef<(() => void) | null>(null);
   const resolvingPath = resolving?.change === p4.selectedChange ? resolving.path : null;
   const openChanges = expanded ?? new Set(p4.selectedChange ? [p4.selectedChange] : []);
 
@@ -120,44 +121,76 @@ export function P4Pending() {
     chooseFile(file.change, file.path, file.shelved);
   }
 
-  function startDrag(event: DragEvent, file: PendingDragFile) {
-    const key = rowKey(file);
-    const chosen = picked.includes(key)
-      ? rowsInOrder().filter((row) => row.shelved === file.shelved && picked.includes(rowKey(row)))
-      : [file];
-    dragFiles.current = chosen.length > 0 ? chosen : [file];
-    didDrag.current = true;
-    setDragKind(file.shelved ? "shelf" : "open");
-    event.dataTransfer.effectAllowed = "move";
-    event.dataTransfer.setData("text/plain", (dragFiles.current ?? []).map((row) => row.path).join("\n"));
-  }
+  useEffect(() => {
+    return () => {
+      pointerDrag.current?.();
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+  }, []);
 
-  function endDrag() {
-    dragFiles.current = null;
-    setDragKind(null);
-    setDropTarget(null);
-    window.setTimeout(() => {
-      didDrag.current = false;
-    }, 0);
-  }
+  function beginPointer(event: ReactPointerEvent, file: PendingDragFile) {
+    if (event.button !== 0) return;
+    pointerDrag.current?.();
+    const pointerId = event.pointerId;
+    const startX = event.clientX;
+    const startY = event.clientY;
+    let dragging = false;
 
-  function allowDrop(event: DragEvent, target: string) {
-    if (!dragFiles.current) return;
-    event.preventDefault();
-    event.dataTransfer.dropEffect = "move";
-    setDropTarget(target);
-  }
+    const move = (ev: PointerEvent) => {
+      if (ev.pointerId !== pointerId) return;
+      if (!dragging) {
+        const dx = ev.clientX - startX;
+        const dy = ev.clientY - startY;
+        if (dx * dx + dy * dy < 16) return;
+        dragging = true;
+        didDrag.current = true;
+        const key = rowKey(file);
+        const chosen = picked.includes(key)
+          ? rowsInOrder().filter((row) => row.shelved === file.shelved && picked.includes(rowKey(row)))
+          : [file];
+        dragFiles.current = chosen.length > 0 ? chosen : [file];
+        setDragKind(file.shelved ? "shelf" : "open");
+        document.body.style.cursor = "grabbing";
+        document.body.style.userSelect = "none";
+      }
+      const next = highlightAt(ev.clientX, ev.clientY, dragFiles.current);
+      setDropTarget((current) => (current === next ? current : next));
+    };
 
-  function finishDrop(targetChange: string, shelf: boolean) {
-    const files = dragFiles.current;
-    endDrag();
-    if (!files || files.length === 0) return;
-    if (shelf) {
-      setShelvedOpen((current) => new Set(current).add(targetChange));
-      setExpanded((current) => new Set(current ?? openChanges).add(targetChange));
-    }
-    setPicked([]);
-    void p4.placeFiles(files, targetChange, shelf);
+    const finish = (ev: PointerEvent) => {
+      if (ev.pointerId !== pointerId) return;
+      stop();
+      const files = dragFiles.current;
+      const target = dragging ? zoneAt(ev.clientX, ev.clientY) : null;
+      dragFiles.current = null;
+      setDragKind(null);
+      setDropTarget(null);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      window.setTimeout(() => {
+        didDrag.current = false;
+      }, 0);
+      if (!dragging || !files || !target || !acceptsDrop(files, target.change, target.shelf)) return;
+      if (target.shelf) {
+        setShelvedOpen((current) => new Set(current).add(target.change));
+        setExpanded((current) => new Set(current ?? openChanges).add(target.change));
+      }
+      setPicked([]);
+      void p4.placeFiles(files, target.change, target.shelf);
+    };
+
+    const stop = () => {
+      window.removeEventListener("pointermove", move, true);
+      window.removeEventListener("pointerup", finish, true);
+      window.removeEventListener("pointercancel", finish, true);
+      if (pointerDrag.current === stop) pointerDrag.current = null;
+    };
+
+    pointerDrag.current = stop;
+    window.addEventListener("pointermove", move, true);
+    window.addEventListener("pointerup", finish, true);
+    window.addEventListener("pointercancel", finish, true);
   }
 
   return (
@@ -172,7 +205,7 @@ export function P4Pending() {
                 New
               </Button>
             </div>
-            <div className="min-h-0 flex-1 overflow-auto px-1 py-1">
+            <div className={cn("min-h-0 flex-1 overflow-auto px-1 py-1", dragKind && "[&_*]:cursor-grabbing")}>
               {p4.pending.map((change) => {
                 const changeOpened = change.files.filter((file) => !file.shelved);
                 const changeShelved = change.files.filter((file) => file.shelved);
@@ -180,8 +213,7 @@ export function P4Pending() {
                 const open = openChanges.has(change.id);
                 const active = change.id === p4.selectedChange;
                 const selectedPath = active ? p4.selectedFile : null;
-                const showShelf =
-                  change.id !== "default" && (changeShelved.length > 0 || (open && dragKind === "open"));
+                const showShelf = open && change.id !== "default";
                 return (
                   <div key={change.id}>
                     <ContextMenu>
@@ -192,18 +224,18 @@ export function P4Pending() {
                             active && "bg-muted",
                             dropTarget === `open:${change.id}` && "bg-accent ring-1 ring-foreground/25 ring-inset",
                           )}
-                          onDragOver={(event) => allowDrop(event, `open:${change.id}`)}
-                          onDrop={(event) => {
-                            event.preventDefault();
-                            finishDrop(change.id, false);
-                          }}
+                          data-drop="open"
+                          data-change={change.id}
                         >
                           <button
                             type="button"
                             className="flex size-7 shrink-0 items-center justify-center"
                             aria-expanded={open}
                             aria-label={open ? "Collapse changelist" : "Expand changelist"}
-                            onClick={() => toggleChange(change.id)}
+                            onClick={() => {
+                              if (didDrag.current) return;
+                              toggleChange(change.id);
+                            }}
                           >
                             <ChevronDownIcon
                               className={cn(
@@ -215,7 +247,10 @@ export function P4Pending() {
                           <button
                             type="button"
                             className="flex min-w-0 flex-1 items-center gap-2 py-1.5 text-left"
-                            onClick={() => focusChange(change.id)}
+                            onClick={() => {
+                              if (didDrag.current) return;
+                              focusChange(change.id);
+                            }}
                           >
                             <ChangeBadge id={change.id} />
                             <span className="min-w-0 flex-1 truncate text-xs">{summary || "No description"}</span>
@@ -238,12 +273,14 @@ export function P4Pending() {
                     {open ? (
                       <>
                         <div
-                          className={cn(dropTarget === `open:${change.id}` && "rounded-md bg-accent/60")}
-                          onDragOver={(event) => allowDrop(event, `open:${change.id}`)}
-                          onDrop={(event) => {
-                            event.preventDefault();
-                            finishDrop(change.id, false);
-                          }}
+                          className={cn(
+                            dropTarget === `open:${change.id}` && "rounded-md bg-accent/60",
+                            changeOpened.length === 0 &&
+                              dragKind === "shelf" &&
+                              "mx-2 my-0.5 min-h-7 rounded-md border border-dashed border-foreground/20",
+                          )}
+                          data-drop="open"
+                          data-change={change.id}
                         >
                           <PendingFiles
                             changeId={change.id}
@@ -257,8 +294,7 @@ export function P4Pending() {
                               chooseFile(change.id, path, false);
                               setResolving({ change: change.id, path });
                             }}
-                            onDragStart={startDrag}
-                            onDragEnd={endDrag}
+                            onPointerDown={beginPointer}
                           />
                         </div>
                         {showShelf ? (
@@ -266,15 +302,8 @@ export function P4Pending() {
                             className={cn(
                               dropTarget === `shelf:${change.id}` && "rounded-md bg-accent ring-1 ring-foreground/25 ring-inset",
                             )}
-                            onDragOver={(event) => {
-                              event.stopPropagation();
-                              allowDrop(event, `shelf:${change.id}`);
-                            }}
-                            onDrop={(event) => {
-                              event.preventDefault();
-                              event.stopPropagation();
-                              finishDrop(change.id, true);
-                            }}
+                            data-drop="shelf"
+                            data-change={change.id}
                           >
                           <FileGroup
                             title="Shelved"
@@ -284,11 +313,14 @@ export function P4Pending() {
                             picked={picked}
                             selectedPath={selectedPath}
                             selectedShelved={p4.selectedShelved}
-                            onToggle={() => toggleShelved(change.id)}
+                            onToggle={() => {
+                              if (didDrag.current) return;
+                              toggleShelved(change.id);
+                            }}
                             onSelect={(event, path) => pickFile(event, { change: change.id, path, shelved: true })}
-                            onDragStart={startDrag}
-                            onDragEnd={endDrag}
+                            onPointerDown={beginPointer}
                             menu={
+                              changeShelved.length === 0 ? undefined : (
                               <ContextMenuContent className="w-36">
                                 <ContextMenuItem
                                   onClick={() => {
@@ -311,6 +343,7 @@ export function P4Pending() {
                                   Delete
                                 </ContextMenuItem>
                               </ContextMenuContent>
+                              )
                             }
                           />
                           </div>
@@ -409,8 +442,7 @@ function FileGroup({
   selectedShelved,
   onToggle,
   onSelect,
-  onDragStart,
-  onDragEnd,
+  onPointerDown,
   menu,
 }: {
   title: string;
@@ -422,8 +454,7 @@ function FileGroup({
   selectedShelved: boolean;
   onToggle: () => void;
   onSelect: (event: MouseEvent, path: string) => void;
-  onDragStart: (event: DragEvent, file: PendingDragFile) => void;
-  onDragEnd: () => void;
+  onPointerDown: (event: ReactPointerEvent, file: PendingDragFile) => void;
   menu?: ReactNode;
 }) {
   const header = (
@@ -457,8 +488,7 @@ function FileGroup({
           selectedShelved={selectedShelved}
           className="pl-12"
           onSelect={onSelect}
-          onDragStart={onDragStart}
-          onDragEnd={onDragEnd}
+          onPointerDown={onPointerDown}
         />
       ) : null}
     </div>
@@ -474,8 +504,7 @@ function PendingFiles({
   className,
   onSelect,
   onResolve,
-  onDragStart,
-  onDragEnd,
+  onPointerDown,
 }: {
   changeId: string;
   files: PendingFile[];
@@ -485,8 +514,7 @@ function PendingFiles({
   className: string;
   onSelect: (event: MouseEvent, path: string) => void;
   onResolve?: (path: string) => void;
-  onDragStart: (event: DragEvent, file: PendingDragFile) => void;
-  onDragEnd: () => void;
+  onPointerDown: (event: ReactPointerEvent, file: PendingDragFile) => void;
 }) {
   return files.map((file) => {
     const drag = { change: changeId, path: file.depotPath, shelved: file.shelved };
@@ -497,15 +525,13 @@ function PendingFiles({
     const row = (
       <button
         type="button"
-        draggable
         className={cn(
-          "flex w-full cursor-grab items-center gap-2 rounded-md py-1 pr-2 text-left text-xs hover:bg-muted/70 active:cursor-grabbing",
+          "flex w-full cursor-grab items-center gap-2 rounded-md py-1 pr-2 text-left text-xs hover:bg-muted/70",
           className,
           active && "bg-muted",
         )}
         onClick={(event) => onSelect(event, file.depotPath)}
-        onDragStart={(event) => onDragStart(event, drag)}
-        onDragEnd={onDragEnd}
+        onPointerDown={(event) => onPointerDown(event, drag)}
       >
         <FileStatusIcon status={file.status || actionStatus(file.action)} className="mr-1" />
         <span className="min-w-0 flex-1 truncate font-mono">{depotBase(file.depotPath)}</span>
@@ -538,6 +564,32 @@ function PendingFiles({
 
 function rowKey(file: PendingDragFile) {
   return `${file.change}\n${file.path}\n${file.shelved ? "1" : "0"}`;
+}
+
+function zoneAt(x: number, y: number) {
+  const hit = document.elementFromPoint(x, y);
+  const zone = hit instanceof Element ? hit.closest("[data-drop]") : null;
+  if (!(zone instanceof HTMLElement)) return null;
+  const kind = zone.dataset.drop;
+  const change = zone.dataset.change;
+  if ((kind !== "open" && kind !== "shelf") || !change) return null;
+  return { change, shelf: kind === "shelf" };
+}
+
+function highlightAt(x: number, y: number, files: PendingDragFile[] | null) {
+  const target = zoneAt(x, y);
+  if (!target || !acceptsDrop(files, target.change, target.shelf)) return null;
+  return `${target.shelf ? "shelf" : "open"}:${target.change}`;
+}
+
+function acceptsDrop(files: PendingDragFile[] | null, targetChange: string, shelf: boolean) {
+  if (!files || files.length === 0) return false;
+  const shelved = files[0].shelved;
+  if (files.some((file) => file.shelved !== shelved)) return false;
+  if (shelf && targetChange === "default") return false;
+  if (shelf && shelved && files.every((file) => file.change === targetChange)) return false;
+  if (!shelf && !shelved && files.every((file) => file.change === targetChange)) return false;
+  return true;
 }
 
 function fileTip(file: { depotPath: string; detail: string; action: string }) {
