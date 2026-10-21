@@ -29,7 +29,7 @@ export function StashFiles() {
 
   if (!stashSelection) {
     return (
-      <div className="flex h-full items-center justify-center p-4 text-center text-sm text-muted-foreground">
+      <div className="absolute inset-0 flex items-center justify-center p-4 text-center text-sm text-muted-foreground">
         Select a stash to see its diff
       </div>
     );
@@ -41,7 +41,7 @@ export function StashFiles() {
   const count = ready?.files.length;
 
   return (
-    <div className="flex h-full min-h-0 min-w-0 flex-col">
+    <div className="absolute inset-0 flex min-h-0 min-w-0 flex-col">
       <div className="flex h-10 shrink-0 items-center gap-2 border-b px-3">
         <HoverTip label={message}>
           <span className="min-w-0 flex-1 truncate text-sm">{message}</span>

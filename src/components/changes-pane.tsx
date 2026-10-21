@@ -1,12 +1,25 @@
 import { useMemo, useState, type KeyboardEvent, type MouseEvent } from "react";
 import {
+  AppWindowIcon,
+  ArchiveIcon,
   ChevronDownIcon,
   ChevronRightIcon,
+  Columns2Icon,
+  CopyIcon,
+  FileIcon,
+  FilePenIcon,
+  FileSearchIcon,
+  FileXIcon,
+  FilesIcon,
   FolderIcon,
+  FolderOpenIcon,
   FolderTreeIcon,
+  GitMergeIcon,
+  HistoryIcon,
   ListIcon,
   MinusIcon,
   PlusIcon,
+  Trash2Icon,
   Undo2Icon,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -406,15 +419,18 @@ export function ChangesPane() {
     return (
       <ContextMenuContent className="min-w-52">
         <ContextMenuItem onClick={() => primaryAction(section, targets)}>
+          {section === "staged" ? <MinusIcon /> : <PlusIcon />}
           {section === "staged" ? "Unstage" : "Stage"}
           {many ? ` ${plural(targets.length, "file")}` : ""}
         </ContextMenuItem>
         {section === "unstaged" ? (
           <>
             <ContextMenuItem onClick={() => setStashTarget(targets)}>
+              <ArchiveIcon />
               Stash {many ? plural(targets.length, "file") : "changes"}…
             </ContextMenuItem>
             <ContextMenuItem variant="destructive" onClick={() => setDiscardTarget(targets)}>
+              <Trash2Icon />
               Discard {many ? plural(targets.length, "file") : "changes"}…
             </ContextMenuItem>
           </>
@@ -424,22 +440,29 @@ export function ChangesPane() {
             <ContextMenuSeparator />
             {many ? (
               <ContextMenuItem onClick={() => void ignorePaths(targets.map((path) => ignorePathPattern(path)))}>
+                <FileXIcon />
                 Ignore {plural(targets.length, "file")}
               </ContextMenuItem>
             ) : (
               <ContextMenuSub>
-                <ContextMenuSubTrigger>Add to .gitignore</ContextMenuSubTrigger>
+                <ContextMenuSubTrigger>
+                  <FileXIcon />
+                  Add to .gitignore
+                </ContextMenuSubTrigger>
                 <ContextMenuSubContent>
                   <ContextMenuItem onClick={() => void ignorePaths([ignorePathPattern(file.path)])}>
+                    <FileIcon />
                     This file
                   </ContextMenuItem>
                   {extension ? (
                     <ContextMenuItem onClick={() => void ignorePaths([extension])}>
+                      <FilesIcon />
                       All {extension} files
                     </ContextMenuItem>
                   ) : null}
                   {folder ? (
                     <ContextMenuItem onClick={() => void ignorePaths([ignorePathPattern(folder, true)])}>
+                      <FolderIcon />
                       Folder {folder}/
                     </ContextMenuItem>
                   ) : null}
@@ -453,8 +476,14 @@ export function ChangesPane() {
             <ContextMenuSeparator />
             {file.kind !== "deleted" ? (
               <>
-                <ContextMenuItem onClick={() => void openInEditor(file.path)}>Open in editor</ContextMenuItem>
-                <ContextMenuItem onClick={() => void openRepoFile(file.path)}>Open with default app</ContextMenuItem>
+                <ContextMenuItem onClick={() => void openInEditor(file.path)}>
+                  <FilePenIcon />
+                  Open in editor
+                </ContextMenuItem>
+                <ContextMenuItem onClick={() => void openRepoFile(file.path)}>
+                  <AppWindowIcon />
+                  Open with default app
+                </ContextMenuItem>
               </>
             ) : null}
             {file.kind !== "untracked" && file.kind !== "conflicted" ? (
@@ -463,29 +492,44 @@ export function ChangesPane() {
                   void openDifftool({ kind: "workdir", path: file.path, staged: section === "staged" })
                 }
               >
+                <Columns2Icon />
                 Open in diff tool
               </ContextMenuItem>
             ) : null}
             {file.kind === "conflicted" ? (
-              <ContextMenuItem onClick={() => void runMergetool(file.path)}>Open in merge tool</ContextMenuItem>
+              <ContextMenuItem onClick={() => void runMergetool(file.path)}>
+                <GitMergeIcon />
+                Open in merge tool
+              </ContextMenuItem>
             ) : null}
             <ContextMenuItem onClick={() => void revealRepoFile(file.kind === "deleted" ? folder : file.path)}>
+              <FolderOpenIcon />
               Reveal in file manager
             </ContextMenuItem>
             {tracked ? (
               <>
-                <ContextMenuItem onClick={() => showFile(file.path, "history")}>File history</ContextMenuItem>
+                <ContextMenuItem onClick={() => showFile(file.path, "history")}>
+                  <HistoryIcon />
+                  File history
+                </ContextMenuItem>
                 {file.kind !== "deleted" ? (
-                  <ContextMenuItem onClick={() => showFile(file.path, "browse")}>Blame</ContextMenuItem>
+                  <ContextMenuItem onClick={() => showFile(file.path, "browse")}>
+                    <FileSearchIcon />
+                    Blame
+                  </ContextMenuItem>
                 ) : null}
               </>
             ) : null}
             <ContextMenuSeparator />
-            <ContextMenuItem onClick={() => void copyText(file.path)}>Copy relative path</ContextMenuItem>
+            <ContextMenuItem onClick={() => void copyText(file.path)}>
+              <CopyIcon />
+              Copy relative path
+            </ContextMenuItem>
             {snapshot ? (
               <ContextMenuItem
                 onClick={() => void copyText(`${snapshot.repo.path.replace(/[\\/]+$/, "")}/${file.path}`)}
               >
+                <CopyIcon />
                 Copy full path
               </ContextMenuItem>
             ) : null}
@@ -500,24 +544,36 @@ export function ChangesPane() {
     return (
       <ContextMenuContent className="min-w-52">
         <ContextMenuItem onClick={() => primaryAction(row.section, row.paths)}>
+          {row.section === "staged" ? <MinusIcon /> : <PlusIcon />}
           {row.section === "staged" ? "Unstage folder" : "Stage folder"}
         </ContextMenuItem>
         {row.section === "unstaged" ? (
           <>
-            <ContextMenuItem onClick={() => setStashTarget(row.paths)}>Stash folder…</ContextMenuItem>
+            <ContextMenuItem onClick={() => setStashTarget(row.paths)}>
+              <ArchiveIcon />
+              Stash folder…
+            </ContextMenuItem>
             <ContextMenuItem variant="destructive" onClick={() => setDiscardTarget(row.paths)}>
+              <Trash2Icon />
               Discard folder…
             </ContextMenuItem>
             {allUntracked ? (
               <ContextMenuItem onClick={() => void ignorePaths([ignorePathPattern(row.path, true)])}>
+                <FileXIcon />
                 Add folder to .gitignore
               </ContextMenuItem>
             ) : null}
           </>
         ) : null}
         <ContextMenuSeparator />
-        <ContextMenuItem onClick={() => void revealRepoFile(row.path)}>Reveal in file manager</ContextMenuItem>
-        <ContextMenuItem onClick={() => void copyText(row.path)}>Copy relative path</ContextMenuItem>
+        <ContextMenuItem onClick={() => void revealRepoFile(row.path)}>
+          <FolderOpenIcon />
+          Reveal in file manager
+        </ContextMenuItem>
+        <ContextMenuItem onClick={() => void copyText(row.path)}>
+          <CopyIcon />
+          Copy relative path
+        </ContextMenuItem>
       </ContextMenuContent>
     );
   }
@@ -654,7 +710,7 @@ export function ChangesPane() {
   );
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="absolute inset-0 flex min-h-0 flex-col">
       <div className="flex h-9 shrink-0 items-center gap-1 border-b px-3">
         <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
           {totalSelected > 1

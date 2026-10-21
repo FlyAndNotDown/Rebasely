@@ -6,7 +6,7 @@ import { AuthorName, ExactTime, RevisionDot } from "@/components/revision-meta";
 import { ChangeBadge } from "@/components/p4/change-badge";
 import { FileStatusIcon } from "@/components/p4/file-status-icon";
 import { P4Diff } from "@/components/p4/p4-diff";
-import { HistorySkeleton } from "@/components/skeletons";
+import { FileRowsSkeleton, HistorySkeleton } from "@/components/skeletons";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -17,10 +17,12 @@ import {
 import { Input } from "@/components/ui/input";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { formatAbsoluteTime, formatExactTime } from "@/lib/format";
+import { errorMessage } from "@/lib/git";
 import { HoverTip } from "@/components/ui/tooltip";
 import { changeSummary, depotBase, p4ActionStatus } from "@/lib/p4";
 import { cn } from "@/lib/utils";
 import { useP4 } from "@/state/p4-context";
+import type { FileDiff } from "@/types/git";
 import type { P4Changelist } from "@/types/p4";
 
 async function copyText(value: string, success: string) {
@@ -83,11 +85,19 @@ export function P4Submitted() {
     : selectedRow
       ? changeSummary(selectedRow.description) || `Change ${selectedRow.id}`
       : null;
+  const meta = detail ?? selectedRow;
   const file =
     picked && detail?.files.some((item) => item.depotPath === picked)
       ? picked
       : (detail?.files[0]?.depotPath ?? null);
-  const diff = p4.submittedDiffs.find((item) => item.path === file) ?? null;
+  const fileItem = detail?.files.find((item) => item.depotPath === file) ?? null;
+  const diffPath = fileItem?.depotPath ?? "";
+  const diffRev = fileItem?.rev ?? "";
+  const [loadedDiff, setLoadedDiff] = useState<{ key: string; diff: FileDiff | null } | null>(null);
+  const revisionDiff = p4.revisionDiff;
+  const diffKey = diffPath && diffRev ? `${diffPath}\0${diffRev}` : "";
+  const diff = loadedDiff?.key === diffKey ? loadedDiff.diff : null;
+  const diffLoading = diffKey !== "" && loadedDiff?.key !== diffKey;
   const loadSubmitted = p4.loadSubmitted;
   const listUsers = p4.listUsers;
   const listClients = p4.listClients;
@@ -104,6 +114,25 @@ export function P4Submitted() {
     if (selectedSubmitted || submittedLoading || submitted.length === 0) return;
     void selectSubmitted(submitted[0].id);
   }, [selectSubmitted, selectedSubmitted, submitted, submittedLoading]);
+
+  useEffect(() => {
+    if (!diffPath || !diffRev) return;
+    const key = `${diffPath}\0${diffRev}`;
+    let live = true;
+    void revisionDiff(diffPath, diffRev)
+      .then((next) => {
+        if (live) setLoadedDiff({ key, diff: next });
+      })
+      .catch((caught) => {
+        if (!live) return;
+        setLoadedDiff({ key, diff: null });
+        const message = errorMessage(caught);
+        if (message && message !== "Login cancelled") toast.error(message);
+      });
+    return () => {
+      live = false;
+    };
+  }, [diffPath, diffRev, revisionDiff]);
 
   function ensureUsers() {
     if (!connection || loaded.current.users) return;
@@ -232,7 +261,7 @@ export function P4Submitted() {
   return (
     <ResizablePanelGroup orientation="horizontal" className="min-h-0 min-w-0 flex-1">
       <ResizablePanel id="p4-submitted-list" defaultSize="40%" minSize="28%" maxSize="56%">
-        <div className="flex h-full min-h-0 flex-col">
+        <div className="absolute inset-0 flex min-h-0 flex-col">
           <div className="grid shrink-0 gap-1.5 border-b p-2">
             <div className="grid grid-cols-2 gap-1.5">
               <FilterMenu
@@ -268,10 +297,10 @@ export function P4Submitted() {
               className="h-8"
             />
           </div>
-          <div ref={listRef} className="min-h-0 flex-1 overflow-auto px-1 py-1" onScroll={onScroll}>
+          <div ref={listRef} className="relative min-h-0 flex-1 overflow-auto px-1 py-1" onScroll={onScroll}>
             {changes.length === 0 ? (
               listBusy ? (
-                <HistorySkeleton rows={8} label={needle ? "Searching changelists" : "Loading changelists"} />
+                <HistorySkeleton fill label={needle ? "Searching changelists" : "Loading changelists"} />
               ) : (
                 <p className="p-4 text-sm text-muted-foreground">
                   {needle ? "No matching changelists." : "No changelists."}
@@ -315,29 +344,29 @@ export function P4Submitted() {
       <ResizablePanel id="p4-submitted-main" defaultSize="60%" minSize="36%">
         <ResizablePanelGroup orientation="vertical" className="min-h-0 min-w-0">
           <ResizablePanel id="p4-submitted-files" defaultSize="32%" minSize="16%">
-            <div className="flex h-full min-h-0 flex-col">
+            <div className="absolute inset-0 flex min-h-0 flex-col">
               <div className="shrink-0 border-b px-3 py-2">
                 <div className="truncate text-sm">{heading}</div>
-                {p4.submittedDetail ? (
+                {meta ? (
                   <div className="mt-1 flex items-center gap-x-2 text-[11px] text-muted-foreground">
                     <HoverTip label="Copy user">
                     <button
                       type="button"
                       className="inline-flex min-w-0 items-center gap-1.5 rounded-md px-1 py-0.5 hover:bg-muted hover:text-foreground"
-                      onClick={() => void copyText(p4.submittedDetail?.user ?? "", "Copied user")}
+                      onClick={() => void copyText(meta.user, "Copied user")}
                     >
-                      <AuthorAvatar name={p4.submittedDetail.user} email="" className="size-4" />
-                      <span className="truncate">{p4.submittedDetail.user}</span>
+                      <AuthorAvatar name={meta.user} email="" className="size-4" />
+                      <span className="truncate">{meta.user}</span>
                     </button>
                     </HoverTip>
-                    {p4.submittedDetail.time ? (
-                      <HoverTip label={formatExactTime(p4.submittedDetail.time)}>
+                    {meta.time ? (
+                      <HoverTip label={formatExactTime(meta.time)}>
                       <button
                         type="button"
                         className="shrink-0 rounded-md px-1 py-0.5 tabular-nums hover:bg-muted hover:text-foreground"
-                        onClick={() => void copyText(formatExactTime(p4.submittedDetail?.time ?? 0), "Copied time")}
+                        onClick={() => void copyText(formatExactTime(meta.time), "Copied time")}
                       >
-                        {formatAbsoluteTime(p4.submittedDetail.time)}
+                        {formatAbsoluteTime(meta.time)}
                       </button>
                       </HoverTip>
                     ) : null}
@@ -345,16 +374,18 @@ export function P4Submitted() {
                     <button
                       type="button"
                       className="shrink-0 rounded-md px-1 py-0.5 font-mono hover:bg-muted hover:text-foreground"
-                      onClick={() => void copyText(p4.submittedDetail?.id ?? "", "Copied changelist")}
+                      onClick={() => void copyText(meta.id, "Copied changelist")}
                     >
-                      #{p4.submittedDetail.id}
+                      #{meta.id}
                     </button>
                     </HoverTip>
                   </div>
                 ) : null}
               </div>
-              <div className="min-h-0 flex-1 overflow-auto px-1 py-1">
-                {p4.submittedDetail?.files.map((item) => (
+              <div className="relative min-h-0 flex-1">
+                {p4.selectedSubmitted && !detail ? <FileRowsSkeleton fill /> : null}
+                <div className={cn("absolute inset-0 overflow-auto px-1 py-1", p4.selectedSubmitted && !detail && "hidden")}>
+                {detail?.files.map((item) => (
                   <button
                     key={item.depotPath}
                     type="button"
@@ -366,11 +397,12 @@ export function P4Submitted() {
                   >
                     <FileStatusIcon status={item.status || p4ActionStatus(item.action)} />
                     <span className="min-w-0 flex-1 truncate font-mono">{depotBase(item.depotPath)}</span>
-                    {item.binary || p4.submittedDiffs.some((diff) => diff.binary && diff.path === item.depotPath) ? (
+                    {item.binary || (diff?.binary && diff.path === item.depotPath) ? (
                       <span className="shrink-0 text-muted-foreground">binary</span>
                     ) : null}
                   </button>
                 ))}
+                </div>
               </div>
             </div>
           </ResizablePanel>
@@ -378,8 +410,16 @@ export function P4Submitted() {
           <ResizablePanel id="p4-submitted-diff" defaultSize="68%" minSize="24%">
             <P4Diff
               diff={diff}
-              loading={p4.submittedLoading && !p4.submittedDetail}
-              empty={p4.selectedSubmitted ? "Select a file to see its diff" : "Select a changelist"}
+              loading={diffLoading || (Boolean(p4.selectedSubmitted) && !detail)}
+              empty={
+                !p4.selectedSubmitted
+                  ? "Select a changelist"
+                  : detail && detail.files.length === 0
+                    ? "No files in this changelist"
+                    : file
+                      ? "No differences in this file"
+                      : "Select a file to see its diff"
+              }
             />
           </ResizablePanel>
         </ResizablePanelGroup>

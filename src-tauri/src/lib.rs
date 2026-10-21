@@ -1087,6 +1087,15 @@ async fn p4_list_depot(
 }
 
 #[tauri::command]
+async fn p4_listing_status(
+    connection: p4::P4Connection,
+    directory: String,
+    depot: bool,
+) -> AppResult<Vec<p4::P4EntryStatus>> {
+    blocking(move || p4::listing_status(&connection, &directory, depot)).await
+}
+
+#[tauri::command]
 async fn p4_search_depot(
     connection: p4::P4Connection,
     query: String,
@@ -1694,6 +1703,7 @@ pub fn run() {
             p4_locate,
             p4_list_dir,
             p4_list_depot,
+            p4_listing_status,
             p4_search_depot,
             p4_cancel_depot_search,
             p4_search_files,

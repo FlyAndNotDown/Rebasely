@@ -171,7 +171,7 @@ export function DiffViewer({ source }: { source: DiffSource }) {
   if (source === "stash") {
     if (!stashSelection) {
       return (
-        <div className="flex h-full items-center justify-center p-6 text-center text-sm text-muted-foreground">
+        <div className="absolute inset-0 flex items-center justify-center p-6 text-center text-sm text-muted-foreground">
           Select a stash to see its diff
         </div>
       );
@@ -181,7 +181,7 @@ export function DiffViewer({ source }: { source: DiffSource }) {
     }
     if (!stashSelection.path) {
       return (
-        <div className="flex h-full items-center justify-center p-6 text-center text-sm text-muted-foreground">
+        <div className="absolute inset-0 flex items-center justify-center p-6 text-center text-sm text-muted-foreground">
           {stashDetails.files.length === 0 ? "No changes in this stash" : "Select a file to see its diff"}
         </div>
       );
@@ -190,7 +190,7 @@ export function DiffViewer({ source }: { source: DiffSource }) {
     return <DiffSkeleton fill label="Loading files" />;
   } else if (comparing && !comparison.path) {
     return (
-      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+      <div className="absolute inset-0 flex items-center justify-center text-sm text-muted-foreground">
         {comparison.files?.length ? "Select a file to see its diff" : "No differences"}
       </div>
     );
@@ -200,7 +200,7 @@ export function DiffViewer({ source }: { source: DiffSource }) {
       (!commitDetails || commitDetails.commit.id !== selection.id);
     if (loadingFiles) return <DiffSkeleton fill label="Loading files" />;
     return (
-      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+      <div className="absolute inset-0 flex items-center justify-center text-sm text-muted-foreground">
         Select a file to see its diff
       </div>
     );
@@ -209,7 +209,7 @@ export function DiffViewer({ source }: { source: DiffSource }) {
   if (!selection) return null;
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="absolute inset-0 flex min-h-0 flex-col">
       <div className="flex h-10 shrink-0 items-center justify-between gap-3 border-b px-3">
         <div className="min-w-0">
           <div className="truncate font-mono text-sm">{title}</div>
@@ -313,7 +313,7 @@ export function DiffViewer({ source }: { source: DiffSource }) {
       ) : diff?.binary ? (
         <p className="p-4 text-sm text-muted-foreground">Binary file</p>
       ) : !diff ? (
-        <div className="min-h-0 flex-1 overflow-hidden">
+        <div className="relative min-h-0 flex-1 overflow-hidden">
           <DiffSkeleton fill />
         </div>
       ) : diff.lines.length === 0 ? (

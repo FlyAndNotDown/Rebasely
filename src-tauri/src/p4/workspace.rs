@@ -15,10 +15,10 @@ use crate::git::{strip_verbatim_prefix, FileDiff};
 use crate::p4::cli::{self, P4Env};
 use crate::p4::parse::{
     blank_change_spec, classic_client_spec, created_change_id, file_type_is_binary, indexed_groups,
-    known_p4_value, normalize_charset, parse_describe_diffs, parse_p4_set, parse_p4config,
-    parse_single_diff, parse_ztag, path_depth, path_is_within, read_description, remove_spec_field,
-    set_description, set_spec_field, spec_field, sync_estimate_files, sync_reports_a_file,
-    valid_client_name, valid_depot_path, ZtagRecord,
+    known_p4_value, normalize_charset, parse_p4_set, parse_p4config, parse_single_diff,
+    parse_unchanged_diff_paths, parse_ztag, path_depth, path_is_within, read_description,
+    remove_spec_field, set_description, set_spec_field, spec_field, sync_estimate_files,
+    sync_reports_a_file, valid_client_name, valid_depot_path, ZtagRecord,
 };
 
 #[derive(Debug, Clone, Deserialize)]
@@ -81,7 +81,7 @@ pub struct P4File {
     pub rev: String,
     pub shelved: bool,
     pub binary: bool,
-    /// Workspace icon state: current, stale, conflict, edit, add, delete, integrate, other, local.
+    /// Workspace icon state: current, stale, conflict, edit, clean, add, delete, integrate, other, local.
     pub status: String,
     /// Sentence shown in the file tooltip.
     pub detail: String,
@@ -176,6 +176,14 @@ pub struct P4DirEntry {
     /// Empty, or current, stale, edit, add, delete, integrate, other, local.
     pub status: String,
     /// Sentence shown when the file icon is hovered.
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct P4EntryStatus {
+    pub path: String,
+    pub status: String,
     pub detail: String,
 }
 
@@ -422,14 +430,15 @@ fn exact_submitted(
 pub fn describe(connection: &P4Connection, change_id: &str) -> AppResult<P4Describe> {
     let id = require_numbered(change_id)?;
     let env = env_for(connection);
+    // File names only. A full `describe -du` pulls every diff in the changelist
+    // before the list can paint, which stalls large submits. Each file's diff
+    // is loaded on its own when that file is selected.
     let meta = run_ok(&env, &["-ztag", "describe", "-s", &id], None)?;
-    let diff_text = cli::run_p4_diff(&env, &["describe", "-du", &id])?;
     let record = parse_ztag(&meta).into_iter().next().unwrap_or_default();
     let files = files_from_groups(connection, &indexed_groups(&record), false);
-    let diffs = parse_describe_diffs(&diff_text);
     Ok(P4Describe {
         change: change_from_record(&record, files, false),
-        diffs,
+        diffs: Vec::new(),
     })
 }
 
@@ -548,9 +557,7 @@ pub fn list_dir(connection: &P4Connection, relative: &str) -> AppResult<Vec<P4Di
             .cmp(&left.dir)
             .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
     });
-    if entries.iter().any(|entry| !entry.dir) {
-        annotate_status(connection, &dir, &mut entries);
-    }
+    // Icons come from a later fstat so the names can paint without a server round trip.
     Ok(entries)
 }
 
@@ -583,8 +590,17 @@ pub fn list_depot(connection: &P4Connection, path: &str) -> AppResult<Vec<P4DirE
         ));
     }
     let spec = format!("{path}/*");
+    let env_files = env.clone();
+    let spec_files = spec.clone();
+    let (dir_records, file_records) = std::thread::scope(|scope| {
+        let dirs = scope.spawn(|| depot_listing(&env, &["-ztag", "dirs", &spec]));
+        let files = scope.spawn(|| depot_listing(&env_files, &["-ztag", "files", &spec_files]));
+        (dirs.join(), files.join())
+    });
+    let dir_records = dir_records.map_err(|_| AppError::msg("Could not list depot folders."))??;
+    let file_records = file_records.map_err(|_| AppError::msg("Could not list depot files."))??;
     let mut entries = Vec::new();
-    for record in depot_listing(&env, &["-ztag", "dirs", &spec])? {
+    for record in dir_records {
         let dir = field(&record, "dir");
         if !valid_depot_path(&dir) {
             continue;
@@ -597,7 +613,7 @@ pub fn list_depot(connection: &P4Connection, path: &str) -> AppResult<Vec<P4DirE
             detail: String::new(),
         });
     }
-    for record in depot_listing(&env, &["-ztag", "files", &spec])? {
+    for record in file_records {
         let file = field(&record, "depotFile");
         if !valid_depot_path(&file) {
             continue;
@@ -611,7 +627,6 @@ pub fn list_depot(connection: &P4Connection, path: &str) -> AppResult<Vec<P4DirE
         });
     }
     sort_dir_entries(&mut entries);
-    annotate_depot_files(connection, &mut entries);
     Ok(entries)
 }
 
@@ -894,36 +909,131 @@ fn sort_dir_entries(entries: &mut [P4DirEntry]) {
     });
 }
 
-fn annotate_depot_files(connection: &P4Connection, entries: &mut [P4DirEntry]) {
-    let env = env_for(connection);
-    let paths: Vec<String> = entries
-        .iter()
-        .filter(|entry| !entry.dir)
-        .map(|entry| entry.path.clone())
-        .collect();
-    if paths.is_empty() {
-        return;
-    }
-    let mut known = HashMap::<String, (String, String)>::new();
-    for chunk in paths.chunks(40) {
-        for record in fstat_records(&env, chunk) {
-            let depot = field(&record, "depotFile");
-            if depot.is_empty() {
-                continue;
-            }
-            known.insert(depot, status_of(&record));
+/// Have/head and open state for one directory. The file list itself does not wait on this.
+pub fn listing_status(
+    connection: &P4Connection,
+    directory: &str,
+    depot: bool,
+) -> AppResult<Vec<P4EntryStatus>> {
+    if depot {
+        let directory = directory.trim().trim_end_matches('/');
+        if directory.is_empty() || directory == "//" {
+            return Ok(Vec::new());
         }
+        if !valid_depot_path(directory) {
+            return Err(AppError::msg(
+                "Depot path should look like //depot/project.",
+            ));
+        }
+        let spec = format!("{directory}/*");
+        return Ok(statuses_from(&env_for(connection), &[spec], true));
     }
-    for entry in entries.iter_mut() {
-        if entry.dir {
+    let root = PathBuf::from(&connection.root);
+    let directory = directory.trim().trim_matches(['/', '\\']);
+    let dir = if directory.is_empty() {
+        root.clone()
+    } else {
+        let path = PathBuf::from(strip_verbatim_prefix(directory));
+        if path.is_absolute() {
+            path
+        } else {
+            root.join(&path)
+        }
+    };
+    if !path_is_within(&root, &dir) {
+        return Err(AppError::msg("Path is outside the workspace."));
+    }
+    let pattern = dir.join("*").to_string_lossy().into_owned();
+    Ok(statuses_from(&env_for(connection), &[pattern], false))
+}
+
+fn statuses_from(env: &P4Env, paths: &[String], depot: bool) -> Vec<P4EntryStatus> {
+    let records = fstat_records(env, paths);
+    let mut rows = Vec::new();
+    let mut depots = Vec::new();
+    let mut locals = Vec::new();
+    let mut edits = Vec::new();
+    for record in &records {
+        let path = field(record, if depot { "depotFile" } else { "clientFile" });
+        if path.is_empty() {
             continue;
         }
-        let Some((status, detail)) = known.get(&entry.path) else {
+        let depot_path = field(record, "depotFile");
+        let (status, detail) = status_of(record);
+        if status == "edit" && depot_path.starts_with("//") {
+            edits.push(depot_path.clone());
+        }
+        let local = field(record, "clientFile");
+        depots.push(depot_path);
+        locals.push(local);
+        rows.push(P4EntryStatus {
+            path,
+            status,
+            detail,
+        });
+    }
+    let same = unchanged_opened(env, &edits);
+    if !same.is_empty() {
+        for (row, (depot_path, local)) in rows.iter_mut().zip(depots.into_iter().zip(locals)) {
+            if row.status == "edit" && path_is_unchanged(&same, &depot_path, &local) {
+                mark_clean_checkout(&mut row.status, &mut row.detail);
+            }
+        }
+    }
+    rows
+}
+
+/// Opened files whose workspace copy matches the have revision.
+/// `p4 diff -sr` exits 1 when any compared file differs, and still prints the identical ones.
+fn unchanged_opened(env: &P4Env, paths: &[String]) -> BTreeSet<String> {
+    let mut wanted = paths.to_vec();
+    wanted.sort();
+    wanted.dedup();
+    let mut same = BTreeSet::new();
+    if wanted.is_empty() {
+        return same;
+    }
+    for chunk in wanted.chunks(40) {
+        let mut args = Vec::with_capacity(chunk.len() + 2);
+        args.push("diff".to_string());
+        args.push("-sr".into());
+        args.extend(chunk.iter().cloned());
+        let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+        let Ok(output) = cli::run_p4(env, &refs, None) else {
             continue;
         };
-        entry.status.clone_from(status);
-        entry.detail.clone_from(detail);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if p4_session_expired(&stdout) || p4_session_expired(&stderr) {
+            return BTreeSet::new();
+        }
+        if !matches!(output.status.code(), Some(0) | Some(1)) {
+            continue;
+        }
+        same.extend(
+            parse_unchanged_diff_paths(&stdout)
+                .into_iter()
+                .map(|path| fold_path(&path)),
+        );
     }
+    same
+}
+
+fn path_is_unchanged(same: &BTreeSet<String>, depot: &str, local: &str) -> bool {
+    let listed = |path: &str| !path.is_empty() && same.contains(&fold_path(path));
+    listed(depot) || listed(local)
+}
+
+fn p4_session_expired(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    lower.contains("please login")
+        || lower.contains("session has expired")
+        || lower.contains("ticket expired")
+}
+
+fn mark_clean_checkout(status: &mut String, detail: &mut String) {
+    *status = "clean".to_string();
+    *detail = detail.replacen("Checked out for edit", "Checked out, no changes", 1);
 }
 
 pub fn search_files(connection: &P4Connection, query: &str) -> AppResult<P4FileSearch> {
@@ -1066,6 +1176,7 @@ fn annotate_paths(connection: &P4Connection, files: &mut [P4DirEntry]) {
     }
     let env = env_for(connection);
     let mut known = HashMap::<String, (String, String)>::new();
+    let mut depot_of = HashMap::<String, String>::new();
     let paths: Vec<String> = files.iter().map(|file| file.path.clone()).collect();
     for chunk in paths.chunks(40) {
         for record in fstat_records(&env, chunk) {
@@ -1073,60 +1184,57 @@ fn annotate_paths(connection: &P4Connection, files: &mut [P4DirEntry]) {
             if client_file.is_empty() {
                 continue;
             }
-            known.insert(fold_path(&client_file), status_of(&record));
+            let key = fold_path(&client_file);
+            let depot_path = field(&record, "depotFile");
+            if depot_path.starts_with("//") {
+                depot_of.insert(key.clone(), depot_path);
+            }
+            known.insert(key, status_of(&record));
         }
     }
     if known.is_empty() {
         return;
     }
+    let edits = edits_in(&known, &depot_of, files);
+    let same = unchanged_opened(&env, &edits);
     for file in files {
-        let Some((status, detail)) = known.get(&fold_path(&file.path)) else {
+        let key = fold_path(&file.path);
+        let Some((status, detail)) = known.get(&key) else {
             file.status = "local".to_string();
             file.detail = "Not in the depot".to_string();
             continue;
         };
         file.status.clone_from(status);
         file.detail.clone_from(detail);
+        let depot = depot_of.get(&key).map(String::as_str).unwrap_or("");
+        if file.status == "edit" && path_is_unchanged(&same, depot, &file.path) {
+            mark_clean_checkout(&mut file.status, &mut file.detail);
+        }
     }
+}
+
+fn edits_in(
+    known: &HashMap<String, (String, String)>,
+    depot_of: &HashMap<String, String>,
+    files: &[P4DirEntry],
+) -> Vec<String> {
+    files
+        .iter()
+        .filter_map(|file| {
+            let key = fold_path(&file.path);
+            let (status, _) = known.get(&key)?;
+            if status != "edit" {
+                return None;
+            }
+            depot_of.get(&key).cloned()
+        })
+        .collect()
 }
 
 fn fold_path(path: &str) -> String {
     strip_verbatim_prefix(path)
         .replace('/', "\\")
         .to_lowercase()
-}
-
-fn annotate_status(connection: &P4Connection, dir: &Path, entries: &mut [P4DirEntry]) {
-    let env = env_for(connection);
-    let pattern = dir.join("*").to_string_lossy().into_owned();
-    let mut by_name = HashMap::<String, (String, String)>::new();
-    for record in fstat_records(&env, &[pattern]) {
-        let client_file = field(&record, "clientFile");
-        let name = client_file
-            .rsplit(['/', '\\'])
-            .next()
-            .unwrap_or("")
-            .to_lowercase();
-        if name.is_empty() {
-            continue;
-        }
-        by_name.insert(name, status_of(&record));
-    }
-    if by_name.is_empty() {
-        return;
-    }
-    for entry in entries.iter_mut() {
-        if entry.dir {
-            continue;
-        }
-        let Some((status, detail)) = by_name.get(&entry.name.to_lowercase()) else {
-            entry.status = "local".to_string();
-            entry.detail = "Not in the depot".to_string();
-            continue;
-        };
-        entry.status.clone_from(status);
-        entry.detail.clone_from(detail);
-    }
 }
 
 fn annotate_pending(connection: &P4Connection, changes: &mut [P4Changelist]) {
@@ -1157,6 +1265,29 @@ fn annotate_pending(connection: &P4Connection, changes: &mut [P4Changelist]) {
                 combine_status(known.get(&file.depot_path).cloned(), &file.action);
             file.status = status;
             file.detail = detail;
+        }
+    }
+    let mut edits = Vec::new();
+    for change in changes.iter() {
+        for file in &change.files {
+            if !file.shelved && file.status == "edit" && file.depot_path.starts_with("//") {
+                edits.push(file.depot_path.clone());
+            }
+        }
+    }
+    let same = unchanged_opened(&env, &edits);
+    if same.is_empty() {
+        return;
+    }
+    for change in changes.iter_mut() {
+        for file in &mut change.files {
+            if file.shelved
+                || file.status != "edit"
+                || !path_is_unchanged(&same, &file.depot_path, &file.local_path)
+            {
+                continue;
+            }
+            mark_clean_checkout(&mut file.status, &mut file.detail);
         }
     }
 }
@@ -2733,7 +2864,9 @@ fn mapped_location(value: &str) -> String {
 }
 
 fn normalize_location(value: &str) -> String {
-    mapped_location(value).replace('\\', "/").to_ascii_lowercase()
+    mapped_location(value)
+        .replace('\\', "/")
+        .to_ascii_lowercase()
 }
 
 fn same_location(left: &str, right: &str) -> bool {
@@ -3232,6 +3365,45 @@ Your changelist 42
 Opened by alice on dev-pc in changelist 43
 Opened by bob on build-pc in changelist 43
 Revision 39"
+        );
+    }
+
+    #[test]
+    fn a_local_diff_path_matches_the_workspace_file() {
+        let mut same = BTreeSet::new();
+        same.insert(fold_path(
+            r"C:\work\client\Config\IOS\mobile.ini",
+        ));
+        assert!(path_is_unchanged(
+            &same,
+            "//depot/main/client/Config/IOS/mobile.ini",
+            r"C:\work\client\Config\IOS\mobile.ini",
+        ));
+        assert!(!path_is_unchanged(
+            &same,
+            "//depot/main/client/project.json",
+            r"C:\work\client\project.json",
+        ));
+    }
+
+    #[test]
+    fn a_clean_checkout_replaces_only_the_edit_headline() {
+        let mut status = "edit".to_string();
+        let mut detail = "\
+//depot/main/mobile.ini
+Checked out for edit
+Your changelist 42
+Revision 4"
+            .to_string();
+        mark_clean_checkout(&mut status, &mut detail);
+        assert_eq!(status, "clean");
+        assert_eq!(
+            detail,
+            "\
+//depot/main/mobile.ini
+Checked out, no changes
+Your changelist 42
+Revision 4"
         );
     }
 

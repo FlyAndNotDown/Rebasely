@@ -42,7 +42,7 @@ export function CommitFiles() {
   );
   if (comparison) {
     return (
-      <div className="flex h-full min-h-0 flex-col">
+      <div className="absolute inset-0 flex min-h-0 flex-col">
         <div className="flex shrink-0 items-center gap-2 px-3 py-2">
           <div className="min-w-0 flex-1">
             <div className="text-sm font-medium">Compare</div>
@@ -100,9 +100,11 @@ export function CommitFiles() {
   if (!commitDetails) {
     return (
       historySelection ? (
-        <CommitFilesSkeleton />
+        <div className="absolute inset-0 flex flex-col">
+          <CommitFilesSkeleton />
+        </div>
       ) : (
-        <div className="flex h-full items-center justify-center p-4 text-sm text-muted-foreground">
+        <div className="absolute inset-0 flex items-center justify-center p-4 text-sm text-muted-foreground">
           Select a commit to see its files
         </div>
       )
@@ -120,7 +122,7 @@ export function CommitFiles() {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="absolute inset-0 flex min-h-0 flex-col">
       <div className="shrink-0 px-3 py-2">
         <div className="flex items-start gap-2">
           <div className="min-w-0 flex-1 text-sm font-medium">{commit.summary}</div>

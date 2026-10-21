@@ -14,7 +14,7 @@ import { P4ConnectionDialog } from "@/components/p4/p4-connection-dialog";
 import { P4LoginDialog } from "@/components/p4/p4-login-dialog";
 import { P4WorkspaceDialog } from "@/components/p4/p4-workspace-dialog";
 import { errorMessage } from "@/lib/git";
-import { depotBase, P4_LOGIN, P4_MISSING, p4Api } from "@/lib/p4";
+import { depotBase, P4_LOGIN, P4_MISSING, p4Api, syncSummary } from "@/lib/p4";
 import { sameRepoPath } from "@/lib/format";
 import { useGitPick } from "@/state/git-context";
 import { repoTabId, type RepoTab } from "@/state/session";
@@ -727,7 +727,7 @@ export function P4Provider({ children }: { children: ReactNode }) {
       const id = beginActivity("Getting latest", current.connection.client);
       try {
         const output = await guard(current.connection, () => p4Api.sync(current.connection, paths, id));
-        toast.success(lastLine(output) || "Up to date");
+        toast.success(syncSummary(output));
         await reloadPending();
         bumpFiles();
       } catch (caught) {
@@ -881,19 +881,24 @@ export function P4Provider({ children }: { children: ReactNode }) {
     async (id: string) => {
       const current = sessionRef.current;
       if (!current) return;
+      if (current.selectedSubmitted === id && current.submittedDetail?.id === id) return;
       patch({ selectedSubmitted: id, submittedDetail: null, submittedDiffs: [] });
       setSubmittedLoading(true);
       try {
         const described = await guard(current.connection, () => p4Api.describe(current.connection, id));
+        const latest = sessionRef.current;
+        if (!latest || latest.selectedSubmitted !== id) return;
         patch({
           selectedSubmitted: id,
           submittedDetail: described.change,
-          submittedDiffs: described.diffs,
+          submittedDiffs: [],
         });
       } catch (caught) {
+        const latest = sessionRef.current;
+        if (!latest || latest.selectedSubmitted !== id) return;
         report(caught);
       } finally {
-        setSubmittedLoading(false);
+        if (sessionRef.current?.selectedSubmitted === id) setSubmittedLoading(false);
       }
     },
     [guard, patch, report],

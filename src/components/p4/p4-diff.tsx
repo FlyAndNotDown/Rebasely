@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { Columns2Icon } from "lucide-react";
 import { toast } from "sonner";
+import { DiffSkeleton } from "@/components/skeletons";
 import { Button } from "@/components/ui/button";
 import { HoverTip } from "@/components/ui/tooltip";
 import { splitRows } from "@/lib/diff-select";
@@ -38,22 +39,23 @@ export function P4Diff({
 }) {
   const { prefs, setDiffOptions } = useGitPick(["prefs", "setDiffOptions"]);
   const sideBySide = split ?? prefs.diffSplit;
+  const frame = chrome ? "absolute inset-0" : "min-h-0 flex-1";
   if (loading && !diff) {
     return (
-      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-        Loading diff
+      <div className={chrome ? "absolute inset-0" : "relative min-h-0 flex-1"}>
+        <DiffSkeleton fill />
       </div>
     );
   }
   if (!diff) {
     return (
-      <div className="flex h-full items-center justify-center p-6 text-center text-sm text-muted-foreground">
+      <div className={cn("flex items-center justify-center p-6 text-center text-sm text-muted-foreground", frame)}>
         {empty}
       </div>
     );
   }
   return (
-    <div className={cn("flex min-h-0 min-w-0 flex-col", chrome ? "h-full" : "flex-1")}>
+    <div className={cn("flex min-h-0 min-w-0 flex-col", frame)}>
       {chrome ? (
         <div className="flex h-10 shrink-0 items-center justify-between gap-3 border-b px-3">
           <button

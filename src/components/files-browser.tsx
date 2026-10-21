@@ -139,7 +139,7 @@ export function FilesBrowser() {
       onLayoutChanged={shell.onLayoutChanged}
     >
       <ResizablePanel id="files-tree" defaultSize="22%" minSize="14%" maxSize="40%">
-        <div className="flex h-full min-h-0 flex-col">
+        <div className="absolute inset-0 flex min-h-0 flex-col">
           <FileTreeFilter title="Files" query={query} onQuery={setQuery} />
           <ScrollArea className="min-h-0 flex-1">
             <div className={fileQuery.active ? "hidden" : undefined}>
@@ -169,7 +169,7 @@ export function FilesBrowser() {
             </div>
             {fileQuery.active ? (
               fileQuery.searching ? (
-                <FileTreeSkeleton />
+                <FileTreeSkeleton fill />
               ) : (
                 <FilteredFileTree
                   nodes={searchNodes}
@@ -206,7 +206,7 @@ export function FilesBrowser() {
             Select a file
           </div>
         ) : (
-          <div className="flex h-full min-h-0 flex-col">
+          <div className="absolute inset-0 flex min-h-0 flex-col">
             <div className="flex h-10 shrink-0 items-center gap-2 border-b px-3">
               <span className="min-w-0 flex-1 truncate font-mono text-xs">{path}</span>
               <HoverTip label="Open in editor">
@@ -762,7 +762,13 @@ const FileBrowse = memo(function FileBrowse({
     return () => node.removeEventListener("scroll", clear);
   }, [visibleRows.viewport]);
 
-  if (textLoading || text === null) return <DiffSkeleton label="Loading file" />;
+  if (textLoading || text === null) {
+    return (
+      <div className="relative min-h-0 flex-1">
+        <DiffSkeleton fill label="Loading file" />
+      </div>
+    );
+  }
   if (binary) {
     return <div className="p-4 text-sm text-muted-foreground">Binary file</div>;
   }
@@ -831,8 +837,8 @@ function FileHistory({
   }, [selectedId]);
 
   return (
-    <ScrollArea className="h-full">
-      {commits.length === 0 && loading ? <DiffSkeleton label="Loading history" /> : null}
+    <ScrollArea className="absolute inset-0">
+      {commits.length === 0 && loading ? <DiffSkeleton fill label="Loading history" /> : null}
       {commits.length === 0 && !loading ? (
         <div className="p-4 text-sm text-muted-foreground">No commits for this file</div>
       ) : null}
@@ -873,17 +879,17 @@ function FileCommitDiff({
   commitId: string | null;
   loading: boolean;
 }) {
-  if (!diff && loading) return <DiffSkeleton />;
+  if (!diff && loading) return <DiffSkeleton fill />;
   if (!diff) {
     return (
-      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+      <div className="absolute inset-0 flex items-center justify-center text-sm text-muted-foreground">
         Select a commit
       </div>
     );
   }
   if (diff.binary && commitId && isImagePath(diff.path)) {
     return (
-      <div className="flex h-full min-h-0 flex-col">
+      <div className="absolute inset-0 flex min-h-0 flex-col">
         <ImageDiff source={{ kind: "commit", oid: commitId, path: diff.path, oldPath: diff.oldPath }} />
       </div>
     );
@@ -891,7 +897,7 @@ function FileCommitDiff({
   if (diff.binary) return <p className="p-4 text-sm text-muted-foreground">Binary file</p>;
   if (diff.lines.length === 0) return <p className="p-4 text-sm text-muted-foreground">No textual diff</p>;
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="absolute inset-0 flex min-h-0 flex-col">
       <DiffLines diff={diff} />
     </div>
   );

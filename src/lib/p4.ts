@@ -10,6 +10,7 @@ import type {
   P4StreamOption,
   P4Describe,
   P4DirEntry,
+  P4EntryStatus,
   P4FileSearch,
   P4GetRevision,
   P4Location,
@@ -80,6 +81,8 @@ export const p4Api = {
     call<P4DirEntry[]>("p4_list_dir", { connection, relative }),
   listDepot: (connection: P4Connection, path: string) =>
     call<P4DirEntry[]>("p4_list_depot", { connection, path }),
+  listingStatus: (connection: P4Connection, directory: string, depot: boolean) =>
+    call<P4EntryStatus[]>("p4_listing_status", { connection, directory, depot }),
   searchDepot: (connection: P4Connection, query: string) =>
     call<P4FileSearch>("p4_search_depot", { connection, query }),
   cancelDepotSearch: () => call<void>("p4_cancel_depot_search"),
@@ -129,6 +132,32 @@ export const p4Api = {
   executables: () => call<P4Executables>("p4_executables"),
   checkExecutable: (path: string) => call<void>("check_p4_executable", { path }),
 };
+
+/** Counts `p4 sync` file lines into one short result. */
+export function syncSummary(output: string): string {
+  let updated = 0;
+  let added = 0;
+  let deleted = 0;
+  for (const raw of output.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) continue;
+    if (line.includes(" - updating ") || line.includes(" - refreshing ") || line.includes(" - moved ")) {
+      updated += 1;
+    } else if (line.includes(" - added ")) {
+      added += 1;
+    } else if (line.includes(" - deleted ")) {
+      deleted += 1;
+    }
+  }
+  if (updated + added + deleted === 0) return "Up to date";
+  const parts: string[] = [];
+  if (updated > 0) parts.push(`Updated ${updated} ${updated === 1 ? "file" : "files"}`);
+  if (added > 0) parts.push(`added ${added} ${added === 1 ? "file" : "files"}`);
+  if (deleted > 0) parts.push(`deleted ${deleted} ${deleted === 1 ? "file" : "files"}`);
+  const [first, ...rest] = parts;
+  const head = first.charAt(0).toUpperCase() + first.slice(1);
+  return rest.length > 0 ? `${head}, ${rest.join(", ")}.` : `${head}.`;
+}
 
 export function changeSummary(description: string): string {
   return description

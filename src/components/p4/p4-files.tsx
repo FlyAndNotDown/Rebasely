@@ -19,7 +19,8 @@ import {
 } from "@/components/ui/context-menu";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { HoverTip } from "@/components/ui/tooltip";
-import { FileTreeSkeleton } from "@/components/skeletons";
+import { FileTreeSkeleton, HistorySkeleton } from "@/components/skeletons";
+import { normalizeRepoPath } from "@/lib/format";
 import { errorMessage, gitApi } from "@/lib/git";
 import { joinRoot, type SearchNode } from "@/lib/file-search";
 import { changeSummary, p4Api, relativeToRoot } from "@/lib/p4";
@@ -27,7 +28,7 @@ import { useFileQuery } from "@/lib/use-file-query";
 import { cn } from "@/lib/utils";
 import { useP4 } from "@/state/p4-context";
 import type { FileDiff } from "@/types/git";
-import type { P4DirEntry, P4Revision } from "@/types/p4";
+import type { P4Connection, P4DirEntry, P4EntryStatus, P4Revision } from "@/types/p4";
 
 export function P4Files() {
   const p4 = useP4();
@@ -66,6 +67,8 @@ export function P4Files() {
       }))
       .filter((node) => node.relative);
   }, [fileQuery.result, mode, root]);
+  const [seenModes, setSeenModes] = useState(() => new Set<"workspace" | "depot">([mode]));
+  if (!seenModes.has(mode)) setSeenModes((current) => new Set(current).add(mode));
   const [revisionPath, setRevisionPath] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [history, setHistory] = useState<P4Revision[] | null>(null);
@@ -233,7 +236,7 @@ export function P4Files() {
     <>
       <ResizablePanelGroup orientation="horizontal" className="min-h-0 min-w-0 flex-1">
       <ResizablePanel id="p4-tree" defaultSize="28%" minSize="18%" maxSize="46%">
-        <div className="flex h-full min-h-0 flex-col">
+        <div className="absolute inset-0 flex min-h-0 flex-col">
           <FileTreeFilter
             title={mode === "depot" ? "Depot" : "Workspace"}
             query={query}
@@ -241,20 +244,11 @@ export function P4Files() {
             placeholder={mode === "depot" ? "Name or //depot/name" : "Filter files"}
             leading={<TreeMode mode={mode} onMode={setMode} />}
           />
-          <div className="min-h-0 flex-1 overflow-auto py-1">
+          <div className="relative min-h-0 flex-1 overflow-auto py-1">
             {root ? (
               <>
-                <div className={fileQuery.active ? "hidden" : undefined}>
-                  {mode === "depot" ? (
-                    <DepotTree
-                      key={`${connection?.port ?? ""}:${connection?.client ?? ""}`}
-                      selected={selected}
-                      onSelect={choose}
-                      onResolved={setSelected}
-                      reveal={reveal?.mode === "depot" ? reveal : null}
-                      menu={fileMenu}
-                    />
-                  ) : (
+                <div className={fileQuery.active || mode !== "workspace" ? "hidden" : undefined}>
+                  {seenModes.has("workspace") ? (
                     <WorkspaceTree
                       key={root}
                       selected={selected}
@@ -263,11 +257,23 @@ export function P4Files() {
                       reveal={reveal?.mode === "workspace" ? reveal : null}
                       menu={fileMenu}
                     />
-                  )}
+                  ) : null}
+                </div>
+                <div className={fileQuery.active || mode !== "depot" ? "hidden" : undefined}>
+                  {seenModes.has("depot") ? (
+                    <DepotTree
+                      key={`${connection?.port ?? ""}:${connection?.client ?? ""}`}
+                      selected={selected}
+                      onSelect={choose}
+                      onResolved={setSelected}
+                      reveal={reveal?.mode === "depot" ? reveal : null}
+                      menu={fileMenu}
+                    />
+                  ) : null}
                 </div>
                 {fileQuery.active ? (
-                  fileQuery.searching ? (
-                    <FileTreeSkeleton />
+                    fileQuery.searching ? (
+                    <FileTreeSkeleton fill label="Searching files" />
                   ) : (
                     <>
                       {fileQuery.result?.scope ? (
@@ -292,12 +298,19 @@ export function P4Files() {
                           iconTitle: node.detail ? <FileStatusTip text={node.detail} /> : undefined,
                         })}
                         onLoadDir={async (path) => {
+                          if (!connection) return null;
                           try {
-                            const next =
-                              mode === "depot"
-                                ? await p4.listDepot(path)
-                                : await p4.listDir(relativeToRoot(root, path));
-                            return next.map(presentFile);
+                            const depot = mode === "depot";
+                            const next = depot
+                              ? await p4.listDepot(path)
+                              : await p4.listDir(relativeToRoot(root, path));
+                            const shown = next.map(presentFile);
+                            try {
+                              const statuses = await p4Api.listingStatus(connection, path, depot);
+                              return mergeListingStatus(shown, statuses, depot);
+                            } catch {
+                              return shown;
+                            }
                           } catch (caught) {
                             const message = errorMessage(caught);
                             if (message && message !== "Login cancelled") toast.error(message);
@@ -317,7 +330,7 @@ export function P4Files() {
       </ResizablePanel>
       <ResizableHandle />
       <ResizablePanel id="p4-file-main" defaultSize="72%" minSize="40%">
-        <div className="flex h-full min-h-0 flex-col">
+        <div className="absolute inset-0 flex min-h-0 flex-col">
           <div className="flex h-10 shrink-0 items-center border-b px-3">
             <HoverTip label={selected ? shownPath(mode, root, selected) : ""}>
               <div className="min-w-0 flex-1 truncate font-mono text-xs">
@@ -328,9 +341,9 @@ export function P4Files() {
           {selected ? (
             <ResizablePanelGroup orientation="vertical" className="min-h-0 min-w-0 flex-1">
               <ResizablePanel id="p4-file-history" defaultSize="34%" minSize="16%">
-                <div className="h-full overflow-auto px-1 py-1">
+                <div className="absolute inset-0 overflow-auto px-1 py-1">
                   {historyLoading && !history ? (
-                    <p className="p-3 text-xs text-muted-foreground">Loading history</p>
+                    <HistorySkeleton fill label="Loading history" />
                   ) : history && history.length === 0 ? (
                     <p className="p-3 text-xs text-muted-foreground">No revisions.</p>
                   ) : (
@@ -393,64 +406,69 @@ function WorkspaceTree({
 }) {
   const { connection, listDir, filesEpoch } = useP4();
   const root = connection?.root ?? "";
-  const [entries, setEntries] = useState<Record<string, FileTreeEntry[]>>({});
-  const [open, setOpen] = useState<Set<string>>(() => new Set());
+  const cacheKey = treeCacheKey("workspace", connection);
+  const cached = cacheKey ? treeSnapshots.get(cacheKey) : undefined;
+  const [entries, setEntries] = useState<Record<string, FileTreeEntry[]>>(() => cached?.entries ?? {});
+  const [open, setOpen] = useState<Set<string>>(() => new Set(cached?.open ?? []));
   const [failed, setFailed] = useState(false);
   const openRef = useRef(open);
   const epochRef = useRef(filesEpoch);
+  const liveRef = useRef(true);
   useEffect(() => {
     openRef.current = open;
   }, [open]);
+  useEffect(() => {
+    liveRef.current = true;
+    return () => {
+      liveRef.current = false;
+    };
+  }, []);
+  useEffect(() => {
+    if (!cacheKey || !entries[""]) return;
+    treeSnapshots.set(cacheKey, { entries, open: [...open] });
+  }, [cacheKey, entries, open]);
 
   useEffect(() => {
     let live = true;
-    void listDir("")
-      .then((next) => {
-        if (live) setEntries((current) => ({ ...current, "": next.map(presentFile) }));
-      })
-      .catch(() => {
+    void publishDirectory("", false, connection, () => listDir(""), setEntries, () => live && liveRef.current).catch(
+      () => {
         if (live) setFailed(true);
-      });
+      },
+    );
     return () => {
       live = false;
     };
-  }, [listDir]);
+  }, [connection, listDir]);
 
   useEffect(() => {
     if (epochRef.current === filesEpoch) return;
     epochRef.current = filesEpoch;
     let live = true;
     const dirs = ["", ...openRef.current];
-    void Promise.all(
-      [...new Set(dirs)].map(async (dir) => {
-        try {
-          const next = await listDir(relativeToRoot(root, dir));
-          return [dir, next.map(presentFile)] as const;
-        } catch {
-          return null;
-        }
-      }),
-    ).then((pairs) => {
-      if (!live) return;
-      setEntries((current) => {
-        const next = { ...current };
-        for (const pair of pairs) {
-          if (!pair) continue;
-          next[pair[0]] = pair[1];
-        }
-        return next;
-      });
-    });
+    for (const dir of new Set(dirs)) {
+      void publishDirectory(
+        dir,
+        false,
+        connection,
+        () => listDir(dir ? relativeToRoot(root, dir) : ""),
+        setEntries,
+        () => live && liveRef.current,
+      ).catch(() => {});
+    }
     return () => {
       live = false;
     };
-  }, [filesEpoch, listDir, root]);
+  }, [connection, filesEpoch, listDir, root]);
 
   const loadWorkspace = useCallback(
     (dir: string) => listDir(dir ? relativeToRoot(root, dir) : ""),
     [listDir, root],
   );
-  useRevealTree(reveal, loadWorkspace, setEntries, setOpen, onResolved);
+  useRevealTree(reveal, loadWorkspace, setEntries, setOpen, onResolved, (directories) => {
+    for (const directory of directories) {
+      void annotateDirectory(directory, false, connection, setEntries, () => liveRef.current);
+    }
+  });
 
   async function toggle(path: string) {
     if (open.has(path)) {
@@ -463,8 +481,14 @@ function WorkspaceTree({
     }
     if (!entries[path]) {
       try {
-        const next = await listDir(relativeToRoot(root, path));
-        setEntries((current) => ({ ...current, [path]: next.map(presentFile) }));
+        await publishDirectory(
+          path,
+          false,
+          connection,
+          () => listDir(relativeToRoot(root, path)),
+          setEntries,
+          () => liveRef.current,
+        );
       } catch {
         return;
       }
@@ -472,8 +496,11 @@ function WorkspaceTree({
     setOpen((current) => new Set(current).add(path));
   }
 
-  if (failed) {
-    return <p className="px-3 py-2 text-xs text-muted-foreground">Could not read the workspace folder.</p>;
+  if (!entries[""]) {
+    if (failed) {
+      return <p className="px-3 py-2 text-xs text-muted-foreground">Could not read the workspace folder.</p>;
+    }
+    return <FileTreeSkeleton fill label="Loading workspace" />;
   }
   return (
     <FileTree
@@ -502,61 +529,61 @@ function DepotTree({
   reveal: TreeReveal | null;
   menu: (entry: FileTreeEntry) => ReactNode;
 }) {
-  const { listDepot, filesEpoch } = useP4();
-  const [entries, setEntries] = useState<Record<string, FileTreeEntry[]>>({});
-  const [open, setOpen] = useState<Set<string>>(() => new Set());
+  const { connection, listDepot, filesEpoch } = useP4();
+  const cacheKey = treeCacheKey("depot", connection);
+  const cached = cacheKey ? treeSnapshots.get(cacheKey) : undefined;
+  const [entries, setEntries] = useState<Record<string, FileTreeEntry[]>>(() => cached?.entries ?? {});
+  const [open, setOpen] = useState<Set<string>>(() => new Set(cached?.open ?? []));
   const [failed, setFailed] = useState(false);
   const openRef = useRef(open);
   const epochRef = useRef(filesEpoch);
+  const liveRef = useRef(true);
   useEffect(() => {
     openRef.current = open;
   }, [open]);
+  useEffect(() => {
+    liveRef.current = true;
+    return () => {
+      liveRef.current = false;
+    };
+  }, []);
+  useEffect(() => {
+    if (!cacheKey || !entries[""]) return;
+    treeSnapshots.set(cacheKey, { entries, open: [...open] });
+  }, [cacheKey, entries, open]);
 
   useEffect(() => {
     let live = true;
-    void listDepot("")
-      .then((next) => {
-        if (live) setEntries((current) => ({ ...current, "": next.map(presentFile) }));
-      })
-      .catch(() => {
+    void publishDirectory("", true, connection, () => listDepot(""), setEntries, () => live && liveRef.current).catch(
+      () => {
         if (live) setFailed(true);
-      });
+      },
+    );
     return () => {
       live = false;
     };
-  }, [listDepot]);
+  }, [connection, listDepot]);
 
   useEffect(() => {
     if (epochRef.current === filesEpoch) return;
     epochRef.current = filesEpoch;
     let live = true;
     const dirs = ["", ...openRef.current];
-    void Promise.all(
-      [...new Set(dirs)].map(async (dir) => {
-        try {
-          const next = await listDepot(dir);
-          return [dir, next.map(presentFile)] as const;
-        } catch {
-          return null;
-        }
-      }),
-    ).then((pairs) => {
-      if (!live) return;
-      setEntries((current) => {
-        const next = { ...current };
-        for (const pair of pairs) {
-          if (!pair) continue;
-          next[pair[0]] = pair[1];
-        }
-        return next;
-      });
-    });
+    for (const dir of new Set(dirs)) {
+      void publishDirectory(dir, true, connection, () => listDepot(dir), setEntries, () => live && liveRef.current).catch(
+        () => {},
+      );
+    }
     return () => {
       live = false;
     };
-  }, [filesEpoch, listDepot]);
+  }, [connection, filesEpoch, listDepot]);
 
-  useRevealTree(reveal, listDepot, setEntries, setOpen, onResolved);
+  useRevealTree(reveal, listDepot, setEntries, setOpen, onResolved, (directories) => {
+    for (const directory of directories) {
+      void annotateDirectory(directory, true, connection, setEntries, () => liveRef.current);
+    }
+  });
 
   async function toggle(path: string) {
     if (open.has(path)) {
@@ -569,8 +596,7 @@ function DepotTree({
     }
     if (!entries[path]) {
       try {
-        const next = await listDepot(path);
-        setEntries((current) => ({ ...current, [path]: next.map(presentFile) }));
+        await publishDirectory(path, true, connection, () => listDepot(path), setEntries, () => liveRef.current);
       } catch {
         return;
       }
@@ -578,8 +604,11 @@ function DepotTree({
     setOpen((current) => new Set(current).add(path));
   }
 
-  if (failed) {
-    return <p className="px-3 py-2 text-xs text-muted-foreground">Could not read the depot.</p>;
+  if (!entries[""]) {
+    if (failed) {
+      return <p className="px-3 py-2 text-xs text-muted-foreground">Could not read the depot.</p>;
+    }
+    return <FileTreeSkeleton fill label="Loading depot" />;
   }
   return (
     <FileTree
@@ -644,23 +673,35 @@ function useRevealTree(
   setEntries: Dispatch<SetStateAction<Record<string, FileTreeEntry[]>>>,
   setOpen: Dispatch<SetStateAction<Set<string>>>,
   onResolved: (path: string) => void,
+  onExpanded?: (directories: string[]) => void,
 ) {
   const resolvedRef = useRef(onResolved);
+  const expandedRef = useRef(onExpanded);
   useEffect(() => {
     resolvedRef.current = onResolved;
   }, [onResolved]);
+  useEffect(() => {
+    expandedRef.current = onExpanded;
+  }, [onExpanded]);
   useEffect(() => {
     if (!reveal) return;
     let live = true;
     void expandTree(async (dir) => (await load(dir)).map(presentFile), reveal.path, reveal.dir)
       .then((result) => {
         if (!live) return;
-        setEntries((current) => ({ ...current, ...result.entries }));
+        setEntries((current) => {
+          const next = { ...current };
+          for (const [dir, list] of Object.entries(result.entries)) {
+            next[dir] = keepKnownIcons(current[dir], list);
+          }
+          return next;
+        });
         setOpen((current) => {
           const next = new Set(current);
           for (const dir of result.open) next.add(dir);
           return next;
         });
+        expandedRef.current?.(Object.keys(result.entries));
         if (result.path !== reveal.path) resolvedRef.current(result.path);
         scrollTreePath(result.path);
       })
@@ -719,6 +760,88 @@ function scrollTreePath(path: string) {
     requestAnimationFrame(() => {
       document.querySelector(`[data-tree-path="${CSS.escape(path)}"]`)?.scrollIntoView({ block: "nearest" });
     });
+  });
+}
+
+type TreeSnapshot = {
+  entries: Record<string, FileTreeEntry[]>;
+  open: string[];
+};
+
+const treeSnapshots = new Map<string, TreeSnapshot>();
+
+function treeCacheKey(mode: "workspace" | "depot", connection: P4Connection | null) {
+  if (!connection) return "";
+  return `${mode}\0${connection.port}\0${connection.client}\0${connection.root}`;
+}
+
+function publishDirectory(
+  directory: string,
+  depot: boolean,
+  connection: P4Connection | null,
+  load: () => Promise<P4DirEntry[]>,
+  setEntries: Dispatch<SetStateAction<Record<string, FileTreeEntry[]>>>,
+  live: () => boolean,
+) {
+  return load().then((next) => {
+    if (!live()) return;
+    const shown = next.map(presentFile);
+    setEntries((current) => ({ ...current, [directory]: keepKnownIcons(current[directory], shown) }));
+    void annotateDirectory(directory, depot, connection, setEntries, live);
+  });
+}
+
+function annotateDirectory(
+  directory: string,
+  depot: boolean,
+  connection: P4Connection | null,
+  setEntries: Dispatch<SetStateAction<Record<string, FileTreeEntry[]>>>,
+  live: () => boolean,
+) {
+  if (!connection || (depot && !directory)) return Promise.resolve();
+  return p4Api
+    .listingStatus(connection, directory, depot)
+    .then((statuses) => {
+      if (!live()) return;
+      setEntries((current) => {
+        const existing = current[directory];
+        if (!existing) return current;
+        return { ...current, [directory]: mergeListingStatus(existing, statuses, depot) };
+      });
+    })
+    .catch(() => {});
+}
+
+function keepKnownIcons(previous: FileTreeEntry[] | undefined, next: FileTreeEntry[]) {
+  if (!previous) return next;
+  const prior = new Map(previous.map((entry) => [entry.path, entry]));
+  return next.map((entry) => {
+    const known = prior.get(entry.path);
+    if (!known?.icon) return entry;
+    return { ...entry, icon: known.icon, iconTitle: known.iconTitle };
+  });
+}
+
+function mergeListingStatus(entries: FileTreeEntry[], statuses: P4EntryStatus[], depot: boolean): FileTreeEntry[] {
+  if (statuses.length === 0) return entries;
+  const byPath = new Map<string, P4EntryStatus>();
+  const byName = new Map<string, P4EntryStatus>();
+  for (const status of statuses) {
+    byPath.set(normalizeRepoPath(status.path), status);
+    const name = status.path.split(/[/\\]/).pop()?.toLowerCase() ?? "";
+    if (name) byName.set(name, status);
+  }
+  return entries.map((entry) => {
+    if (entry.dir) return entry;
+    const found = byPath.get(normalizeRepoPath(entry.path)) ?? byName.get(entry.name.toLowerCase());
+    if (!found && depot) return entry;
+    const status = found?.status ?? "local";
+    const detail = found?.detail || (found ? "" : "Not in the depot");
+    return {
+      ...entry,
+      icon: <FileStatusIcon status={status} />,
+      iconTitle: detail ? <FileStatusTip text={detail} /> : undefined,
+    };
   });
 }
 

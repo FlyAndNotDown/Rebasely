@@ -283,6 +283,68 @@ pub fn valid_depot_path(path: &str) -> bool {
     path.starts_with("//") && path.len() > 2 && !path.contains([' ', '\\', '?', '*', '#', '@'])
 }
 
+/// Paths from `p4 diff -sr` can be local paths (`C:\work\client\file.txt`),
+/// depot revisions (`//depot/main/file.txt#3`), or a pair of depot revisions
+/// separated by `- vs`. Error lines are skipped.
+pub fn parse_unchanged_diff_paths(text: &str) -> Vec<String> {
+    let mut paths = Vec::new();
+    for line in text.lines() {
+        let line = line.trim().trim_matches('"');
+        if line.is_empty() || unchanged_diff_error(line) {
+            continue;
+        }
+        if let Some(start) = line.find("//") {
+            let rest = &line[start..];
+            let end = rest.find(['#', ' ', '\t']).unwrap_or(rest.len());
+            let path = &rest[..end];
+            if valid_depot_path(path) {
+                let tail = revision_tail(&rest[end..]);
+                if tail.is_empty() || tail.starts_with("- vs") || tail.starts_with("vs ") {
+                    paths.push(path.to_string());
+                }
+            }
+            continue;
+        }
+        if local_diff_path(line) {
+            paths.push(line.to_string());
+        }
+    }
+    paths
+}
+
+fn local_diff_path(line: &str) -> bool {
+    let bytes = line.as_bytes();
+    if bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && (bytes[2] == b'\\' || bytes[2] == b'/')
+    {
+        return !line.contains(['*', '?']);
+    }
+    line.starts_with('/') && !line.starts_with("//")
+}
+
+fn unchanged_diff_error(line: &str) -> bool {
+    let lower = line.to_ascii_lowercase();
+    lower.contains("error")
+        || lower.contains("not opened")
+        || lower.contains("no such file")
+        || lower.contains("protected")
+        || lower.contains("must refer")
+}
+
+fn revision_tail(rest: &str) -> &str {
+    let rest = rest.trim();
+    let Some(stripped) = rest.strip_prefix('#') else {
+        return rest;
+    };
+    let digits = stripped
+        .chars()
+        .take_while(|ch| ch.is_ascii_digit())
+        .count();
+    stripped[digits..].trim()
+}
+
 pub fn normalize_charset(value: &str) -> String {
     match value.trim().to_ascii_lowercase().as_str() {
         "" | "none" => String::new(),
@@ -327,6 +389,7 @@ fn fold(text: &str) -> String {
     }
 }
 
+#[cfg(test)]
 pub fn parse_describe_diffs(text: &str) -> Vec<FileDiff> {
     split_sections(text)
         .into_iter()
@@ -704,6 +767,27 @@ Files:
         assert!(!known_p4_value("*unknown*"));
         assert!(!known_p4_value("*error*"));
         assert!(!known_p4_value("none"));
+    }
+
+    #[test]
+    fn unchanged_diff_keeps_identical_files_and_skips_errors() {
+        let paths = parse_unchanged_diff_paths(
+            "\
+//depot/main/mobile.ini#4 - vs //depot/main/mobile.ini#4
+//depot/main/desktop.ini#2
+C:\\work\\client\\Config\\Linux\\server.ini
+//depot/main/Missing.ini - file(s) not opened on this client.
+error: something failed for //depot/main/Other.ini#1
+",
+        );
+        assert_eq!(
+            paths,
+            vec![
+                "//depot/main/mobile.ini".to_string(),
+                "//depot/main/desktop.ini".to_string(),
+                r"C:\work\client\Config\Linux\server.ini".to_string(),
+            ]
+        );
     }
 
     #[test]

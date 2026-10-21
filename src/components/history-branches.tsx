@@ -1,5 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeftRightIcon, ChevronRightIcon, EyeIcon, GitBranchIcon, PlusIcon, SearchIcon, TagIcon } from "lucide-react";
+import {
+  ArrowDownToLineIcon,
+  ArrowLeftRightIcon,
+  ChevronRightIcon,
+  DownloadIcon,
+  EyeIcon,
+  EyeOffIcon,
+  GitBranchIcon,
+  GitMergeIcon,
+  PlusIcon,
+  SearchIcon,
+  TagIcon,
+  Trash2Icon,
+  UploadIcon,
+} from "lucide-react";
 import { AddRemoteDialog } from "@/components/lazy-dialogs";
 import { CreateTagDialog } from "@/components/create-ref-dialogs";
 import { MergeDialog, RebaseOntoDialog } from "@/components/rebase-dialog";
@@ -282,7 +296,7 @@ export function HistoryBranches() {
 
   return (
     <div
-      className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden"
+      className="absolute inset-0 flex min-h-0 min-w-0 flex-col overflow-hidden"
       aria-busy={!sidebarReady}
     >
       <div className="shrink-0 border-b px-2 py-1.5">
@@ -717,14 +731,19 @@ function TreeRows({
               </ContextMenuTrigger>
               <ContextMenuContent className="w-44">
                 <ContextMenuItem onClick={() => onCheckout({ name, isHead: false, isRemote: false, upstream: null })}>
+                  <ArrowDownToLineIcon />
                   Checkout
                 </ContextMenuItem>
                 {onPushTag && remotes && remotes.length > 0 ? (
                   <ContextMenuSub>
-                    <ContextMenuSubTrigger>Push to</ContextMenuSubTrigger>
+                    <ContextMenuSubTrigger>
+                      <UploadIcon />
+                      Push to
+                    </ContextMenuSubTrigger>
                     <ContextMenuSubContent>
                       {remotes.map((remote) => (
                         <ContextMenuItem key={remote} onClick={() => onPushTag(remote, name)}>
+                          <UploadIcon />
                           <span className="font-mono">{remote}</span>
                         </ContextMenuItem>
                       ))}
@@ -733,6 +752,7 @@ function TreeRows({
                 ) : null}
                 {onDeleteTag ? (
                   <ContextMenuItem variant="destructive" onClick={() => onDeleteTag(name)}>
+                    <Trash2Icon />
                     Delete
                   </ContextMenuItem>
                 ) : null}
@@ -816,15 +836,18 @@ function TreeRows({
                 ) : (
                 <>
                 <ContextMenuItem disabled={branch.isHead} onClick={() => onCheckout(branch)}>
+                  <ArrowDownToLineIcon />
                   Checkout
                 </ContextMenuItem>
                 {onRebase ? (
                   <ContextMenuItem disabled={branch.isHead} onClick={() => onRebase(branch)}>
+                    <GitBranchIcon />
                     Rebase onto
                   </ContextMenuItem>
                 ) : null}
                 {onMerge ? (
                   <ContextMenuItem disabled={branch.isHead} onClick={() => onMerge(branch)}>
+                    <GitMergeIcon />
                     Merge
                   </ContextMenuItem>
                 ) : null}
@@ -833,6 +856,7 @@ function TreeRows({
                   disabled={branch.isHead}
                   onClick={() => onDelete(branch)}
                 >
+                  <Trash2Icon />
                   Delete
                 </ContextMenuItem>
                 </>
@@ -899,10 +923,14 @@ function TreeRows({
                 <ContextMenuTrigger asChild>{folderRow}</ContextMenuTrigger>
                 <ContextMenuContent className="w-44">
                   {onFetchRemote ? (
-                    <ContextMenuItem onClick={() => onFetchRemote(remoteName)}>Fetch</ContextMenuItem>
+                    <ContextMenuItem onClick={() => onFetchRemote(remoteName)}>
+                      <DownloadIcon />
+                      Fetch
+                    </ContextMenuItem>
                   ) : null}
                   {onDeleteRemote ? (
                     <ContextMenuItem variant="destructive" onClick={() => onDeleteRemote(remoteName)}>
+                      <Trash2Icon />
                       Delete
                     </ContextMenuItem>
                   ) : null}
@@ -982,12 +1010,13 @@ function MultiBranchMenu({
       ) : null}
       {shown.length > 0 ? (
         <ContextMenuItem onClick={() => onHide(shown)}>
-          <EyeIcon />
+          <EyeOffIcon />
           Hide from history
         </ContextMenuItem>
       ) : null}
       {deletable.length > 0 ? (
         <ContextMenuItem variant="destructive" onClick={() => onDelete(deletable)}>
+          <Trash2Icon />
           Delete
         </ContextMenuItem>
       ) : null}

@@ -1,5 +1,6 @@
 import type { LucideIcon } from "lucide-react";
 import {
+  CheckIcon,
   CircleAlertIcon,
   CircleCheckIcon,
   CircleHelpIcon,
@@ -61,6 +62,7 @@ function iconFor(line: string): LucideIcon {
   if (line === "Opened by another user" || line.startsWith("Opened by ")) return UserIcon;
   if (line.includes("more user")) return UsersIcon;
   if (line === "Checked out for edit") return PencilIcon;
+  if (line === "Checked out, no changes") return CheckIcon;
   if (line === "Marked for add") return PlusIcon;
   if (line === "Marked for delete") return MinusIcon;
   if (line === "Opened for integrate") return GitMergeIcon;

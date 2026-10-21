@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ArchiveRestoreIcon, CheckIcon, Trash2Icon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { HoverTip } from "@/components/ui/tooltip";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -184,10 +185,17 @@ function StashRow({
       </ContextMenuTrigger>
       </HoverTip>
       <ContextMenuContent className="w-36">
-        <ContextMenuItem onClick={onApply}>Apply</ContextMenuItem>
-        <ContextMenuItem onClick={onPop}>Pop</ContextMenuItem>
+        <ContextMenuItem onClick={onApply}>
+          <CheckIcon />
+          Apply
+        </ContextMenuItem>
+        <ContextMenuItem onClick={onPop}>
+          <ArchiveRestoreIcon />
+          Pop
+        </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem variant="destructive" onClick={onDrop}>
+          <Trash2Icon />
           Drop
         </ContextMenuItem>
       </ContextMenuContent>

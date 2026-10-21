@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import {
+  CheckIcon,
   CircleAlertIcon,
   CircleHelpIcon,
   FileIcon,
@@ -36,6 +37,9 @@ function statusMark(status: string): { iconClass: string; badge: ReactNode } | n
   }
   if (status === "edit") {
     return { iconClass: "text-sky-300", badge: <PencilIcon className="size-2.5 text-sky-300" /> };
+  }
+  if (status === "clean") {
+    return { iconClass: "text-muted-foreground", badge: <CheckIcon className="size-2.5 text-zinc-400" /> };
   }
   if (status === "add") {
     return { iconClass: "text-green-300", badge: <PlusIcon className="size-2.5 text-green-300" /> };

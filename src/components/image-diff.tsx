@@ -55,7 +55,13 @@ export function ImageDiff({ source }: { source: FileSource }) {
     };
   }, [key, repoPath]);
 
-  if (!loaded || loaded.key !== key) return <DiffSkeleton label="Loading image" />;
+  if (!loaded || loaded.key !== key) {
+    return (
+      <div className="relative min-h-0 flex-1">
+        <DiffSkeleton fill label="Loading image" />
+      </div>
+    );
+  }
   if (loaded.error || !loaded.pair) {
     return <p className="p-4 text-sm text-muted-foreground">{loaded.error ?? "Could not load the image"}</p>;
   }

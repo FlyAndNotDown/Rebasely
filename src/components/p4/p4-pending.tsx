@@ -263,7 +263,7 @@ export function P4Pending() {
     <>
       <ResizablePanelGroup orientation="horizontal" className="min-h-0 min-w-0 flex-1">
         <ResizablePanel id="p4-pending-tree" defaultSize="42%" minSize="26%" maxSize="68%">
-          <div className="flex h-full min-h-0 flex-col">
+          <div className="absolute inset-0 flex min-h-0 flex-col">
             <div className="flex h-10 shrink-0 items-center justify-between border-b px-3">
               <span className="text-sm font-medium">Pending</span>
               <Button type="button" size="xs" variant="ghost" onClick={() => setCreating(true)}>
@@ -287,7 +287,7 @@ export function P4Pending() {
                         <div
                           className={cn(
                             "flex items-center rounded-md pr-2 hover:bg-muted/70",
-                            active && "bg-muted",
+                            active && !selectedPath && "bg-muted",
                             dropTarget === `open:${change.id}` && "bg-accent ring-1 ring-foreground/25 ring-inset",
                           )}
                           data-drop="open"
@@ -460,7 +460,7 @@ export function P4Pending() {
             <P4Diff
               diff={p4.diff}
               loading={p4.diffLoading}
-              empty={p4.selectedFile ? "Loading diff" : "Select a file to see its diff"}
+              empty={p4.selectedFile ? "No differences in this file" : "Select a file to see its diff"}
             />
           )}
         </ResizablePanel>

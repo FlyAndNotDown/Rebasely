@@ -1,6 +1,18 @@
 import { useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { BoxIcon, ChevronRightIcon, FolderGit2Icon, PlusIcon, RefreshCwIcon } from "lucide-react";
+import {
+  AppWindowIcon,
+  BoxIcon,
+  ChevronRightIcon,
+  CopyIcon,
+  DownloadIcon,
+  FolderGit2Icon,
+  LinkIcon,
+  PlusIcon,
+  RefreshCwIcon,
+  ScissorsIcon,
+  Trash2Icon,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { HoverTip } from "@/components/ui/tooltip";
@@ -164,17 +176,25 @@ export function RepoStructure({ onReady }: { onReady?: (repoPath: string) => voi
                   <ContextMenuContent className="w-48">
                     {module.state !== "uninitialized" ? (
                       <ContextMenuItem onClick={() => void openPath(joinPath(repoPath, module.path))}>
+                        <AppWindowIcon />
                         Open in a new tab
                       </ContextMenuItem>
                     ) : null}
                     <ContextMenuItem onClick={() => void updateSubmodules([module.path])}>
+                      {module.state === "uninitialized" ? <DownloadIcon /> : <RefreshCwIcon />}
                       {module.state === "uninitialized" ? "Check out" : "Update to recorded commit"}
                     </ContextMenuItem>
                     <ContextMenuSeparator />
                     {module.url ? (
-                      <ContextMenuItem onClick={() => void copy(module.url ?? "")}>Copy URL</ContextMenuItem>
+                      <ContextMenuItem onClick={() => void copy(module.url ?? "")}>
+                        <LinkIcon />
+                        Copy URL
+                      </ContextMenuItem>
                     ) : null}
-                    <ContextMenuItem onClick={() => void copy(module.path)}>Copy path</ContextMenuItem>
+                    <ContextMenuItem onClick={() => void copy(module.path)}>
+                      <CopyIcon />
+                      Copy path
+                    </ContextMenuItem>
                   </ContextMenuContent>
                 </ContextMenu>
               ))
@@ -205,8 +225,14 @@ export function RepoStructure({ onReady }: { onReady?: (repoPath: string) => voi
             </div>
           </ContextMenuTrigger>
           <ContextMenuContent className="w-44">
-            <ContextMenuItem onClick={() => setAdding(true)}>New worktree…</ContextMenuItem>
-            <ContextMenuItem onClick={() => void prune()}>Prune missing</ContextMenuItem>
+            <ContextMenuItem onClick={() => setAdding(true)}>
+              <PlusIcon />
+              New worktree…
+            </ContextMenuItem>
+            <ContextMenuItem onClick={() => void prune()}>
+              <ScissorsIcon />
+              Prune missing
+            </ContextMenuItem>
           </ContextMenuContent>
         </ContextMenu>
         {openSections.worktrees
@@ -234,13 +260,20 @@ export function RepoStructure({ onReady }: { onReady?: (repoPath: string) => voi
                 </HoverTip>
                 <ContextMenuContent className="w-48">
                   {!tree.current && !tree.prunable ? (
-                    <ContextMenuItem onClick={() => void openPath(tree.path)}>Open in a new tab</ContextMenuItem>
+                    <ContextMenuItem onClick={() => void openPath(tree.path)}>
+                      <AppWindowIcon />
+                      Open in a new tab
+                    </ContextMenuItem>
                   ) : null}
-                  <ContextMenuItem onClick={() => void copy(tree.path)}>Copy path</ContextMenuItem>
+                  <ContextMenuItem onClick={() => void copy(tree.path)}>
+                    <CopyIcon />
+                    Copy path
+                  </ContextMenuItem>
                   {!tree.main && !tree.current ? (
                     <>
                       <ContextMenuSeparator />
                       <ContextMenuItem variant="destructive" onClick={() => setRemoving(tree)}>
+                        <Trash2Icon />
                         Remove…
                       </ContextMenuItem>
                     </>

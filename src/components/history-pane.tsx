@@ -368,7 +368,7 @@ export function HistoryPane() {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="absolute inset-0 flex min-h-0 flex-col">
       <div className="flex shrink-0 items-center gap-1 border-b px-2 py-1.5">
         <div className="relative min-w-0 flex-1">
           <SearchIcon className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground" />

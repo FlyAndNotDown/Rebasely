@@ -73,6 +73,12 @@ export interface P4DirEntry {
   detail: string;
 }
 
+export interface P4EntryStatus {
+  path: string;
+  status: string;
+  detail: string;
+}
+
 export interface P4FileSearch {
   hits: P4DirEntry[];
   truncated: boolean;

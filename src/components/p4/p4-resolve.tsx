@@ -49,7 +49,7 @@ export function P4Resolve({
   const name = depotBase(view?.path || path);
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="absolute inset-0 flex min-h-0 flex-col">
       <div className="flex h-10 shrink-0 items-center border-b px-3">
         <span className="min-w-0 truncate font-mono text-sm" title={view?.path || path}>
           {name}
