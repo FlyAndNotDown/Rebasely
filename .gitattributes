@@ -1,0 +1,9 @@
+# Keep text as LF in the repository and in the working tree.
+# A Windows core.autocrlf checkout otherwise expects CRLF, then reports a
+# file as modified when a tool saves it with LF even though the normalized
+# text is unchanged. Cargo.toml is the file that hits this.
+* text=auto eol=lf
+
+*.png -text -diff -eol
+*.ico -text -diff -eol
+*.icns -text -diff -eol

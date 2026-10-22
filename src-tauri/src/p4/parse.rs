@@ -715,7 +715,8 @@ and the rest
 
     #[test]
     fn config_and_p4_set_ignore_comments_and_source_tags() {
-        let config = parse_p4config("# note\nP4PORT=ssl:perforce.example.com:1666\nP4CLIENT=alice_main\n");
+        let config =
+            parse_p4config("# note\nP4PORT=ssl:perforce.example.com:1666\nP4CLIENT=alice_main\n");
         assert_eq!(
             config.get("P4PORT").map(String::as_str),
             Some("ssl:perforce.example.com:1666")

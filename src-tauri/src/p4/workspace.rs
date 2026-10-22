@@ -3318,10 +3318,7 @@ mod tests {
             ("otherLock", "alice@dev-pc"),
         ]));
         assert_eq!(status, "other");
-        assert_eq!(
-            detail,
-            "Locked by alice on dev-pc\nRevision 3"
-        );
+        assert_eq!(detail, "Locked by alice on dev-pc\nRevision 3");
     }
 
     #[test]
@@ -3371,9 +3368,7 @@ Revision 39"
     #[test]
     fn a_local_diff_path_matches_the_workspace_file() {
         let mut same = BTreeSet::new();
-        same.insert(fold_path(
-            r"C:\work\client\Config\IOS\mobile.ini",
-        ));
+        same.insert(fold_path(r"C:\work\client\Config\IOS\mobile.ini"));
         assert!(path_is_unchanged(
             &same,
             "//depot/main/client/Config/IOS/mobile.ini",
@@ -3446,10 +3441,7 @@ Description:
 ";
         assert_eq!(
             client_view_roots(spec),
-            vec![
-                "//depot".to_string(),
-                "//vendor/library".to_string(),
-            ]
+            vec!["//depot".to_string(), "//vendor/library".to_string(),]
         );
     }
 
@@ -3461,10 +3453,7 @@ Description:
             ("headRev", "1"),
         ]));
         assert_eq!(status, "current");
-        assert_eq!(
-            detail,
-            "//depot/main/notes.bat\nUp to date\nRevision 1"
-        );
+        assert_eq!(detail, "//depot/main/notes.bat\nUp to date\nRevision 1");
     }
 
     #[test]
@@ -3531,9 +3520,7 @@ Description:
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(root.join("client").join("src")).unwrap();
         fs::write(
-            root.join("client")
-                .join("src")
-                .join("notes.bat"),
+            root.join("client").join("src").join("notes.bat"),
             b"@echo off",
         )
         .unwrap();
@@ -3546,9 +3533,7 @@ Description:
         fs::create_dir_all(root.join(".cache")).unwrap();
 
         let hits = match_workspace_files(&root, "notes");
-        assert!(hits
-            .iter()
-            .any(|hit| !hit.dir && hit.name == "notes.bat"));
+        assert!(hits.iter().any(|hit| !hit.dir && hit.name == "notes.bat"));
         assert!(hits.iter().all(|hit| !hit.path.contains("secret.txt")));
 
         let folders = match_workspace_files(&root, "cache");
