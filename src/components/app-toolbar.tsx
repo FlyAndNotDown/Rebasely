@@ -6,6 +6,7 @@ import {
   CheckIcon,
   ChevronDownIcon,
   FileInputIcon,
+  RefreshCwIcon,
   Settings2Icon,
 } from "lucide-react";
 import { Popover as PopoverPrimitive } from "radix-ui";
@@ -38,6 +39,7 @@ export function AppToolbar() {
     snapshot,
     prefs,
     updatePrefs,
+    refreshRepository,
     fetchRemote,
     fetchAllRemotes,
     pullRemote,
@@ -50,6 +52,7 @@ export function AppToolbar() {
     "snapshot",
     "prefs",
     "updatePrefs",
+    "refreshRepository",
     "fetchRemote",
     "fetchAllRemotes",
     "pullRemote",
@@ -72,6 +75,9 @@ export function AppToolbar() {
   return (
     <>
       <div className="flex h-7 shrink-0 items-center gap-1.5 rounded-[min(var(--radius-md),12px)] border border-input bg-secondary px-0.5">
+        <ToolbarAction label="Refresh" onClick={() => void refreshRepository()}>
+          <RefreshCwIcon className="size-4" />
+        </ToolbarAction>
         <SyncPopover
           action="fetch"
           openAction={syncAction}
@@ -217,7 +223,7 @@ function SyncPopover({
           side="bottom"
           align="start"
           sideOffset={6}
-          className="z-50 w-64 origin-(--radix-popover-content-transform-origin) rounded-lg bg-popover p-3 text-popover-foreground shadow-md ring-1 ring-foreground/10 data-[side=bottom]:slide-in-from-top-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95"
+          className="z-50 w-64 max-w-64 min-w-0 origin-(--radix-popover-content-transform-origin) rounded-lg bg-popover p-3 text-popover-foreground shadow-md ring-1 ring-foreground/10 data-[side=bottom]:slide-in-from-top-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95"
           onInteractOutside={(event) => {
             const target = event.target;
             if (target instanceof Element && target.closest("[data-slot=dropdown-menu-content]")) {
@@ -335,9 +341,8 @@ function PushPanel({
         <span>Force push</span>
       </label>
       {force ? (
-        <p className="text-xs text-muted-foreground">
-          Overwrites <span className="font-mono text-foreground">{target}</span>. Others who pushed
-          here may need to recover their work.
+        <p className="min-w-0 text-xs break-all text-muted-foreground">
+          Overwrites <span className="font-mono text-foreground">{target}</span>.
         </p>
       ) : null}
     </Panel>
@@ -361,7 +366,7 @@ function Panel({
 }) {
   return (
     <form
-      className="grid gap-3"
+      className="grid min-w-0 gap-3"
       onSubmit={(event) => {
         event.preventDefault();
         if (!disabled) onSubmit();

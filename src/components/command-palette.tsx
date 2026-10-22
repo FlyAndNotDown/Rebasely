@@ -38,6 +38,7 @@ export function CommandCenter() {
     "openFolder",
     "openPath",
     "closeRepo",
+    "refreshRepository",
     "fetchRemote",
     "fetchAllRemotes",
     "pullRemote",
@@ -101,6 +102,7 @@ export function CommandCenter() {
         { id: "view-history", label: "Go to History", group: "Navigate", shortcut: "viewHistory", run: () => git.setView("history") },
         { id: "view-stash", label: "Go to Stash", group: "Navigate", shortcut: "viewStash", run: () => git.setView("stash") },
         { id: "view-files", label: "Go to Files", group: "Navigate", shortcut: "viewFiles", run: () => git.setView("files") },
+        { id: "refresh", label: "Refresh", group: "Repository", run: () => void git.refreshRepository() },
         { id: "fetch", label: "Fetch", group: "Remote", shortcut: "fetch", run: () => void git.fetchRemote() },
         { id: "fetch-all", label: "Fetch all remotes", group: "Remote", run: () => void git.fetchAllRemotes() },
         {

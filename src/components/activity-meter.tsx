@@ -9,11 +9,12 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { gitApi } from "@/lib/git";
 import { cn } from "@/lib/utils";
-import { useActivities } from "@/state/git-context";
+import { useActivities, useGitPick } from "@/state/git-context";
 import type { Activity } from "@/types/git";
 
 export function ActivityMeter() {
-  const activities = useActivities();
+  const { activeTabId } = useGitPick(["activeTabId"]);
+  const activities = useActivities().filter((activity) => activity.tabId === activeTabId);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState<ReadonlySet<string>>(() => new Set());
   if (activities.length === 0) return null;

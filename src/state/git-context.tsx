@@ -96,6 +96,18 @@ function afterPaint() {
   });
 }
 
+type GenMap = Record<string, number>;
+
+function readGen(map: GenMap, tabId: string) {
+  return map[tabId] ?? 0;
+}
+
+function bumpGen(map: GenMap, tabId: string) {
+  const next = (map[tabId] ?? 0) + 1;
+  map[tabId] = next;
+  return next;
+}
+
 interface GitContextValue {
   recents: RecentRepo[];
   tabs: AppTab[];
@@ -153,6 +165,8 @@ interface GitContextValue {
   cloneRepository: (url: string, destination: string) => Promise<boolean>;
   revealRepo: () => Promise<void>;
   openTerminal: () => Promise<void>;
+  /** Reloads status, branches, and the open working-tree diff for the active repository. */
+  refreshRepository: () => Promise<void>;
   ensureBranches: () => Promise<void>;
   ensureHistory: () => Promise<void>;
   loadMoreCommits: () => Promise<void>;
@@ -288,7 +302,8 @@ const WELCOME_TAB: AppTab = { id: WELCOME_TAB_ID, kind: "welcome" };
 // the fields they read, so an unrelated update does not re-render them.
 const GitContext = createContext<{ store: GitStore; actions: GitActions } | null>(null);
 // Progress updates arrive many times per second; keeping them out of GitContext
-// means only the activity meter re-renders for them.
+// means only the activity meter re-renders for them. Each activity names the tab
+// that started it, so one repository's bar does not show another's work.
 const ActivityContext = createContext<Activity[]>([]);
 
 export function GitProvider({ children }: { children: ReactNode }) {
@@ -305,7 +320,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
   const [kindPrompt, setKindPromptState] = useState<RepoKindPrompt | null>(null);
   const kindPromptRef = useRef<RepoKindPrompt | null>(null);
   const restoredRef = useRef(false);
-  const refreshAfterReplayRef = useRef<() => Promise<void>>(async () => {});
+  const refreshAfterReplayRef = useRef<(tabId?: string) => Promise<void>>(async () => {});
   const prefsRef = useRef(prefs);
   const persistPrefsTimer = useRef<number | null>(null);
 
@@ -315,10 +330,11 @@ export function GitProvider({ children }: { children: ReactNode }) {
   const openingPathsRef = useRef(new Set<string>());
   const historyRevsMapRef = useRef<Record<string, string[]>>({});
   const historyExpandedMapRef = useRef<Record<string, string[]>>({});
-  const historyLoadGen = useRef(0);
-  const compareLoadGen = useRef(0);
-  const stashLoadGen = useRef(0);
-  const changeLoadGen = useRef(0);
+  // Per tab, so a load in one repository cannot cancel a load in another.
+  const historyLoadGen = useRef<GenMap>({});
+  const compareLoadGen = useRef<GenMap>({});
+  const stashLoadGen = useRef<GenMap>({});
+  const changeLoadGen = useRef<GenMap>({});
 
   // The refs are the source of truth for callbacks. Every update is computed
   // from them and handed to React as a plain value, so a render that skips a
@@ -413,8 +429,10 @@ export function GitProvider({ children }: { children: ReactNode }) {
       generation?: number,
       scope: "history" | "stash" = "history",
     ) => {
-      const active = scope === "stash" ? stashLoadGen.current : historyLoadGen.current;
-      if (generation !== undefined && active !== generation) return;
+      if (generation !== undefined) {
+        const counters = scope === "stash" ? stashLoadGen.current : historyLoadGen.current;
+        if (readGen(counters, tabId) !== generation) return;
+      }
       const current = sessionsRef.current;
       const existing = current[tabId];
       if (!existing) return;
@@ -572,9 +590,11 @@ export function GitProvider({ children }: { children: ReactNode }) {
       detail: string | undefined,
       fn: (activityId: string) => Promise<T>,
       cancellable = false,
+      tabId?: string,
     ) => {
       const id = crypto.randomUUID();
-      setActivities((current) => [...current, { id, label, detail, cancellable }]);
+      const owner = tabId ?? activeTabIdRef.current;
+      setActivities((current) => [...current, { id, label, detail, cancellable, tabId: owner }]);
       try {
         return await fn(id);
       } finally {
@@ -584,9 +604,10 @@ export function GitProvider({ children }: { children: ReactNode }) {
     [],
   );
 
-  const beginActivity = useCallback((label: string, detail?: string, progress?: number) => {
+  const beginActivity = useCallback((label: string, detail?: string, progress?: number, tabId?: string) => {
     const id = crypto.randomUUID();
-    setActivities((current) => [...current, { id, label, detail, progress }]);
+    const owner = tabId ?? activeTabIdRef.current;
+    setActivities((current) => [...current, { id, label, detail, progress, tabId: owner }]);
     return id;
   }, []);
 
@@ -650,8 +671,12 @@ export function GitProvider({ children }: { children: ReactNode }) {
       if (openingPathsRef.current.has(pendingKey)) return;
       openingPathsRef.current.add(pendingKey);
       try {
-        const snapshot = await runActivity("Opening repository", tab.path, () =>
-          gitApi.openRepository(tab.path),
+        const snapshot = await runActivity(
+          "Opening repository",
+          tab.path,
+          () => gitApi.openRepository(tab.path),
+          false,
+          tabId,
         );
         if (!tabsRef.current.some((item) => item.id === tabId)) return;
         const current = sessionsRef.current;
@@ -896,9 +921,9 @@ export function GitProvider({ children }: { children: ReactNode }) {
     }
   }, [activeRepoPath]);
 
-  const ensureBranches = useCallback(async (force = false) => {
-    const repoPath = activeRepoPath();
-    const tabId = activeTabIdRef.current;
+  const ensureBranches = useCallback(async (force = false, tabId = activeTabIdRef.current) => {
+    const tab = tabsRef.current.find((item) => item.id === tabId);
+    const repoPath = tab?.kind === "repo" ? tab.path : null;
     const current = sessionsRef.current[tabId];
     if (!repoPath || !current?.snapshot) return;
     if (!force && current.snapshot.branches.remote.length > 0) return;
@@ -910,7 +935,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       reportError(error);
     }
-  }, [activeRepoPath, patchSession]);
+  }, [patchSession]);
 
   const historyEpochRef = useRef<Record<string, number>>({});
   const historyInflightRef = useRef<Record<string, number>>({});
@@ -942,6 +967,8 @@ export function GitProvider({ children }: { children: ReactNode }) {
           reset ? "Loading history" : "Loading earlier history",
           current.snapshot?.repo.name,
           () => gitApi.getCommits(repoPath, COMMIT_PAGE, skip, undefined, revs),
+          false,
+          tabId,
         );
         stale = historyEpochRef.current[tabId] !== epoch;
         if (stale) return;
@@ -1005,8 +1032,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
   }, [loadHistoryPage]);
 
   const setHistoryRevs = useCallback(
-    (revs: string[]) => {
-      const tabId = activeTabIdRef.current;
+    (revs: string[], tabId = activeTabIdRef.current) => {
       const current = sessionsRef.current[tabId];
       const next = [...new Set(revs.map((rev) => rev.trim()).filter(Boolean))];
       if (!current || sameRevs(current.historyRevs, next)) return;
@@ -1024,8 +1050,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
   );
 
   const setHistoryExpanded = useCallback(
-    (ids: string[]) => {
-      const tabId = activeTabIdRef.current;
+    (ids: string[], tabId = activeTabIdRef.current) => {
       const current = sessionsRef.current[tabId];
       const next = [...new Set(ids.map((id) => id.trim()).filter(Boolean))];
       if (!current || (current.historyExpanded !== null && sameRevs(current.historyExpanded, next))) {
@@ -1043,7 +1068,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
     if (!selection) return {};
     const match = stashes.find((stash) => stash.id === selection.id);
     if (!match) {
-      stashLoadGen.current += 1;
+      bumpGen(stashLoadGen.current, tabId);
       return { stashSelection: null, stashDetails: null, stashDiff: null };
     }
     if (match.index !== selection.index) {
@@ -1052,8 +1077,10 @@ export function GitProvider({ children }: { children: ReactNode }) {
     return {};
   }, []);
 
+  // One worker per repository. A refresh in one repo does not hold up the others,
+  // and hints for the same repo still collapse into a single follow-up pass.
   const refreshFlight = useRef({
-    running: false,
+    running: new Set<string>(),
     queued: new Map<string, RefreshHint>(),
   });
 
@@ -1069,29 +1096,27 @@ export function GitProvider({ children }: { children: ReactNode }) {
           paths: incoming.overflow ? [] : [...incoming.paths],
         });
       }
-      if (flight.running) return;
-      flight.running = true;
+      if (flight.running.has(path)) return;
+      flight.running.add(path);
       void (async () => {
         try {
           for (;;) {
-            const next = flight.queued.keys().next().value;
-            if (!next) break;
-            const job = flight.queued.get(next);
-            flight.queued.delete(next);
-            if (!job) continue;
-            const tab = findRepoTab(tabsRef.current, next, "git");
+            const job = flight.queued.get(path);
+            if (!job) break;
+            flight.queued.delete(path);
+            const tab = findRepoTab(tabsRef.current, path, "git");
             if (!tab) continue;
             const current = sessionsRef.current[tab.id];
-            const changeGeneration = changeLoadGen.current;
+            const changeGeneration = readGen(changeLoadGen.current, tab.id);
             try {
-              const snapshot = keepRemoteBranches(current?.snapshot, await gitApi.refreshWorkspace(next));
+              const snapshot = keepRemoteBranches(current?.snapshot, await gitApi.refreshWorkspace(path));
               const graphChanged = historyGraphChanged(current?.snapshot, snapshot);
               let changeDiff = current?.changeDiff ?? null;
               const selection = current?.changeSelection;
-              if (selection && shouldReloadWorkdirDiff(job, next, selection.path)) {
+              if (selection && shouldReloadWorkdirDiff(job, path, selection.path)) {
                 try {
                   changeDiff = await gitApi.getWorkdirDiff(
-                    next,
+                    path,
                     selection.path,
                     selection.staged,
                     prefsRef.current.diffIgnoreWhitespace,
@@ -1101,11 +1126,11 @@ export function GitProvider({ children }: { children: ReactNode }) {
                 }
               }
               const snapshotSame = sameSnapshot(current?.snapshot, snapshot);
-              const selectionMoved = changeLoadGen.current !== changeGeneration;
+              const selectionMoved = readGen(changeLoadGen.current, tab.id) !== changeGeneration;
               const diffSame =
                 selectionMoved ||
                 sameDiff(changeDiff, sessionsRef.current[tab.id]?.changeDiff ?? null);
-              if (!diffSame) changeLoadGen.current += 1;
+              if (!diffSame) bumpGen(changeLoadGen.current, tab.id);
               if (!snapshotSame || !diffSame) {
                 const stashPatch = snapshotSame ? {} : stashPatchFor(tab.id, snapshot.stashes);
                 const patch = {
@@ -1124,13 +1149,12 @@ export function GitProvider({ children }: { children: ReactNode }) {
             }
           }
         } finally {
-          flight.running = false;
-          if (flight.queued.size > 0) {
-            const next = flight.queued.keys().next().value;
-            const job = next ? flight.queued.get(next) : undefined;
-            if (next && job) {
-              flight.queued.delete(next);
-              refreshRepo(next, job);
+          flight.running.delete(path);
+          if (flight.queued.has(path)) {
+            const job = flight.queued.get(path);
+            if (job) {
+              flight.queued.delete(path);
+              refreshRepo(path, job);
             }
           }
         }
@@ -1138,6 +1162,66 @@ export function GitProvider({ children }: { children: ReactNode }) {
     },
     [invalidateHistory, patchSession, stashPatchFor],
   );
+
+  const refreshRepository = useCallback(async () => {
+    const tabId = activeTabIdRef.current;
+    const tab = tabsRef.current.find((item) => item.id === tabId);
+    const repoPath = tab?.kind === "repo" ? tab.path : null;
+    if (!repoPath) return;
+    const current = sessionsRef.current[tabId];
+    const changeSelection = current?.changeSelection ?? null;
+    const changeGeneration = readGen(changeLoadGen.current, tabId);
+    try {
+      const next = await runActivity(
+        "Refreshing",
+        current?.snapshot?.repo.name,
+        async () => {
+          const snapshot = keepRemoteBranches(
+            current?.snapshot,
+            await gitApi.refreshWorkspace(repoPath),
+          );
+          let changeDiff = current?.changeDiff ?? null;
+          let nextSelection = changeSelection;
+          if (changeSelection) {
+            try {
+              changeDiff = await gitApi.getWorkdirDiff(
+                repoPath,
+                changeSelection.path,
+                changeSelection.staged,
+                prefsRef.current.diffIgnoreWhitespace,
+              );
+            } catch {
+              changeDiff = null;
+              nextSelection = null;
+            }
+          }
+          return {
+            snapshot,
+            changeDiff,
+            changeSelection: nextSelection,
+            graphChanged: historyGraphChanged(current?.snapshot, snapshot),
+          };
+        },
+        false,
+        tabId,
+      );
+      const selectionMoved = readGen(changeLoadGen.current, tabId) !== changeGeneration;
+      if (!selectionMoved) bumpGen(changeLoadGen.current, tabId);
+      patchSession(tabId, {
+        snapshot: next.snapshot,
+        ...(selectionMoved
+          ? {}
+          : { changeDiff: next.changeDiff, changeSelection: next.changeSelection }),
+        ...stashPatchFor(tabId, next.snapshot.stashes),
+      });
+      await ensureBranches(true, tabId);
+      if (next.graphChanged) {
+        invalidateHistory(tabId, sessionsRef.current[tabId]?.view === "history");
+      }
+    } catch (error) {
+      reportError(error);
+    }
+  }, [ensureBranches, invalidateHistory, patchSession, runActivity, stashPatchFor]);
 
   const watchedKey = useMemo(
     () =>
@@ -1193,7 +1277,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       const repoPath = activeRepoPath();
       const tabId = activeTabIdRef.current;
       if (!repoPath) return;
-      const generation = ++changeLoadGen.current;
+      const generation = bumpGen(changeLoadGen.current, tabId);
       const previous = sessionsRef.current[tabId]?.changeSelection;
       const samePath = previous?.path === path && previous.staged === staged;
       patchSession(tabId, {
@@ -1208,10 +1292,10 @@ export function GitProvider({ children }: { children: ReactNode }) {
           staged,
           prefsRef.current.diffIgnoreWhitespace,
         );
-        if (changeLoadGen.current !== generation) return;
+        if (readGen(changeLoadGen.current, tabId) !== generation) return;
         patchSession(tabId, { changeDiff });
       } catch (error) {
-        if (changeLoadGen.current !== generation) return;
+        if (readGen(changeLoadGen.current, tabId) !== generation) return;
         patchSession(tabId, { changeDiff: null });
         reportError(error);
       }
@@ -1241,17 +1325,17 @@ export function GitProvider({ children }: { children: ReactNode }) {
             shown.files.some((file) => file.path === selectedPath)));
       if (alreadyShown) return;
 
-      const generation = ++historyLoadGen.current;
+      const generation = bumpGen(historyLoadGen.current, tabId);
       const holdPath = current?.historySelection?.path;
       patchSession(tabId, {
         view: "history",
         historySelection: holdPath ? { type: "commit", id, path: holdPath } : { type: "commit", id },
       });
       await afterPaint();
-      if (historyLoadGen.current !== generation) return;
+      if (readGen(historyLoadGen.current, tabId) !== generation) return;
 
       const repoName = sessionsRef.current[tabId]?.snapshot?.repo.name;
-      const activityId = beginActivity("Loading commit files", repoName);
+      const activityId = beginActivity("Loading commit files", repoName, undefined, tabId);
       try {
         startTransition(() => {
           patchSession(
@@ -1265,7 +1349,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
           );
         });
         const details = await gitApi.getCommitDetails(repoPath, id);
-        if (historyLoadGen.current !== generation) return;
+        if (readGen(historyLoadGen.current, tabId) !== generation) return;
         const first = details.files[0];
         startTransition(() => {
           patchSession(
@@ -1289,13 +1373,13 @@ export function GitProvider({ children }: { children: ReactNode }) {
           first.path,
           prefsRef.current.diffIgnoreWhitespace,
         );
-        if (historyLoadGen.current !== generation) return;
+        if (readGen(historyLoadGen.current, tabId) !== generation) return;
         startTransition(() => {
           patchSession(tabId, { historyDiff }, generation);
         });
         await afterPaint();
       } catch (error) {
-        if (historyLoadGen.current !== generation) return;
+        if (readGen(historyLoadGen.current, tabId) !== generation) return;
         patchSession(tabId, { commitDetails: null, historyDiff: null }, generation);
         reportError(error);
       } finally {
@@ -1320,10 +1404,10 @@ export function GitProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      const generation = ++historyLoadGen.current;
+      const generation = bumpGen(historyLoadGen.current, tabId);
       patchSession(tabId, { view: "history", historySelection: { type: "commit", id, path } });
       await afterPaint();
-      if (historyLoadGen.current !== generation) return;
+      if (readGen(historyLoadGen.current, tabId) !== generation) return;
 
       const cached =
         sessionsRef.current[tabId]?.commitDetails?.commit.id === id
@@ -1333,12 +1417,14 @@ export function GitProvider({ children }: { children: ReactNode }) {
       const activityId = beginActivity(
         cached ? "Loading file diff" : "Loading commit files",
         cached ? path : repoName,
+        undefined,
+        tabId,
       );
       try {
         const details =
           cached ??
           (await gitApi.getCommitDetails(repoPath, id));
-        if (historyLoadGen.current !== generation) return;
+        if (readGen(historyLoadGen.current, tabId) !== generation) return;
         if (!cached) {
           startTransition(() => {
             patchSession(tabId, { commitDetails: details }, generation);
@@ -1368,13 +1454,13 @@ export function GitProvider({ children }: { children: ReactNode }) {
           path,
           prefsRef.current.diffIgnoreWhitespace,
         );
-        if (historyLoadGen.current !== generation) return;
+        if (readGen(historyLoadGen.current, tabId) !== generation) return;
         startTransition(() => {
           patchSession(tabId, { commitDetails: details, historyDiff }, generation);
         });
         await afterPaint();
       } catch (error) {
-        if (historyLoadGen.current !== generation) return;
+        if (readGen(historyLoadGen.current, tabId) !== generation) return;
         patchSession(tabId, { historyDiff: null }, generation);
         reportError(error);
       } finally {
@@ -1389,7 +1475,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       const repoPath = activeRepoPath();
       const tabId = activeTabIdRef.current;
       if (!repoPath) return;
-      const generation = ++compareLoadGen.current;
+      const generation = bumpGen(compareLoadGen.current, tabId);
       patchSession(tabId, {
         view: "history",
         comparison: { base, head, files: null, path: null },
@@ -1397,7 +1483,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       });
       try {
         const files = await gitApi.compareRevisions(repoPath, base.rev, head.rev);
-        if (compareLoadGen.current !== generation) return;
+        if (readGen(compareLoadGen.current, tabId) !== generation) return;
         const first = files[0];
         patchSession(tabId, {
           comparison: { base, head, files, path: first?.path ?? null },
@@ -1411,10 +1497,10 @@ export function GitProvider({ children }: { children: ReactNode }) {
           first.path,
           prefsRef.current.diffIgnoreWhitespace,
         );
-        if (compareLoadGen.current !== generation) return;
+        if (readGen(compareLoadGen.current, tabId) !== generation) return;
         patchSession(tabId, { historyDiff });
       } catch (error) {
-        if (compareLoadGen.current !== generation) return;
+        if (readGen(compareLoadGen.current, tabId) !== generation) return;
         patchSession(tabId, { comparison: null, historyDiff: null });
         reportError(error);
       }
@@ -1440,22 +1526,22 @@ export function GitProvider({ children }: { children: ReactNode }) {
       const tabId = activeTabIdRef.current;
       const current = sessionsRef.current[tabId];
       if (source === "changes") {
-        changeLoadGen.current += 1;
+        bumpGen(changeLoadGen.current, tabId);
         patchSession(tabId, { changeSelection: null, changeDiff: null });
         return;
       }
       if (source === "stash") {
         const selected = current?.stashSelection;
         if (!selected?.path) return;
-        stashLoadGen.current += 1;
+        bumpGen(stashLoadGen.current, tabId);
         patchSession(tabId, {
           stashSelection: { type: "stash", id: selected.id, index: selected.index },
           stashDiff: null,
         });
         return;
       }
-      historyLoadGen.current += 1;
-      compareLoadGen.current += 1;
+      bumpGen(historyLoadGen.current, tabId);
+      bumpGen(compareLoadGen.current, tabId);
       if (current?.comparison) {
         patchSession(tabId, {
           comparison: { ...current.comparison, path: null },
@@ -1475,14 +1561,14 @@ export function GitProvider({ children }: { children: ReactNode }) {
 
   const closeStash = useCallback(() => {
     const tabId = activeTabIdRef.current;
-    stashLoadGen.current += 1;
+    bumpGen(stashLoadGen.current, tabId);
     patchSession(tabId, { stashSelection: null, stashDetails: null, stashDiff: null });
   }, [patchSession]);
 
   const closeCommit = useCallback(() => {
     const tabId = activeTabIdRef.current;
-    historyLoadGen.current += 1;
-    compareLoadGen.current += 1;
+    bumpGen(historyLoadGen.current, tabId);
+    bumpGen(compareLoadGen.current, tabId);
     patchSession(tabId, {
       historySelection: null,
       historyDiff: null,
@@ -1493,7 +1579,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
 
   const closeComparison = useCallback(() => {
     const tabId = activeTabIdRef.current;
-    compareLoadGen.current += 1;
+    bumpGen(compareLoadGen.current, tabId);
     const selected = sessionsRef.current[tabId]?.historySelection;
     patchSession(tabId, {
       comparison: null,
@@ -1511,7 +1597,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       if (!repoPath || !current?.files) return;
       const file = current.files.find((item) => item.path === path);
       if (!file) return;
-      const generation = ++compareLoadGen.current;
+      const generation = bumpGen(compareLoadGen.current, tabId);
       patchSession(tabId, {
         comparison: { ...current, path },
         historyDiff: file.binary ? emptyBinaryDiff(path, file.oldPath) : null,
@@ -1525,10 +1611,10 @@ export function GitProvider({ children }: { children: ReactNode }) {
           path,
           prefsRef.current.diffIgnoreWhitespace,
         );
-        if (compareLoadGen.current !== generation) return;
+        if (readGen(compareLoadGen.current, tabId) !== generation) return;
         patchSession(tabId, { historyDiff });
       } catch (error) {
-        if (compareLoadGen.current !== generation) return;
+        if (readGen(compareLoadGen.current, tabId) !== generation) return;
         patchSession(tabId, { historyDiff: null });
         reportError(error);
       }
@@ -1552,7 +1638,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      const generation = ++stashLoadGen.current;
+      const generation = bumpGen(stashLoadGen.current, tabId);
       patchSession(
         tabId,
         {
@@ -1564,10 +1650,10 @@ export function GitProvider({ children }: { children: ReactNode }) {
         "stash",
       );
       const repoName = current?.snapshot?.repo.name;
-      const activityId = beginActivity("Loading stash", repoName);
+      const activityId = beginActivity("Loading stash", repoName, undefined, tabId);
       try {
         const details = await gitApi.getStashDetails(repoPath, stash.id);
-        if (stashLoadGen.current !== generation) return;
+        if (readGen(stashLoadGen.current, tabId) !== generation) return;
         const first = details.files[0];
         patchSession(
           tabId,
@@ -1589,10 +1675,10 @@ export function GitProvider({ children }: { children: ReactNode }) {
           first.path,
           prefsRef.current.diffIgnoreWhitespace,
         );
-        if (stashLoadGen.current !== generation) return;
+        if (readGen(stashLoadGen.current, tabId) !== generation) return;
         patchSession(tabId, { stashDiff }, generation, "stash");
       } catch (error) {
-        if (stashLoadGen.current !== generation) return;
+        if (readGen(stashLoadGen.current, tabId) !== generation) return;
         patchSession(tabId, { stashDetails: null, stashDiff: null }, generation, "stash");
         reportError(error);
       } finally {
@@ -1616,7 +1702,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      const generation = ++stashLoadGen.current;
+      const generation = bumpGen(stashLoadGen.current, tabId);
       const index =
         current?.stashSelection?.id === id
           ? current.stashSelection.index
@@ -1634,7 +1720,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       );
       if (file?.binary) return;
 
-      const activityId = beginActivity("Loading file diff", path);
+      const activityId = beginActivity("Loading file diff", path, undefined, tabId);
       try {
         const stashDiff = await gitApi.getStashDiff(
           repoPath,
@@ -1642,10 +1728,10 @@ export function GitProvider({ children }: { children: ReactNode }) {
           path,
           prefsRef.current.diffIgnoreWhitespace,
         );
-        if (stashLoadGen.current !== generation) return;
+        if (readGen(stashLoadGen.current, tabId) !== generation) return;
         patchSession(tabId, { stashDiff }, generation, "stash");
       } catch (error) {
-        if (stashLoadGen.current !== generation) return;
+        if (readGen(stashLoadGen.current, tabId) !== generation) return;
         patchSession(tabId, { stashDiff: null }, generation, "stash");
         reportError(error);
       } finally {
@@ -1660,14 +1746,15 @@ export function GitProvider({ children }: { children: ReactNode }) {
       label: string,
       action: (repoPath: string, activityId: string) => Promise<WorkspaceSnapshot>,
       success?: string,
-      options?: { cancellable?: boolean },
+      options?: { cancellable?: boolean; tabId?: string },
     ) => {
-      const repoPath = activeRepoPath();
-      const tabId = activeTabIdRef.current;
+      const tabId = options?.tabId ?? activeTabIdRef.current;
+      const tab = tabsRef.current.find((item) => item.id === tabId);
+      const repoPath = tab?.kind === "repo" ? tab.path : null;
       if (!repoPath) return false;
       const current = sessionsRef.current[tabId];
       const changeSelection = current?.changeSelection ?? null;
-      const changeGeneration = changeLoadGen.current;
+      const changeGeneration = readGen(changeLoadGen.current, tabId);
       try {
         const next = await runActivity(label, current?.snapshot?.repo.name, async (activityId) => {
           const snapshot = keepRemoteBranches(current?.snapshot, await action(repoPath, activityId));
@@ -1688,9 +1775,9 @@ export function GitProvider({ children }: { children: ReactNode }) {
           }
           const headChanged = current?.snapshot?.repo.headId !== snapshot.repo.headId;
           return { snapshot, changeDiff, changeSelection: nextSelection, headChanged };
-        }, options?.cancellable);
-        const selectionMoved = changeLoadGen.current !== changeGeneration;
-        if (!selectionMoved) changeLoadGen.current += 1;
+        }, options?.cancellable, tabId);
+        const selectionMoved = readGen(changeLoadGen.current, tabId) !== changeGeneration;
+        if (!selectionMoved) bumpGen(changeLoadGen.current, tabId);
         patchSession(tabId, {
           snapshot: next.snapshot,
           ...(selectionMoved
@@ -1713,7 +1800,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
         return false;
       }
     },
-    [activeRepoPath, patchSession, refetchStaleHistory, runActivity, stashPatchFor],
+    [patchSession, refetchStaleHistory, runActivity, stashPatchFor],
   );
 
   const stage = useCallback(
@@ -1732,12 +1819,12 @@ export function GitProvider({ children }: { children: ReactNode }) {
 
   const discard = useCallback(
     async (paths: string[]) => {
+      const tabId = activeTabIdRef.current;
       await runMutation(
         "Discarding changes",
         (repoPath) => gitApi.discardPaths(repoPath, paths),
         "Discarded changes",
       );
-      const tabId = activeTabIdRef.current;
       const selected = sessionsRef.current[tabId]?.changeSelection;
       if (selected && paths.includes(selected.path)) {
         patchSession(tabId, { changeSelection: null, changeDiff: null });
@@ -1762,6 +1849,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
 
   const commitDraftNonce = useRef(0);
   const undoLastCommit = useCallback(async () => {
+    const tabId = activeTabIdRef.current;
     let message = "";
     const ok = await runMutation(
       "Undoing the last commit",
@@ -1774,7 +1862,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
     );
     if (ok) {
       commitDraftNonce.current += 1;
-      patchSession(activeTabIdRef.current, {
+      patchSession(tabId, {
         view: "changes",
         commitDraft: { text: message, nonce: commitDraftNonce.current },
       });
@@ -1784,11 +1872,12 @@ export function GitProvider({ children }: { children: ReactNode }) {
 
   const commit = useCallback(
     async (message: string, amend = false) => {
+      const tabId = activeTabIdRef.current;
       const ok = await runMutation(amend ? "Amending commit" : "Creating commit", (repoPath) =>
         gitApi.commit(repoPath, message, amend),
       );
       if (ok) {
-        patchSession(activeTabIdRef.current, { changeSelection: null, changeDiff: null });
+        patchSession(tabId, { changeSelection: null, changeDiff: null });
         if (amend) toast.success("Amended commit");
         else toast.success("Created commit", { action: { label: "Undo", onClick: () => void undoLastCommit() } });
       }
@@ -1812,13 +1901,14 @@ export function GitProvider({ children }: { children: ReactNode }) {
 
   const checkoutDetached = useCallback(
     async (oid: string) => {
+      const tabId = activeTabIdRef.current;
       const ok = await runMutation(
         `Checking out ${oid.slice(0, 7)}`,
         (repoPath) => gitApi.checkoutDetached(repoPath, oid),
         `Checked out ${oid.slice(0, 7)} without a branch`,
       );
       if (ok) {
-        patchSession(activeTabIdRef.current, { changeSelection: null, changeDiff: null });
+        patchSession(tabId, { changeSelection: null, changeDiff: null });
       }
       return ok;
     },
@@ -1827,12 +1917,12 @@ export function GitProvider({ children }: { children: ReactNode }) {
 
   const checkoutBranch = useCallback(
     async (name: string) => {
+      const tabId = activeTabIdRef.current;
       await runMutation(
         `Checking out ${name}`,
         (repoPath) => gitApi.checkoutBranch(repoPath, name),
         `Checked out ${name}`,
       );
-      const tabId = activeTabIdRef.current;
       patchSession(tabId, {
         changeSelection: null,
         changeDiff: null,
@@ -1845,13 +1935,10 @@ export function GitProvider({ children }: { children: ReactNode }) {
   );
 
   const refreshAfterFetch = useCallback(
-    async (ok: boolean) => {
-      await ensureBranches(true);
+    async (ok: boolean, tabId = activeTabIdRef.current) => {
+      await ensureBranches(true, tabId);
       if (ok) {
-        invalidateHistory(
-          activeTabIdRef.current,
-          sessionsRef.current[activeTabIdRef.current]?.view === "history",
-        );
+        invalidateHistory(tabId, sessionsRef.current[tabId]?.view === "history");
       }
     },
     [ensureBranches, invalidateHistory],
@@ -1861,16 +1948,17 @@ export function GitProvider({ children }: { children: ReactNode }) {
   // fetches wait a full interval after any fetch.
   const lastFetchRef = useRef<Record<string, number>>({});
   const fetchingRef = useRef(new Set<string>());
-  const markFetched = useCallback(() => {
-    const path = activeRepoPath();
-    if (path) lastFetchRef.current[normalizeRepoPath(path)] = Date.now();
+  const markFetched = useCallback((path?: string | null) => {
+    const target = path ?? activeRepoPath();
+    if (target) lastFetchRef.current[normalizeRepoPath(target)] = Date.now();
   }, [activeRepoPath]);
 
   const fetchRemote = useCallback(
     async (remote?: string) => {
+      const tabId = activeTabIdRef.current;
+      const repoPath = activeRepoPath();
       const named = remote?.trim();
-      const target =
-        named || defaultFetchRemote(sessionsRef.current[activeTabIdRef.current]?.snapshot);
+      const target = named || defaultFetchRemote(sessionsRef.current[tabId]?.snapshot);
       const ok = await runMutation(
         target ? `Fetching ${target}` : "Fetching",
         (repoPath, activityId) =>
@@ -1880,13 +1968,15 @@ export function GitProvider({ children }: { children: ReactNode }) {
         target ? `Fetched ${target}` : "Fetched",
         { cancellable: true },
       );
-      if (ok) markFetched();
-      await refreshAfterFetch(ok);
+      if (ok) markFetched(repoPath);
+      await refreshAfterFetch(ok, tabId);
     },
-    [markFetched, refreshAfterFetch, runMutation],
+    [activeRepoPath, markFetched, refreshAfterFetch, runMutation],
   );
 
   const fetchAllRemotes = useCallback(async () => {
+    const tabId = activeTabIdRef.current;
+    const repoPath = activeRepoPath();
     const ok = await runMutation(
       "Fetching all remotes",
       (repoPath, activityId) =>
@@ -1894,9 +1984,9 @@ export function GitProvider({ children }: { children: ReactNode }) {
       "Fetched all remotes",
       { cancellable: true },
     );
-    if (ok) markFetched();
-    await refreshAfterFetch(ok);
-  }, [markFetched, refreshAfterFetch, runMutation]);
+    if (ok) markFetched(repoPath);
+    await refreshAfterFetch(ok, tabId);
+  }, [activeRepoPath, markFetched, refreshAfterFetch, runMutation]);
 
   /** Fetches every remote without prompts or toasts; failures stay quiet. */
   const backgroundFetch = useCallback(
@@ -1915,14 +2005,14 @@ export function GitProvider({ children }: { children: ReactNode }) {
               background: true,
             }),
           true,
+          tabId,
         );
         const current = sessionsRef.current[tabId];
         if (!current) return;
         const snapshot = keepRemoteBranches(current.snapshot, fetched);
         const changed = !sameSnapshot(current.snapshot, snapshot);
         if (changed) patchSession(tabId, { snapshot });
-        if (activeTabIdRef.current !== tabId) return;
-        await ensureBranches(true);
+        await ensureBranches(true, tabId);
         if (changed || historyGraphChanged(current.snapshot, snapshot)) {
           invalidateHistory(tabId, sessionsRef.current[tabId]?.view === "history");
         }
@@ -1958,7 +2048,9 @@ export function GitProvider({ children }: { children: ReactNode }) {
   }, [backgroundFetch, prefs.autoFetchMinutes]);
 
   const pullRemote = useCallback(async (remote?: string, rebase = false) => {
-    const snapshot = sessionsRef.current[activeTabIdRef.current]?.snapshot;
+    const tabId = activeTabIdRef.current;
+    const repoPath = activeRepoPath();
+    const snapshot = sessionsRef.current[tabId]?.snapshot;
     const target = remote?.trim() || primaryRemote(snapshot);
     if (!target) {
       toast.error("Add a remote before pulling");
@@ -1966,15 +2058,15 @@ export function GitProvider({ children }: { children: ReactNode }) {
     }
     const ok = await runMutation(
       rebase ? `Rebasing onto ${target}` : `Pulling from ${target}`,
-      (repoPath, activityId) => gitApi.pullRemote(repoPath, activityId, target, rebase),
+      (path, activityId) => gitApi.pullRemote(path, activityId, target, rebase),
       rebase ? `Rebased onto ${target}` : `Pulled from ${target}`,
-      { cancellable: true },
+      { cancellable: true, tabId },
     );
-    if (ok) markFetched();
-    await ensureBranches(true);
-    if (ok) invalidateHistory(activeTabIdRef.current, sessionsRef.current[activeTabIdRef.current]?.view === "history");
-    else await refreshAfterReplayRef.current();
-  }, [ensureBranches, invalidateHistory, markFetched, runMutation]);
+    if (ok) markFetched(repoPath);
+    await ensureBranches(true, tabId);
+    if (ok) invalidateHistory(tabId, sessionsRef.current[tabId]?.view === "history");
+    else await refreshAfterReplayRef.current(tabId);
+  }, [activeRepoPath, ensureBranches, invalidateHistory, markFetched, runMutation]);
 
   const pushRemote = useCallback(
     async (options?: { remote?: string; force?: boolean; setUpstream?: boolean }) => {
@@ -2029,13 +2121,14 @@ export function GitProvider({ children }: { children: ReactNode }) {
 
   const createBranch = useCallback(
     async (name: string, switchTo: boolean, start?: string) => {
+      const tabId = activeTabIdRef.current;
       const ok = await runMutation(
         switchTo ? `Creating and checking out ${name}` : `Creating ${name}`,
         (repoPath) => gitApi.createBranch(repoPath, name, switchTo, start),
         switchTo ? `Created and checked out ${name}` : `Created ${name}`,
+        { tabId },
       );
       if (!ok) return false;
-      const tabId = activeTabIdRef.current;
       patchSession(tabId, {
         ...(switchTo
           ? {
@@ -2065,15 +2158,16 @@ export function GitProvider({ children }: { children: ReactNode }) {
 
   const deleteTag = useCallback(
     async (name: string) => {
+      const tabId = activeTabIdRef.current;
       const ok = await runMutation(
         `Deleting tag ${name}`,
         (repoPath) => gitApi.deleteTag(repoPath, name),
         `Deleted tag ${name}`,
+        { tabId },
       );
       if (!ok) return false;
-      const tabId = activeTabIdRef.current;
       const revs = sessionsRef.current[tabId]?.historyRevs ?? [];
-      if (revs.includes(name)) setHistoryRevs(revs.filter((rev) => rev !== name));
+      if (revs.includes(name)) setHistoryRevs(revs.filter((rev) => rev !== name), tabId);
       return true;
     },
     [runMutation, setHistoryRevs],
@@ -2118,14 +2212,15 @@ export function GitProvider({ children }: { children: ReactNode }) {
             current?.snapshot?.repo.name,
             (activityId) => gitApi.deleteBranch(repoPath, name, activityId, force),
             wasRemote,
+            tabId,
           ),
         );
         patchSession(tabId, { snapshot });
         const next = sessionsRef.current[tabId];
         if (next?.historyRevs.includes(name)) {
-          setHistoryRevs(next.historyRevs.filter((rev) => rev !== name));
+          setHistoryRevs(next.historyRevs.filter((rev) => rev !== name), tabId);
         }
-        if (wasRemote) await ensureBranches(true);
+        if (wasRemote) await ensureBranches(true, tabId);
         toast.success(`Deleted ${name}`);
         return true;
       } catch (error) {
@@ -2139,9 +2234,9 @@ export function GitProvider({ children }: { children: ReactNode }) {
     [activeRepoPath, ensureBranches, patchSession, runActivity, setHistoryRevs],
   );
 
-  const refreshAfterReplay = useCallback(async () => {
-    const repoPath = activeRepoPath();
-    const tabId = activeTabIdRef.current;
+  const refreshAfterReplay = useCallback(async (tabId = activeTabIdRef.current) => {
+    const tab = tabsRef.current.find((item) => item.id === tabId);
+    const repoPath = tab?.kind === "repo" ? tab.path : null;
     if (!repoPath) return;
     try {
       const snapshot = keepRemoteBranches(
@@ -2164,19 +2259,21 @@ export function GitProvider({ children }: { children: ReactNode }) {
     } catch {
       /* the original error is already shown */
     }
-  }, [activeRepoPath, patchSession, refetchStaleHistory]);
+  }, [patchSession, refetchStaleHistory]);
   useLayoutEffect(() => {
     refreshAfterReplayRef.current = refreshAfterReplay;
   }, [refreshAfterReplay]);
 
   const revertCommit = useCallback(
     async (oid: string) => {
+      const tabId = activeTabIdRef.current;
       const ok = await runMutation(
         `Reverting ${oid.slice(0, 7)}`,
         (repoPath) => gitApi.revertCommit(repoPath, oid),
         "Reverted commit",
+        { tabId },
       );
-      if (!ok) await refreshAfterReplay();
+      if (!ok) await refreshAfterReplay(tabId);
       return ok;
     },
     [refreshAfterReplay, runMutation],
@@ -2184,12 +2281,14 @@ export function GitProvider({ children }: { children: ReactNode }) {
 
   const rebaseOnto = useCallback(
     async (onto: string, label: string) => {
+      const tabId = activeTabIdRef.current;
       const ok = await runMutation(
         `Rebasing onto ${label}`,
         (repoPath) => gitApi.rebaseOnto(repoPath, onto),
         `Rebased onto ${label}`,
+        { tabId },
       );
-      if (!ok) await refreshAfterReplay();
+      if (!ok) await refreshAfterReplay(tabId);
       return ok;
     },
     [refreshAfterReplay, runMutation],
@@ -2197,34 +2296,40 @@ export function GitProvider({ children }: { children: ReactNode }) {
 
   const rebaseInteractive = useCallback(
     async (onto: string, steps: RebaseStep[]) => {
+      const tabId = activeTabIdRef.current;
       const ok = await runMutation(
         "Rebasing commits",
         (repoPath) => gitApi.rebaseInteractive(repoPath, onto, steps),
         "Rebased commits",
+        { tabId },
       );
-      if (!ok) await refreshAfterReplay();
+      if (!ok) await refreshAfterReplay(tabId);
       return ok;
     },
     [refreshAfterReplay, runMutation],
   );
 
   const rebaseContinue = useCallback(async () => {
+    const tabId = activeTabIdRef.current;
     const ok = await runMutation(
       "Continuing rebase",
       (repoPath) => gitApi.rebaseContinue(repoPath),
       "Rebase finished",
+      { tabId },
     );
-    if (!ok) await refreshAfterReplay();
+    if (!ok) await refreshAfterReplay(tabId);
     return ok;
   }, [refreshAfterReplay, runMutation]);
 
   const rebaseSkip = useCallback(async () => {
+    const tabId = activeTabIdRef.current;
     const ok = await runMutation(
       "Skipping commit",
       (repoPath) => gitApi.rebaseSkip(repoPath),
       "Skipped commit",
+      { tabId },
     );
-    if (!ok) await refreshAfterReplay();
+    if (!ok) await refreshAfterReplay(tabId);
     return ok;
   }, [refreshAfterReplay, runMutation]);
 
@@ -2238,25 +2343,29 @@ export function GitProvider({ children }: { children: ReactNode }) {
 
   const mergeRef = useCallback(
     async (onto: string, label: string) => {
+      const tabId = activeTabIdRef.current;
       const ok = await runMutation(
         `Merging ${label}`,
         (repoPath) => gitApi.mergeRef(repoPath, onto),
         `Merged ${label}`,
+        { tabId },
       );
-      if (!ok) await refreshAfterReplay();
+      if (!ok) await refreshAfterReplay(tabId);
       return ok;
     },
     [refreshAfterReplay, runMutation],
   );
 
   const operationContinue = useCallback(async (message?: string) => {
-    const kind = sessionsRef.current[activeTabIdRef.current]?.snapshot?.repo.operation?.kind;
+    const tabId = activeTabIdRef.current;
+    const kind = sessionsRef.current[tabId]?.snapshot?.repo.operation?.kind;
     const ok = await runMutation(
       kind ? `Continuing ${kind}` : "Continuing",
       (repoPath) => gitApi.operationContinue(repoPath, message),
       (kind && OPERATION_FINISHED[kind]) || "Operation finished",
+      { tabId },
     );
-    if (!ok) await refreshAfterReplay();
+    if (!ok) await refreshAfterReplay(tabId);
     return ok;
   }, [refreshAfterReplay, runMutation]);
 
@@ -2292,12 +2401,14 @@ export function GitProvider({ children }: { children: ReactNode }) {
 
   const cherryPickCommit = useCallback(
     async (oid: string) => {
+      const tabId = activeTabIdRef.current;
       const ok = await runMutation(
         `Cherry-picking ${oid.slice(0, 7)}`,
         (repoPath) => gitApi.cherryPickCommit(repoPath, oid),
         "Cherry-picked commit",
+        { tabId },
       );
-      if (!ok) await refreshAfterReplay();
+      if (!ok) await refreshAfterReplay(tabId);
       return ok;
     },
     [refreshAfterReplay, runMutation],
@@ -2318,6 +2429,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
   const createPatch = useCallback(
     async (commit: CommitSummary) => {
       const repoPath = activeRepoPath();
+      const tabId = activeTabIdRef.current;
       if (!repoPath) return;
       const dest = await save({
         title: "Save patch",
@@ -2326,8 +2438,12 @@ export function GitProvider({ children }: { children: ReactNode }) {
       });
       if (typeof dest !== "string" || !dest) return;
       try {
-        await runActivity("Creating patch", sessionsRef.current[activeTabIdRef.current]?.snapshot?.repo.name, () =>
-          gitApi.writeCommitPatch(repoPath, commit.id, dest),
+        await runActivity(
+          "Creating patch",
+          sessionsRef.current[tabId]?.snapshot?.repo.name,
+          () => gitApi.writeCommitPatch(repoPath, commit.id, dest),
+          false,
+          tabId,
         );
         toast.success("Saved patch");
       } catch (error) {
@@ -2344,35 +2460,38 @@ export function GitProvider({ children }: { children: ReactNode }) {
       filters: [{ name: "Patch", extensions: ["patch", "diff"] }],
     });
     if (typeof selected !== "string" || !selected) return;
+    const tabId = activeTabIdRef.current;
     const ok = await runMutation(
       "Applying patch",
       (repoPath) => gitApi.applyPatch(repoPath, selected),
       "Applied patch",
+      { tabId },
     );
-    if (!ok) await refreshAfterReplay();
+    if (!ok) await refreshAfterReplay(tabId);
   }, [refreshAfterReplay, runMutation]);
 
   const addRemote = useCallback(
     async (name: string, url: string) => {
+      const tabId = activeTabIdRef.current;
       const added = await runMutation(
         `Adding ${name}`,
         (repoPath) => gitApi.addRemote(repoPath, name, url),
         `Added ${name}`,
+        { tabId },
       );
       if (!added) return false;
       await runMutation(
         `Fetching ${name}`,
         (repoPath, activityId) => gitApi.fetchRemote(repoPath, activityId, name),
         undefined,
-        { cancellable: true },
+        { cancellable: true, tabId },
       );
-      const tabId = activeTabIdRef.current;
       patchSession(tabId, {
         commitsLoaded: false,
         commitsHasMore: true,
       });
       refetchStaleHistory(tabId);
-      await ensureBranches(true);
+      await ensureBranches(true, tabId);
       return true;
     },
     [ensureBranches, patchSession, refetchStaleHistory, runMutation],
@@ -2385,6 +2504,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
         `Removing ${name}`,
         (repoPath) => gitApi.deleteRemote(repoPath, name),
         `Removed ${name}`,
+        { tabId },
       );
       if (!removed) return false;
       const prefix = `${name}/`;
@@ -2403,15 +2523,18 @@ export function GitProvider({ children }: { children: ReactNode }) {
       }
       const next = sessionsRef.current[tabId];
       if (next?.historyRevs.some((rev) => rev === name || rev.startsWith(prefix))) {
-        setHistoryRevs(next.historyRevs.filter((rev) => rev !== name && !rev.startsWith(prefix)));
+        setHistoryRevs(
+          next.historyRevs.filter((rev) => rev !== name && !rev.startsWith(prefix)),
+          tabId,
+        );
       }
       const expanded = next?.historyExpanded;
       if (expanded) {
         const folder = `remote:${name}`;
         const filtered = expanded.filter((id) => id !== folder && !id.startsWith(`${folder}/`));
-        if (filtered.length !== expanded.length) setHistoryExpanded(filtered);
+        if (filtered.length !== expanded.length) setHistoryExpanded(filtered, tabId);
       }
-      await ensureBranches(true);
+      await ensureBranches(true, tabId);
       return true;
     },
     [ensureBranches, patchSession, runMutation, setHistoryExpanded, setHistoryRevs],
@@ -2597,26 +2720,26 @@ export function GitProvider({ children }: { children: ReactNode }) {
     const jobs: Promise<void>[] = [];
     const change = current.changeSelection;
     if (change) {
-      const generation = ++changeLoadGen.current;
+      const generation = bumpGen(changeLoadGen.current, tabId);
       jobs.push(
         gitApi.getWorkdirDiff(repoPath, change.path, change.staged, ws).then((changeDiff) => {
-          if (changeLoadGen.current === generation) patchSession(tabId, { changeDiff });
+          if (readGen(changeLoadGen.current, tabId) === generation) patchSession(tabId, { changeDiff });
         }),
       );
     }
     const comparison = current.comparison;
     const history = current.historySelection;
     if (comparison?.path) {
-      const generation = ++compareLoadGen.current;
+      const generation = bumpGen(compareLoadGen.current, tabId);
       jobs.push(
         gitApi
           .compareFileDiff(repoPath, comparison.base.rev, comparison.head.rev, comparison.path, ws)
           .then((historyDiff) => {
-            if (compareLoadGen.current === generation) patchSession(tabId, { historyDiff });
+            if (readGen(compareLoadGen.current, tabId) === generation) patchSession(tabId, { historyDiff });
           }),
       );
     } else if (history?.path && current.historyDiff && !current.historyDiff.binary) {
-      const generation = ++historyLoadGen.current;
+      const generation = bumpGen(historyLoadGen.current, tabId);
       jobs.push(
         gitApi.getCommitDiff(repoPath, history.id, history.path, ws).then((historyDiff) => {
           patchSession(tabId, { historyDiff }, generation);
@@ -2625,7 +2748,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
     }
     const stash = current.stashSelection;
     if (stash?.path && current.stashDiff && !current.stashDiff.binary) {
-      const generation = ++stashLoadGen.current;
+      const generation = bumpGen(stashLoadGen.current, tabId);
       jobs.push(
         gitApi.getStashDiff(repoPath, stash.id, stash.path, ws).then((stashDiff) => {
           patchSession(tabId, { stashDiff }, generation, "stash");
@@ -2735,6 +2858,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       cloneRepository,
       revealRepo,
       openTerminal,
+      refreshRepository,
       ensureBranches,
       ensureHistory,
       loadMoreCommits,
@@ -2826,6 +2950,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       cloneRepository,
       revealRepo,
       openTerminal,
+      refreshRepository,
       ensureBranches,
       ensureHistory,
       loadMoreCommits,

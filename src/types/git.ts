@@ -356,6 +356,8 @@ export interface WorkspaceSnapshot {
 
 export interface Activity {
   id: string;
+  /** Tab that started the work. Each tab's meter shows only its own activities. */
+  tabId: string;
   label: string;
   detail?: string;
   progress?: number;
