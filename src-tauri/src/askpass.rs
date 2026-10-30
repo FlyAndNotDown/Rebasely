@@ -25,6 +25,7 @@ const ENV_ACTIVITY: &str = "REBASELY_ASKPASS_ACTIVITY";
 const MAX_MESSAGE_BYTES: usize = 64 * 1024;
 const MAX_CONNECTIONS: usize = 32;
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
+const SOCKET_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const PROMPT_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 const SECRET_PROMPT_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -172,14 +173,16 @@ impl SecretPrompt {
                     state.connection = Some(connection);
                 }
                 let reply = (|| {
-                    stream.set_read_timeout(Some(HANDSHAKE_TIMEOUT)).ok()?;
+                    stream.set_read_timeout(Some(SOCKET_POLL_INTERVAL)).ok()?;
                     stream.set_write_timeout(Some(HANDSHAKE_TIMEOUT)).ok()?;
-                    let request = read_socket_message_cancellable(
-                        &mut stream,
-                        Instant::now() + HANDSHAKE_TIMEOUT,
-                        Some(&owned_stopping),
-                    )
-                    .ok()?;
+                    let request = credential_io(
+                        "private request read",
+                        read_socket_message_cancellable(
+                            &mut stream,
+                            Instant::now() + HANDSHAKE_TIMEOUT,
+                            Some(&owned_stopping),
+                        ),
+                    )?;
                     let mut parts = request.splitn(3, '\n');
                     if parts.next() != Some(token.as_str()) || parts.next() != Some("ssh-keygen") {
                         return None;
@@ -191,7 +194,8 @@ impl SecretPrompt {
                     Some(Zeroizing::new(format!("1{}", secret.as_str())))
                 })();
                 if let Some(reply) = reply {
-                    let _ = stream.write_all(reply.as_bytes());
+                    let _ =
+                        credential_io("private reply write", stream.write_all(reply.as_bytes()));
                 }
                 owned_state
                     .lock()
@@ -313,6 +317,17 @@ fn read_socket_message_cancellable(
     deadline: Instant,
     stopping: Option<&AtomicBool>,
 ) -> std::io::Result<Zeroizing<String>> {
+    read_socket_message_using(stream, deadline, stopping, |stream, buffer| {
+        stream.read(buffer)
+    })
+}
+
+fn read_socket_message_using(
+    stream: &mut TcpStream,
+    deadline: Instant,
+    stopping: Option<&AtomicBool>,
+    mut read: impl FnMut(&mut TcpStream, &mut [u8]) -> std::io::Result<usize>,
+) -> std::io::Result<Zeroizing<String>> {
     let mut message = Zeroizing::new(Vec::with_capacity(MAX_MESSAGE_BYTES + 1));
     let mut buffer = Zeroizing::new([0_u8; 4096]);
     loop {
@@ -322,29 +337,26 @@ fn read_socket_message_cancellable(
                 "Credential prompt cancelled.",
             ));
         }
-        let remaining = deadline
-            .checked_duration_since(Instant::now())
-            .ok_or_else(|| {
-                std::io::Error::new(
-                    std::io::ErrorKind::TimedOut,
-                    "Credential message timed out.",
-                )
-            })?;
-        let timeout = if stopping.is_some() {
-            remaining.min(Duration::from_millis(100))
-        } else {
-            remaining
-        };
-        stream.set_read_timeout(Some(timeout))?;
+        if Instant::now() >= deadline {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "Credential message timed out.",
+            ));
+        }
+        // Callers configure a short polling timeout before half-closing the
+        // connection. Darwin rejects later socket-option changes once both
+        // directions are shut, even when the final reply bytes are readable.
         let limit = buffer.len().min(MAX_MESSAGE_BYTES + 1 - message.len());
-        let read = match stream.read(&mut buffer[..limit]) {
+        let read = match read(stream, &mut buffer[..limit]) {
             Ok(read) => read,
+            // Interrupted reads have not consumed bytes. Re-enter the outer
+            // loop so cancellation and the total deadline are checked again.
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
             Err(error)
-                if stopping.is_some()
-                    && matches!(
-                        error.kind(),
-                        std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
-                    ) =>
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+                ) =>
             {
                 continue
             }
@@ -366,13 +378,30 @@ fn read_socket_message_cancellable(
     Ok(Zeroizing::new(text.to_string()))
 }
 
+fn credential_io<T>(stage: &str, result: std::io::Result<T>) -> Option<T> {
+    if let Err(error) = &result {
+        #[cfg(test)]
+        eprintln!(
+            "Credential transport {stage} failed: kind={:?}, os={:?}.",
+            error.kind(),
+            error.raw_os_error()
+        );
+        #[cfg(not(test))]
+        let _ = (stage, error);
+    }
+    result.ok()
+}
+
 fn handle(mut stream: TcpStream, emit: &Emit, token: &str) {
-    if stream.set_read_timeout(Some(HANDSHAKE_TIMEOUT)).is_err()
+    if stream.set_read_timeout(Some(SOCKET_POLL_INTERVAL)).is_err()
         || stream.set_write_timeout(Some(HANDSHAKE_TIMEOUT)).is_err()
     {
         return;
     }
-    let Ok(request) = read_socket_message(&mut stream, Instant::now() + HANDSHAKE_TIMEOUT) else {
+    let Some(request) = credential_io(
+        "prompt request read",
+        read_socket_message(&mut stream, Instant::now() + HANDSHAKE_TIMEOUT),
+    ) else {
         return;
     };
     let mut parts = request.splitn(3, '\n');
@@ -406,7 +435,7 @@ fn handle(mut stream: TcpStream, emit: &Emit, token: &str) {
         }
         None => Zeroizing::new("0".to_string()),
     };
-    let _ = stream.write_all(reply.as_bytes());
+    let _ = credential_io("prompt reply write", stream.write_all(reply.as_bytes()));
 }
 
 pub fn answer(id: u64, answer: Option<String>) -> AppResult<()> {
@@ -484,18 +513,24 @@ fn ask(port: &str, token: &str, activity: &str, prompt: &str) -> Option<Zeroizin
     if request.len() > MAX_MESSAGE_BYTES {
         return None;
     }
-    let mut stream = TcpStream::connect(("127.0.0.1", port)).ok()?;
-    stream.set_write_timeout(Some(HANDSHAKE_TIMEOUT)).ok()?;
-    stream
-        .set_read_timeout(Some(PROMPT_TIMEOUT + HANDSHAKE_TIMEOUT))
-        .ok()?;
-    stream.write_all(request.as_bytes()).ok()?;
-    stream.shutdown(Shutdown::Write).ok()?;
-    let reply = read_socket_message(
-        &mut stream,
-        Instant::now() + PROMPT_TIMEOUT + HANDSHAKE_TIMEOUT,
-    )
-    .ok()?;
+    let mut stream = credential_io("connect", TcpStream::connect(("127.0.0.1", port)))?;
+    credential_io(
+        "request write timeout",
+        stream.set_write_timeout(Some(HANDSHAKE_TIMEOUT)),
+    )?;
+    credential_io(
+        "reply read timeout",
+        stream.set_read_timeout(Some(SOCKET_POLL_INTERVAL)),
+    )?;
+    credential_io("request write", stream.write_all(request.as_bytes()))?;
+    credential_io("request half close", stream.shutdown(Shutdown::Write))?;
+    let reply = credential_io(
+        "reply read",
+        read_socket_message(
+            &mut stream,
+            Instant::now() + PROMPT_TIMEOUT + HANDSHAKE_TIMEOUT,
+        ),
+    )?;
     reply
         .strip_prefix('1')
         .map(|text| Zeroizing::new(text.to_string()))
@@ -533,11 +568,74 @@ mod tests {
             }
         });
         let (mut receiver, _) = listener.accept().unwrap();
+        receiver
+            .set_read_timeout(Some(SOCKET_POLL_INTERVAL))
+            .unwrap();
         let started = Instant::now();
         assert!(read_socket_message(&mut receiver, started + Duration::from_millis(80)).is_err());
         assert!(started.elapsed() < Duration::from_millis(500));
         drop(receiver);
         writer.join().unwrap();
+    }
+
+    #[test]
+    fn credential_replies_remain_readable_after_both_socket_directions_close() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        client.set_read_timeout(Some(SOCKET_POLL_INTERVAL)).unwrap();
+        let (mut server, _) = listener.accept().unwrap();
+        client.shutdown(Shutdown::Write).unwrap();
+        let mut request = Vec::new();
+        server.read_to_end(&mut request).unwrap();
+        server.write_all(b"1example response").unwrap();
+        server.shutdown(Shutdown::Write).unwrap();
+        drop(server);
+
+        let reply = read_socket_message(&mut client, Instant::now() + HANDSHAKE_TIMEOUT).unwrap();
+        assert_eq!(reply.as_str(), "1example response");
+        // EOF is now observed, so Darwin considers both directions shut. Reading
+        // again must return EOF without attempting another SO_RCVTIMEO update.
+        let eof = read_socket_message(&mut client, Instant::now() + HANDSHAKE_TIMEOUT).unwrap();
+        assert!(eof.is_empty());
+    }
+
+    #[test]
+    fn interrupted_credential_reads_preserve_bytes_and_check_cancellation() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (_server, _) = listener.accept().unwrap();
+        let mut payload = std::io::Cursor::new(b"example response");
+        let mut calls = 0;
+        let reply = read_socket_message_using(
+            &mut client,
+            Instant::now() + HANDSHAKE_TIMEOUT,
+            None,
+            |_, buffer| {
+                calls += 1;
+                if calls == 1 || calls == 3 {
+                    Err(std::io::ErrorKind::Interrupted.into())
+                } else {
+                    payload.read(buffer)
+                }
+            },
+        )
+        .unwrap();
+        assert_eq!(reply.as_str(), "example response");
+        assert_eq!(calls, 4);
+
+        let stopping = AtomicBool::new(false);
+        let error = read_socket_message_using(
+            &mut client,
+            Instant::now() + HANDSHAKE_TIMEOUT,
+            Some(&stopping),
+            |_, _| {
+                stopping.store(true, Ordering::Release);
+                Err(std::io::ErrorKind::Interrupted.into())
+            },
+        )
+        .unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::Interrupted);
+        assert_eq!(error.to_string(), "Credential prompt cancelled.");
     }
 
     #[test]
