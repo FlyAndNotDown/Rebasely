@@ -57,6 +57,8 @@ Asset names include the full version and platform, for example `Rebasely_v0.0.1_
 
 All four builds upload to the same draft. Only after every build succeeds does the final job check that every required bundle, installer, and signature exists and has finished uploading. It creates one `latest.json` containing all four platforms, including a separate Linux Debian entry so Debian installations receive a `.deb` update. It then publishes the release and marks it latest. Generating this manifest once avoids parallel build jobs overwriting each other's platform entries.
 
+GitHub can give draft assets temporary `untagged-...` download URLs. The final job checks these against the draft's release page and writes the requested version's permanent download URLs into `latest.json` before publishing.
+
 The app downloads update metadata and packages over HTTPS and verifies each update using its embedded Tauri public key. Before publication, the release workflow verifies each signature's authenticated version comment against that key and the requested version. The app also verifies the downloaded artifact bytes before installation and rejects a mismatched signed version. Startup and manual update checks follow the app's update settings.
 
 ## Failures and retries
@@ -66,6 +68,8 @@ A failed build or validation leaves the release as a draft. It does not replace 
 Release validation rejects missing source-tree notices, a newer failed or unfinished Check run, direct changes to `master`, and a mismatch between tested and merged contents. Ensure an up-to-date pull request passes its native checks before merging; if the merged content lacks that proof, validate a new pull request against current `master` before releasing.
 
 A new full workflow run rejects an existing version tag or draft. To restart a completely failed release using the same version, first inspect and remove only its unpublished draft and any unused tag; never replace a published version. If `master` has advanced, start from its current checked revision after resolving that draft. Choose a new version for changes to an already published release.
+
+If a failure requires a workflow or script fix, merge that fix through a reviewed pull request first. Rerunning the old workflow uses its original source revision and will not include the fix. Resolve the unpublished draft as described above, then have the owner start a new release from the updated `master`.
 
 ## Local version commands
 

@@ -173,17 +173,24 @@ export function validateUpdaterSignature(value, { version, publicKey } = {}) {
   return signature;
 }
 
-export function buildUpdaterManifest({ tag, repository, assets, signatures, publicKey, notes, pubDate }) {
+export function buildUpdaterManifest({ tag, repository, releaseUrl, assets, signatures, publicKey, notes, pubDate }) {
   const version = parseReleaseTag(tag);
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)) throw new Error("Invalid release repository.");
   if (!Number.isFinite(Date.parse(pubDate))) throw new Error("Invalid publication date.");
+  const releasePrefix = `https://github.com/${repository}/releases/tag/`;
+  const assetTag = typeof releaseUrl === "string" && releaseUrl.startsWith(releasePrefix) ? releaseUrl.slice(releasePrefix.length) : "";
+  if (assetTag !== tag && !/^untagged-[A-Za-z0-9]+$/.test(assetTag)) throw new Error("Unexpected release URL.");
   const platforms = {};
   for (const target of releaseAssets(tag)) {
     const asset = requireAsset(assets, target.name);
     requireAsset(assets, `${target.name}.sig`);
     if (target.installer) requireAsset(assets, target.installer);
     const url = `https://github.com/${repository}/releases/download/${tag}/${target.name}`;
-    if (asset.browser_download_url !== url) throw new Error(`Unexpected download URL for ${target.name}.`);
+    // Draft assets can use the release page's temporary tag until publication.
+    const draftUrl = `https://github.com/${repository}/releases/download/${assetTag}/${target.name}`;
+    if (asset.browser_download_url !== url && asset.browser_download_url !== draftUrl) {
+      throw new Error(`Unexpected download URL for ${target.name}.`);
+    }
     platforms[target.platform] = { signature: validateUpdaterSignature(signatures[target.name] ?? "", { version, publicKey }), url };
   }
   return { version, notes, pub_date: new Date(pubDate).toISOString(), platforms };
@@ -230,7 +237,7 @@ export async function publishRelease({ github, context, core, tag, releaseId }) 
     signatures[target.name] = Buffer.from(data).toString("utf8");
   }
   const manifest = buildUpdaterManifest({
-    tag, repository: `${owner}/${repo}`, assets, signatures,
+    tag, repository: `${owner}/${repo}`, releaseUrl: release.html_url, assets, signatures,
     publicKey: JSON.parse(await readFile(new URL("../src-tauri/tauri.conf.json", import.meta.url), "utf8")).plugins?.updater?.pubkey,
     notes: release.body ?? "", pubDate: new Date().toISOString(),
   });

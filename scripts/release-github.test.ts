@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { generateKeyPairSync, sign } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { assertReleaseOwner, buildUpdaterManifest, preflight, publishRelease, releaseAssets, validateUpdaterSignature } from "./release-github.mjs";
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const original = await importOriginal<typeof import("node:fs/promises")>();
+  return { ...original, readFile: vi.fn(original.readFile) };
+});
 
 const tag = "v0.0.1";
 const repository = "maintainer/sample-app";
@@ -13,17 +19,31 @@ const trustedComment = "timestamp:1\tfile:fixture.bin\tversion:0.0.1";
 const commentSignature = sign(null, Buffer.concat([packet.subarray(10), Buffer.from(trustedComment)]), keys.privateKey);
 const signature = Buffer.from(`untrusted comment: fixture signature\n${packet.toString("base64")}\ntrusted comment: ${trustedComment}\n${commentSignature.toString("base64")}\n`).toString("base64");
 
-afterEach(() => vi.unstubAllEnvs());
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.mocked(readFile).mockReset();
+});
 
 function fixture() {
   const assets = releaseAssets(tag).flatMap((target: { name: string; installer?: string }) => [
     target.name, `${target.name}.sig`, ...(target.installer ? [target.installer] : []),
-  ]).map((name: string) => ({
-    name, state: "uploaded", size: 100,
+  ]).map((name: string, index: number) => ({
+    id: index + 1, name, state: "uploaded", size: 100,
     browser_download_url: `https://github.com/${repository}/releases/download/${tag}/${name}`,
   }));
   const signatures = Object.fromEntries(releaseAssets(tag).map((target: { name: string }) => [target.name, signature]));
-  return { tag, repository, assets, signatures, publicKey, notes: "Release notes", pubDate: "2026-01-01T00:00:00Z" };
+  const releaseUrl = `https://github.com/${repository}/releases/tag/${tag}`;
+  return { tag, repository, releaseUrl, assets, signatures, publicKey, notes: "Release notes", pubDate: "2026-01-01T00:00:00Z" };
+}
+
+function draftFixture() {
+  const input = fixture();
+  const draftTag = "untagged-a1b2c3d4";
+  input.releaseUrl = `https://github.com/${repository}/releases/tag/${draftTag}`;
+  for (const asset of input.assets) {
+    asset.browser_download_url = `https://github.com/${repository}/releases/download/${draftTag}/${asset.name}`;
+  }
+  return input;
 }
 
 describe("release authorization", () => {
@@ -194,26 +214,34 @@ describe("release preflight", () => {
 
 function publishFixture() {
   const input = githubFixture();
-  const release = { id: 99, draft: true, prerelease: false, tag_name: tag, target_commitish: input.context.sha };
+  const release = {
+    id: 99, draft: true, prerelease: false, tag_name: tag, target_commitish: input.context.sha,
+    html_url: `https://github.com/${repository}/releases/tag/${tag}`,
+  };
   input.lists.releases.push(release);
   const repos = {
     ...input.github.rest.repos,
     getRelease: vi.fn(async () => ({ data: release })),
     listReleaseAssets: vi.fn(),
+    getReleaseAsset: vi.fn(async () => ({ data: Buffer.from(signature) })),
     updateRelease: vi.fn(),
-    uploadReleaseAsset: vi.fn(),
+    uploadReleaseAsset: vi.fn(async (_parameters: {
+      owner: string; repo: string; release_id: number; name: string; data: Buffer;
+      headers: Record<string, string | number>;
+    }) => undefined),
     deleteReleaseAsset: vi.fn(),
   };
   const git = {
     getRef: vi.fn(async () => ({ data: { object: { type: "commit", sha: input.context.sha } } })),
     getTag: vi.fn(),
   };
+  const assets: ReturnType<typeof fixture>["assets"] = [];
   const github = {
     ...input.github,
     rest: { ...input.github.rest, repos, git },
-    paginate: vi.fn(async (method: unknown, parameters: { check_run_id?: number } = {}) => method === repos.listReleaseAssets ? [] : input.github.paginate(method, parameters)),
+    paginate: vi.fn(async (method: unknown, parameters: { check_run_id?: number } = {}) => method === repos.listReleaseAssets ? assets : input.github.paginate(method, parameters)),
   };
-  return { ...input, github, release, tag, releaseId: "99" };
+  return { ...input, github, release, assets, tag, releaseId: "99" };
 }
 
 describe("release publication guards", () => {
@@ -240,6 +268,40 @@ describe("release publication guards", () => {
     expect(input.github.rest.repos.uploadReleaseAsset).not.toHaveBeenCalled();
     expect(input.github.rest.repos.deleteReleaseAsset).not.toHaveBeenCalled();
   });
+
+  it("uploads versioned updater URLs before publishing a complete untagged draft", async () => {
+    const input = publishFixture();
+    const draft = draftFixture();
+    input.release.html_url = draft.releaseUrl;
+    input.assets.push(...draft.assets);
+    const original = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
+    const configUrl = new URL("../src-tauri/tauri.conf.json", import.meta.url).href;
+    vi.mocked(readFile).mockImplementation((async (file, options) => {
+      if (file instanceof URL && file.href === configUrl) {
+        const config = JSON.parse(await original.readFile(file, "utf8"));
+        config.plugins.updater.pubkey = publicKey;
+        return JSON.stringify(config);
+      }
+      return original.readFile(file, options);
+    }) as typeof readFile);
+
+    await publishRelease(input);
+
+    const repos = input.github.rest.repos;
+    expect(repos.uploadReleaseAsset).toHaveBeenCalledOnce();
+    const upload = repos.uploadReleaseAsset.mock.calls[0][0];
+    expect(upload).toMatchObject({ ...input.context.repo, release_id: 99, name: "latest.json" });
+    const manifest = JSON.parse(upload.data.toString("utf8"));
+    for (const target of releaseAssets(tag)) {
+      expect(manifest.platforms[target.platform]).toEqual({
+        signature, url: `https://github.com/${repository}/releases/download/${tag}/${target.name}`,
+      });
+    }
+    expect(repos.updateRelease).toHaveBeenCalledWith({
+      ...input.context.repo, release_id: 99, draft: false, make_latest: "true",
+    });
+    expect(repos.uploadReleaseAsset.mock.invocationCallOrder[0]).toBeLessThan(repos.updateRelease.mock.invocationCallOrder[0]);
+  });
 });
 
 describe("release updater manifest", () => {
@@ -247,10 +309,66 @@ describe("release updater manifest", () => {
     const manifest = buildUpdaterManifest(fixture());
     expect(manifest.version).toBe("0.0.1");
     expect(Object.keys(manifest.platforms).sort()).toEqual(["darwin-aarch64", "darwin-x86_64", "linux-x86_64", "linux-x86_64-deb", "windows-x86_64"]);
-    expect(manifest.platforms["windows-x86_64"].url).toContain("/v0.0.1/Rebasely_v0.0.1_windows_x64.exe");
-    expect(manifest.platforms["darwin-aarch64"].signature).toBe(signature);
-    expect(manifest.platforms["linux-x86_64-deb"].url).toMatch(/\.deb$/);
-    expect(manifest.platforms["linux-x86_64"].url).toMatch(/\.AppImage$/);
+    expect(manifest.platforms).toHaveProperty("windows-x86_64.url", expect.stringContaining("/v0.0.1/Rebasely_v0.0.1_windows_x64.exe"));
+    expect(manifest.platforms).toHaveProperty("darwin-aarch64.signature", signature);
+    expect(manifest.platforms).toHaveProperty("linux-x86_64-deb.url", expect.stringMatching(/\.deb$/));
+    expect(manifest.platforms).toHaveProperty("linux-x86_64.url", expect.stringMatching(/\.AppImage$/));
+  });
+
+  it("normalizes every draft platform URL to its final versioned download URL", () => {
+    const manifest = buildUpdaterManifest(draftFixture());
+    for (const target of releaseAssets(tag)) {
+      expect(manifest.platforms).toHaveProperty(target.platform, {
+        signature, url: `https://github.com/${repository}/releases/download/${tag}/${target.name}`,
+      });
+    }
+    expect(JSON.stringify(manifest)).not.toContain("untagged-");
+  });
+
+  it("accepts final download URLs when a draft release still has an untagged page", () => {
+    const input = draftFixture();
+    input.assets = fixture().assets;
+    expect(buildUpdaterManifest(input)).toEqual(buildUpdaterManifest(fixture()));
+  });
+
+  it("rejects release pages outside the repository, requested tag, or draft namespace", () => {
+    for (const releaseUrl of [
+      undefined,
+      "",
+      `http://github.com/${repository}/releases/tag/${tag}`,
+      `https://example.com/${repository}/releases/tag/${tag}`,
+      `https://github.com/maintainer/other-app/releases/tag/${tag}`,
+      `https://github.com/${repository}/releases/tag/v0.0.2`,
+      `https://github.com/${repository}/releases/tag/untagged-`,
+      `https://github.com/${repository}/releases/tag/untagged-a1-b2`,
+      `https://github.com/${repository}/releases/tag/untagged-a1/extra`,
+      `https://github.com/${repository}/releases/tag/${tag}?draft=true`,
+      `https://github.com/${repository}/releases/tag/${tag}#assets`,
+      `https://github.com/${repository}/releases/tag/untagged-a1?draft=true`,
+    ]) {
+      expect(() => buildUpdaterManifest({ ...fixture(), releaseUrl })).toThrow("Unexpected release URL");
+    }
+  });
+
+  it("rejects download URLs that do not match the release page or exact asset", () => {
+    const name = releaseAssets(tag)[0].name;
+    for (const browserDownloadUrl of [
+      `http://github.com/${repository}/releases/download/untagged-a1b2c3d4/${name}`,
+      `https://example.com/${repository}/releases/download/untagged-a1b2c3d4/${name}`,
+      `https://github.com/maintainer/other-app/releases/download/untagged-a1b2c3d4/${name}`,
+      `https://github.com/${repository}/releases/download/v0.0.2/${name}`,
+      `https://github.com/${repository}/releases/download/untagged-otherdraft/${name}`,
+      `https://github.com/${repository}/releases/download/untagged-a1b2c3d4/other.exe`,
+      `https://github.com/${repository}/releases/download/untagged-a1b2c3d4/${name}?download=1`,
+      `https://github.com/${repository}/releases/download/untagged-a1b2c3d4/${name}#asset`,
+    ]) {
+      const input = draftFixture();
+      input.assets[0].browser_download_url = browserDownloadUrl;
+      expect(() => buildUpdaterManifest(input)).toThrow("Unexpected download URL");
+    }
+    const input = fixture();
+    input.assets[0].browser_download_url = `https://github.com/${repository}/releases/download/untagged-a1b2c3d4/${name}`;
+    expect(() => buildUpdaterManifest(input)).toThrow("Unexpected download URL");
   });
 
   it("refuses partial uploads, missing signatures, and missing installer packages", () => {
