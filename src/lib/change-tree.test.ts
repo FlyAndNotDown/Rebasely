@@ -25,6 +25,22 @@ describe("buildChangeTree", () => {
     expect(src.dirs.map((dir) => [dir.label, dir.path])).toEqual([["lib/deep", "src/lib/deep"]]);
     expect(src.files.map((item) => item.path)).toEqual(["src/A.ts", "src/b.ts"]);
   });
+
+  it("sorts numbered names naturally and preserves the order of case-equivalent names", () => {
+    const tree = buildChangeTree([
+      file("folder10/file.txt"),
+      file("folder2/item10.txt"),
+      file("folder2/item2.txt"),
+      file("folder2/ITEM2.txt"),
+      file("folder1/file.txt"),
+    ]);
+    expect(tree.dirs.map((dir) => dir.label)).toEqual(["folder1", "folder2", "folder10"]);
+    expect(tree.dirs[1].files.map((item) => item.path)).toEqual([
+      "folder2/item2.txt",
+      "folder2/ITEM2.txt",
+      "folder2/item10.txt",
+    ]);
+  });
 });
 
 describe("changeRows", () => {

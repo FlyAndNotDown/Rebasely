@@ -22,8 +22,7 @@ export type ChangeRow =
     }
   | { kind: "file"; section: ChangeSection; file: FileStatus; depth: number };
 
-const byName = (left: string, right: string) =>
-  left.localeCompare(right, undefined, { sensitivity: "base", numeric: true });
+const byName = new Intl.Collator(undefined, { sensitivity: "base", numeric: true }).compare;
 
 /** Groups files by folder, folders before files, both sorted by name. */
 export function buildChangeTree(files: FileStatus[]): ChangeDir {

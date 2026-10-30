@@ -5,6 +5,8 @@ export interface SearchNode {
   detail?: string;
 }
 
+const byName = new Intl.Collator(undefined, { sensitivity: "base" }).compare;
+
 /** Builds the ancestor folders for a filtered file list and expands those folders. */
 export function nestSearchNodes(nodes: SearchNode[]): {
   entries: Record<string, SearchNode[]>;
@@ -60,7 +62,7 @@ export function nestSearchNodes(nodes: SearchNode[]): {
   for (const [parent, map] of buckets) {
     entries[parent] = [...map.values()].sort((left, right) => {
       if (left.dir !== right.dir) return left.dir ? -1 : 1;
-      return baseName(left.relative).localeCompare(baseName(right.relative), undefined, { sensitivity: "base" });
+      return byName(baseName(left.relative), baseName(right.relative));
     });
   }
   return { entries, open: [...open] };
