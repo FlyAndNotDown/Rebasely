@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 const root = fileURLToPath(new URL("../", import.meta.url));
 const extensions = new Set([".rs", ".ts", ".tsx", ".js", ".mjs", ".cjs", ".css", ".html", ".json", ".toml", ".yml", ".yaml", ".svg", ".md", ".lock"]);
 const directories = ["src", "src-tauri/src", "src-tauri/capabilities", "scripts", ".github", "docs", "site"];
+const ignoredDirectories = new Set(["dist", "dist-ssr", "node_modules"]);
 const files = [];
 const violations = [];
 const han = /\p{Script=Han}/u;
@@ -19,7 +20,7 @@ async function collect(directory, recursive) {
   }
   for (const entry of entries) {
     const target = path.join(directory, entry.name);
-    if (entry.isDirectory() && recursive) await collect(target, true);
+    if (entry.isDirectory() && recursive && !ignoredDirectories.has(entry.name)) await collect(target, true);
     else if (entry.isFile() && extensions.has(path.extname(entry.name))) files.push(target);
   }
 }

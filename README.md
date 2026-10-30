@@ -1,4 +1,4 @@
-![Rebasely — a unified version control client](site/assets/hero.svg)
+![Rebasely — a unified version control client](site/public/assets/hero.svg)
 
 <p align="center">
   Review changes. Follow history. Keep your work in view.<br><br>

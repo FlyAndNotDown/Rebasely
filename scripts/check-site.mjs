@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
-const root = fileURLToPath(new URL("../site/", import.meta.url));
+const root = fileURLToPath(new URL("../site/dist/", import.meta.url));
 const files = new Set();
 const textFiles = new Map();
 const violations = [];
@@ -17,7 +17,13 @@ async function collect(directory = "") {
   }
 }
 
-await collect();
+try {
+  await collect();
+} catch (error) {
+  if (error.code !== "ENOENT") throw error;
+  console.error("Website output is missing; run npm run site:build first.");
+  process.exit(1);
+}
 if (!files.has("index.html")) violations.push("index.html: missing website entry point");
 
 for (const filename of files) {

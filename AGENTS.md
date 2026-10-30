@@ -11,7 +11,7 @@ Rebasely is a unified version control client, built with React, TypeScript, Taur
 | `src/state/` | Repository sessions, asynchronous actions, refreshes, and selection |
 | `src/lib/` | Typed command clients and reusable, testable UI logic |
 | `src/types/` | TypeScript models for the Rust command boundary |
-| `site/` | Self-contained website deployed to GitHub Pages |
+| `site/` | Website sharing application UI components, deployed to GitHub Pages |
 | `docs/` | Development, release, and security guides |
 | `src-tauri/src/lib.rs` | Tauri commands, event wiring, and blocking-work dispatch |
 | `src-tauri/src/git/` | Git commands, parsers, history, diffs, and operations |
@@ -28,7 +28,7 @@ Use the npm scripts in `package.json` and the committed lockfiles. Development r
 | `npm run dev` | Start the Tauri desktop app with Vite |
 | `npm run vite:build` | Check TypeScript and build the frontend |
 | `npm run check:source` | Reject Han characters and invalid UTF-8 in repository text |
-| `npm run check:site` | Validate website links, assets, and JavaScript syntax |
+| `npm run check:site` | Typecheck, build, and validate the website |
 | `npm run check` | Run the source policy, TypeScript, ESLint, and Vitest |
 | `npm run check:rust` | Run rustfmt, Clippy with warnings denied, and Rust tests |
 | `npm run check:all` | Run both frontend and Rust checks |

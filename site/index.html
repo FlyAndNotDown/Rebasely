@@ -1,121 +1,36 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="dark">
   <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="Rebasely is a unified version control client. Review changes, follow history, and keep your work in one desktop workspace.">
-    <meta name="theme-color" content="#090b10">
+    <meta name="theme-color" content="#171717">
+    <script>
+      (() => {
+        let theme = "dark";
+        try {
+          const saved = localStorage.getItem("rebasely-site-theme");
+          if (["light", "dark", "system"].includes(saved)) theme = saved;
+        } catch {
+          // Keep the default when browser storage is unavailable.
+        }
+        const dark = theme === "dark" || (theme === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.classList.toggle("dark", dark);
+        document.documentElement.style.colorScheme = dark ? "dark" : "light";
+        document.documentElement.dataset.siteTheme = theme;
+      })();
+    </script>
     <meta property="og:type" content="website">
     <meta property="og:title" content="Rebasely — a unified version control client">
-    <meta property="og:description" content="Every change. One clear view.">
+    <meta property="og:description" content="Review changes. Follow history. Keep your work in view.">
     <meta property="og:image" content="https://flyandnotdown.github.io/Rebasely/assets/hero.svg">
     <meta property="og:url" content="https://flyandnotdown.github.io/Rebasely/">
     <link rel="canonical" href="https://flyandnotdown.github.io/Rebasely/">
-    <link rel="icon" type="image/svg+xml" href="assets/mark.svg">
-    <link rel="preload" href="assets/geist-latin.woff2" as="font" type="font/woff2" crossorigin>
-    <link rel="stylesheet" href="styles.css">
-    <script src="script.js" defer></script>
+    <link rel="icon" type="image/svg+xml" href="./assets/mark.svg">
     <title>Rebasely — a unified version control client</title>
   </head>
   <body>
-    <a class="skip-link" href="#main">Skip to content</a>
-    <svg class="symbols" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-      <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M7 17 17 7M7 7h10v10"/></symbol>
-      <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 3v12m-5-5 5 5 5-5M5 16v5h14v-5"/></symbol>
-      <symbol id="i-branch" viewBox="0 0 24 24"><path d="M6 3v12M18 9a6 6 0 0 1-6 6H6"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/></symbol>
-      <symbol id="i-history" viewBox="0 0 24 24"><path d="M3 10a9 9 0 1 1 2 8M3 4v6h6m3-3v5l3 2"/></symbol>
-      <symbol id="i-diff" viewBox="0 0 24 24"><path d="M9 3H5v18h14V7l-4-4H9M9 10h6m-3-3v6m-3 4h6"/></symbol>
-      <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7V4h6l3 3h9v13H3V7Z"/></symbol>
-      <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
-      <symbol id="i-key" viewBox="0 0 24 24"><path d="M9 7V4H4v5h3m8-2V4h5v5h-3M9 17v3H4v-5h3m10 0h3v5h-5v-3"/></symbol>
-      <symbol id="i-github" viewBox="0 0 24 24"><path d="M9 19c-4 1-4-2-6-2m12 5v-4a3.5 3.5 0 0 0-1-3c3 0 6-2 6-6a5 5 0 0 0-1-3 4.5 4.5 0 0 0 0-4s-1 0-4 2a14 14 0 0 0-6 0C6 2 5 2 5 2a4.5 4.5 0 0 0 0 4 5 5 0 0 0-1 3c0 4 3 6 6 6a3.5 3.5 0 0 0-1 3v4"/></symbol>
-      <symbol id="i-apple" viewBox="0 0 24 24"><path d="M15 3c0 2-1 3-3 3 3 0 4-2 3-3ZM16 7c-2-1-3 0-4 0s-2-1-4 0c-3 1-4 6-1 11 2 3 3 3 5 2 2 1 3 1 5-2l2-4c-3-1-4-4-1-6l-2-1Z"/></symbol>
-      <symbol id="i-windows" viewBox="0 0 24 24"><path d="m3 5 8-1v7H3V5Zm10-1 8-1v8h-8V4ZM3 13h8v7l-8-1v-6Zm10 0h8v8l-8-1v-7Z"/></symbol>
-      <symbol id="i-linux" viewBox="0 0 24 24"><path d="M9 5a3 3 0 0 1 6 0v4l3 7-2 4H8l-2-4 3-7V5Zm-1 15H4l2-4m10 4h4l-2-4M10 9l2 1 2-1"/><path d="M10.5 6h.01m3 0h.01"/></symbol>
-    </svg>
-
-    <header class="site-header wrap">
-      <a class="brand" href="./" aria-label="Rebasely home"><img src="assets/mark.svg" width="32" height="32" alt=""><span>Rebasely</span></a>
-      <nav aria-label="Main navigation">
-        <a href="#workflow">Workflow</a>
-        <a href="#download">Download</a>
-        <a class="nav-source" href="https://github.com/FlyAndNotDown/Rebasely">GitHub <svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></a>
-      </nav>
-    </header>
-
-    <main id="main">
-      <section class="hero wrap" aria-labelledby="hero-title">
-        <div class="orbital" aria-hidden="true"><i></i><i></i><i></i><span></span></div>
-        <p class="eyebrow"><span class="signal"></span> EVERY CHANGE. ONE CLEAR VIEW.</p>
-        <h1 id="hero-title">A unified<br><span>version control client.</span></h1>
-        <p class="hero-copy">Review changes. Follow history.<br class="mobile-break"> Keep your work in view.</p>
-        <div class="hero-actions">
-          <a class="button button-primary" href="#download"><svg class="icon" aria-hidden="true"><use href="#i-down"/></svg> Get Rebasely</a>
-          <a class="button button-secondary" href="https://github.com/FlyAndNotDown/Rebasely">Explore the source <svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></a>
-        </div>
-        <p class="platform-note">macOS Apple Silicon <span>·</span> Windows <span>·</span> Linux</p>
-
-        <div class="product" role="img" aria-label="Illustrative preview of Rebasely's history and diff views">
-          <div class="product-top"><div class="window-dots" aria-hidden="true"><i></i><i></i><i></i></div><span class="product-project"><svg class="icon" aria-hidden="true"><use href="#i-branch"/></svg> orbital <span class="project-cross" aria-hidden="true">×</span></span><span class="product-plus" aria-hidden="true">+</span><span class="product-title">Rebasely</span></div>
-          <div class="product-toolbar"><span><svg class="icon" aria-hidden="true"><use href="#i-branch"/></svg> main <span class="chevron" aria-hidden="true">⌄</span></span><span class="toolbar-actions">↓ Fetch <span>↙ Pull</span> <span>↗ Push</span></span></div>
-          <div class="product-body">
-            <aside class="product-sidebar" aria-hidden="true"><span><svg class="icon" aria-hidden="true"><use href="#i-diff"/></svg></span><span class="selected"><svg class="icon" aria-hidden="true"><use href="#i-history"/></svg></span><span><svg class="icon" aria-hidden="true"><use href="#i-folder"/></svg></span><div></div><span><svg class="icon" aria-hidden="true"><use href="#i-key"/></svg></span></aside>
-            <div class="product-branches"><p class="micro-label">BRANCHES</p><div class="branch-item active"><svg class="icon" aria-hidden="true"><use href="#i-branch"/></svg> main <span>HEAD</span></div><div class="branch-item"><svg class="icon" aria-hidden="true"><use href="#i-branch"/></svg> feature/search</div><div class="branch-item"><svg class="icon" aria-hidden="true"><use href="#i-branch"/></svg> release</div><p class="micro-label remotes-label">REMOTES</p><div class="branch-item"><span class="tiny-dot"></span> origin</div><div class="branch-item sub-branch">main</div><div class="branch-item sub-branch">feature/search</div><p class="micro-label remotes-label">TAGS</p><div class="branch-item">◇ <span class="tag-name">v1.0.0</span></div></div>
-            <div class="product-content">
-              <div class="history-title"><span>History</span><span class="search-display">Search commits <kbd>⌘ F</kbd></span></div>
-              <div class="history-row highlighted"><span class="graph-cell blue-node"><i></i></span><span class="commit-title"><b class="ref">main</b> Refine workspace navigation</span><span class="commit-hash">a6f203d</span><span class="commit-time">2 min ago</span></div>
-              <div class="history-row"><span class="graph-cell merge-node"><i></i><em></em></span><span class="commit-title">Merge branch 'feature/search'</span><span class="commit-hash">9e72bc1</span><span class="commit-time">18 min ago</span></div>
-              <div class="history-row"><span class="graph-cell side-node"><i></i></span><span class="commit-title"><b class="ref ref-muted">feature/search</b> Keep search results in view</span><span class="commit-hash">c4d810a</span><span class="commit-time">32 min ago</span></div>
-              <div class="history-row"><span class="graph-cell blue-node"><i></i></span><span class="commit-title">Add keyboard navigation</span><span class="commit-hash">0b73e6f</span><span class="commit-time">1 hour ago</span></div>
-              <div class="preview-detail"><div class="detail-files"><p class="detail-heading">2 changed files <span>+8 <b>−3</b></span></p><div class="preview-file selected"><span class="file-modified">M</span> navigation.ts</div><div class="preview-file"><span class="file-added">A</span> navigation.test.ts</div><p class="commit-description">Refine workspace navigation</p><p class="commit-byline">A focused change, ready to review.</p></div><div class="preview-diff"><div class="diff-filename">src/navigation.ts <span>+6 <b>−3</b></span></div><pre><code><span class="diff-context"><em>12</em>  <span class="syntax-purple">export function</span> nextView(</span><span class="diff-context"><em>13</em>    current: View, direction: Direction</span><span class="diff-context"><em>14</em>  ): View {</span><span class="diff-removed"><em>15</em> −  <span class="syntax-purple">return</span> views[current + 1];</span><span class="diff-added"><em>15</em> +  <span class="syntax-purple">const</span> index = views.indexOf(current);</span><span class="diff-added"><em>16</em> +  <span class="syntax-purple">const</span> step = direction === <span class="syntax-blue">'next'</span> ? 1 : -1;</span><span class="diff-added"><em>17</em> +  <span class="syntax-purple">return</span> views[(index + step + views.length)</span><span class="diff-added"><em>18</em> +    % views.length];</span><span class="diff-context"><em>19</em>  }</span></code></pre></div></div>
-            </div>
-          </div>
-          <div class="product-status"><span><svg class="icon" aria-hidden="true"><use href="#i-branch"/></svg> main</span><span>Working tree clean <svg class="icon" aria-hidden="true"><use href="#i-check"/></svg></span></div>
-        </div>
-        <p class="preview-caption">An illustrative workspace. Your repositories, your context.</p>
-      </section>
-
-      <section class="workflow wrap" id="workflow" aria-labelledby="workflow-title">
-        <div class="section-intro"><p class="eyebrow">BUILT AROUND YOUR WORK</p><h2 id="workflow-title">From the big picture<br>to the smallest change.</h2><p>One place to understand what changed<br>and decide what comes next.</p></div>
-        <div class="workflow-demo">
-          <div class="workflow-tabs" role="tablist" aria-label="Explore workflows">
-            <button type="button" id="tab-review" role="tab" aria-selected="true" aria-controls="panel-review" tabindex="0"><svg class="icon" aria-hidden="true"><use href="#i-diff"/></svg> Review</button>
-            <button type="button" id="tab-history" role="tab" aria-selected="false" aria-controls="panel-history" tabindex="-1"><svg class="icon" aria-hidden="true"><use href="#i-history"/></svg> History</button>
-            <button type="button" id="tab-workspace" role="tab" aria-selected="false" aria-controls="panel-workspace" tabindex="-1"><svg class="icon" aria-hidden="true"><use href="#i-folder"/></svg> Workspace</button>
-          </div>
-          <div class="workflow-panel" id="panel-review" role="tabpanel" aria-labelledby="tab-review" tabindex="0">
-            <div class="mini-diff" aria-hidden="true"><div><span>28</span> <b>−</b> const theme = 'light';</div><div><span>28</span> <b>+</b> const theme = preferences.theme;</div><div><span>29</span> <b>+</b> applyTheme(theme);</div><div class="mini-selection">2 lines selected <span>Stage lines ↗</span></div></div>
-            <h3>Make every line count.</h3><p>Review text and image diffs. Stage a file, a hunk, or just the lines that belong together.</p>
-          </div>
-          <div class="workflow-panel" id="panel-history" role="tabpanel" aria-labelledby="tab-history" tabindex="0" hidden>
-            <div class="mini-history" aria-hidden="true"><div><i></i><span class="mini-ref">main</span> Bring the work together</div><div><i></i><span class="mini-ref secondary-ref">feature</span> Explore another direction</div><div><i></i> Start with a clear view</div></div>
-            <h3>Find the story behind a change.</h3><p>Follow the commit graph, inspect file history, and compare revisions without losing your place.</p>
-          </div>
-          <div class="workflow-panel" id="panel-workspace" role="tabpanel" aria-labelledby="tab-workspace" tabindex="0" hidden>
-            <div class="mini-workspace" aria-hidden="true"><div><svg class="icon" aria-hidden="true"><use href="#i-branch"/></svg> orbital <span class="mini-ref">Git</span></div><div><svg class="icon" aria-hidden="true"><use href="#i-folder"/></svg> studio <span class="mini-ref secondary-ref">Perforce</span></div><div class="mini-workspace-summary"><span class="signal"></span> Two projects. One workspace.</div></div>
-            <h3>Keep your projects close.</h3><p>Move between repositories in tabs. Work with Git repositories and Perforce changelists in a consistent interface.</p>
-          </div>
-        </div>
-      </section>
-
-      <section class="principles wrap" aria-label="Made for the desktop">
-        <div><svg class="icon" aria-hidden="true"><use href="#i-key"/></svg><h3>Keep your hands on the keys.</h3><p>Jump between views and actions with shortcuts and the command palette.</p></div>
-        <div><svg class="icon" aria-hidden="true"><use href="#i-folder"/></svg><h3>Pick up where you left off.</h3><p>Your tabs and recent repositories are ready for the next session.</p></div>
-        <div><svg class="icon" aria-hidden="true"><use href="#i-github"/></svg><h3>Open by design.</h3><p>Read the source, report an issue, or make it your own. Released under MIT.</p></div>
-      </section>
-
-      <section class="download wrap" id="download" aria-labelledby="download-title">
-        <div class="download-heading"><p class="eyebrow">YOUR NEXT CHANGE STARTS HERE</p><h2 id="download-title">Bring it into view.</h2><p>Browse releases or build from source.</p></div>
-        <div class="download-options">
-          <a href="https://github.com/FlyAndNotDown/Rebasely/releases" class="download-option"><svg class="platform-icon" aria-hidden="true"><use href="#i-apple"/></svg><span><strong>macOS</strong><small>Apple Silicon · DMG</small></span><svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></a>
-          <a href="https://github.com/FlyAndNotDown/Rebasely/releases" class="download-option"><svg class="platform-icon" aria-hidden="true"><use href="#i-windows"/></svg><span><strong>Windows</strong><small>x64 · Installer</small></span><svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></a>
-          <a href="https://github.com/FlyAndNotDown/Rebasely/releases" class="download-option"><svg class="platform-icon" aria-hidden="true"><use href="#i-linux"/></svg><span><strong>Linux</strong><small>x64 · AppImage / DEB</small></span><svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></a>
-        </div>
-        <p class="download-note">Requires Git for Git repositories, or the Perforce CLI for Perforce workspaces.</p>
-        <details class="download-details"><summary>Building from source?</summary><p>Follow the <a href="https://github.com/FlyAndNotDown/Rebasely/blob/dev/docs/development.md">development guide</a> to run or build Rebasely locally.</p></details>
-      </section>
-    </main>
-
-    <footer class="site-footer wrap"><a class="brand" href="./"><img src="assets/mark.svg" width="26" height="26" alt=""><span>Rebasely</span></a><span class="footer-copy">A unified version control client.</span><nav aria-label="Footer navigation"><a href="https://github.com/FlyAndNotDown/Rebasely">Source</a><a href="https://github.com/FlyAndNotDown/Rebasely/issues">Feedback</a><a href="https://github.com/FlyAndNotDown/Rebasely/blob/dev/LICENSE">MIT License</a></nav></footer>
+    <div id="root"></div>
+    <script type="module" src="./src/main.tsx"></script>
   </body>
 </html>

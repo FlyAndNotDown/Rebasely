@@ -63,7 +63,7 @@ The app downloads update metadata and packages over HTTPS and verifies each upda
 
 ## Website deployment
 
-The website is a self-contained static directory at `site/`. A successful release calls the [Website workflow](../.github/workflows/pages.yml) to deploy that same source revision to GitHub Pages. No separate build tools or hosting credentials are needed.
+The website source lives in `site/` and shares the application's React components and theme tokens. `npm run check:site` typechecks the website, builds `site/dist/`, and validates its generated assets and links. A successful release calls the [Website workflow](../.github/workflows/pages.yml) to deploy that same source revision to GitHub Pages. The website uses the repository's locked frontend dependencies; no hosting credentials are needed.
 
 The repository owner can also run **Actions → Website → Run workflow** to publish a website correction independently of an application release. This workflow does not run the Check or Release workflows. Its manual entry point becomes available after the workflow is merged into the default branch.
 

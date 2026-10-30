@@ -35,7 +35,7 @@ The binary build supplies the helper needed by SSH askpass integration tests.
 | --- | --- |
 | `npm run check` | Source policy, version consistency, TypeScript, ESLint, and frontend tests |
 | `npm run check:rust` | rustfmt, Clippy, and Rust tests with the committed lockfile |
-| `npm run check:site` | Website references, anchors, and script syntax |
+| `npm run check:site` | Website typecheck, production build, and asset validation |
 | `npm run vite:build` | Frontend production build |
 | `npm run check:all` | Both check suites |
 
@@ -58,7 +58,7 @@ check on one operating system does not establish support on the others.
 | `src-tauri/src/git/`, `src-tauri/src/p4/` | CLI adapters and repository operations |
 | `src-tauri/icons/` | Application icon source and desktop assets |
 | `scripts/` | Source checks and release tooling |
-| `site/` | Self-contained GitHub Pages website and brand artwork |
+| `site/` | GitHub Pages website source and brand artwork |
 | `docs/` | Development, release, and security references |
 
 Frontend files use kebab-case, with React entry points `App.tsx` and `main.tsx`.
@@ -73,9 +73,20 @@ engineering rules are in [AGENTS.md](../AGENTS.md).
 
 ## Website
 
-The website is buildless. Serve `site/` with a static HTTP server for local
-preview; it has no runtime dependencies or credentials. Changes ship through
-the release workflow. The [release guide](releasing.md) covers publishing.
+The website uses React and Vite with the same dependencies, UI primitives,
+Geist fonts, and theme tokens as the desktop app. It does not call native
+commands.
+
+```sh
+npm run site:dev
+npm run check:site
+npm run site:preview
+```
+
+`check:site` typechecks, builds, and checks the website assets. Vite writes
+`site/dist/`; GitHub Pages deploys that output after a successful release or
+an owner-started website workflow. The [release guide](releasing.md) covers
+publishing.
 
 ## Further reading
 
