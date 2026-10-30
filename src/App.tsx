@@ -2,6 +2,7 @@ import { lazy, Suspense, useSyncExternalStore } from "react";
 import { CircleAlertIcon } from "lucide-react";
 import { AppHeader } from "@/components/app-header";
 import { AppSidebar } from "@/components/app-sidebar";
+import { AppUpdateBanner } from "@/components/app-updates";
 import { AskpassDialog } from "@/components/askpass-dialog";
 import { CommandCenter } from "@/components/command-palette";
 import { ReflogDialog } from "@/components/lazy-dialogs";
@@ -32,6 +33,7 @@ export default function App() {
       <WindowResizeBorders />
       <AppHeader />
       <MissingToolsBanner />
+      <AppUpdateBanner />
       <div className="flex min-h-0 flex-1">
         <AppSidebar />
         <div className="min-h-0 min-w-0 flex-1">

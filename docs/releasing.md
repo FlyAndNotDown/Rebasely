@@ -1,0 +1,72 @@
+# Releasing Rebasely
+
+Development happens on `dev` or topic branches based on `dev`. Merge reviewed changes into `master` through a pull request. Routine development never pushes directly to `master`.
+
+The [Release workflow](../.github/workflows/release.yml) publishes only when the repository owner explicitly starts it on `master` and enters a stable version such as `v0.0.1`. A push, merge, or tag does not publish a release. The owner must also initiate any rerun; a collaborator cannot rerun an owner's release job to gain its publishing permissions.
+
+## Before the first release
+
+1. Store the Tauri updater signing private key in the repository Actions secret `TAURI_SIGNING_PRIVATE_KEY`. If the key has a password, store that in `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`; an unencrypted key uses an empty or absent password secret.
+2. Keep the matching updater public key in `src-tauri/tauri.conf.json`. Back up the private key securely outside the repository. Existing installations trust this key; replacing or losing it prevents them from accepting future updates.
+3. Enable GitHub Actions and allow the workflow's `GITHUB_TOKEN` to write repository contents. No personal access token is needed. Keep `master` protected with reviewed pull requests and the native Check jobs.
+4. Ensure the repository's releases are accessible to the intended users. Anonymous update checks cannot download private GitHub release assets. The workflow does not change repository visibility.
+
+The updater key is used only for Tauri update verification. Windows Authenticode certificates and Apple Developer signing/notarization credentials are separate. This workflow currently produces unsigned Windows installers and ad-hoc signed, unnotarized macOS packages, so first-time downloads can show operating-system security prompts.
+
+## Publish a version
+
+1. Finish the changes on `dev`, run the checks, and merge a reviewed pull request into `master`.
+2. Wait for the **Check** workflow to succeed on the exact current `master` commit on Windows, macOS, and Linux.
+3. As the repository owner, open **Actions → Release → Run workflow**, select `master`, and enter the complete version, including `v`.
+
+The equivalent owner-only CLI request is:
+
+```bash
+gh workflow run release.yml --ref master -f version=v0.0.1
+```
+
+Use strict `vX.Y.Z` versions without leading zeros, prerelease suffixes, or build metadata. The first release can equal the checked-in source version, initially `v0.0.1`. Later versions must exceed every existing stable version tag and release, including reserved drafts, and cannot be lower than the source version. Each numeric component is limited to 65535 so Windows installers can represent it.
+
+The workflow checks the owner's identity, including the actor who initiates a rerun, the selected branch, the version, existing tags/releases, and successful checks for the exact source revision. It then creates a draft and stamps the requested version into each isolated build checkout:
+
+- `package.json`
+- `package-lock.json`, including its root package entry
+- `src-tauri/Cargo.toml`
+- `src-tauri/Cargo.lock`, for the application package only
+- `src-tauri/tauri.conf.json`
+
+Dependency versions remain locked. Stamping does not commit changes or push to `dev` or `master`. The release tag identifies the reviewed source commit; the explicit workflow input determines the version embedded in its bundles. Before publishing, the workflow checks that `master` still points to that revision and that its native checks remain successful.
+
+## Release assets and updates
+
+| Platform | Installer | Signed updater package |
+| --- | --- | --- |
+| Windows x64 | NSIS `.exe` | The same `.exe`, with `.sig` |
+| macOS Apple Silicon | `.dmg` | `.app.tar.gz`, with `.sig` |
+| macOS Intel | `.dmg` | `.app.tar.gz`, with `.sig` |
+| Linux x64 | `.AppImage` and `.deb` | Each package, with its own `.sig` |
+
+Asset names include the full version and platform, for example `Rebasely_v0.0.1_windows_x64.exe`. Windows and both macOS targets build on native runners. Linux bundles build on Ubuntu 22.04 for its older system-library baseline.
+
+All four builds upload to the same draft. Only after every build succeeds does the final job check that every required bundle, installer, and signature exists and has finished uploading. It creates one `latest.json` containing all four platforms, including a separate Linux Debian entry so Debian installations receive a `.deb` update. It then publishes the release and marks it latest. Generating this manifest once avoids parallel build jobs overwriting each other's platform entries.
+
+The app downloads update metadata and packages over HTTPS and verifies each update using its embedded Tauri public key. Before publication, the release workflow verifies each signature's authenticated version comment against that key and the requested version. The app also verifies the downloaded artifact bytes before installation and rejects a mismatched signed version. Startup and manual update checks follow the app's update settings.
+
+## Failures and retries
+
+A failed build or validation leaves the release as a draft. It does not replace the last published updater manifest. Inspect the failed job and rerun failed jobs as the owner while `master` still points to the original source revision.
+
+A new full workflow run rejects an existing version tag or draft. To restart a completely failed release using the same version, first inspect and remove only its unpublished draft and any unused tag; never replace a published version. If `master` has advanced, start from its current checked revision after resolving that draft. Choose a new version for changes to an already published release.
+
+## Local version commands
+
+```bash
+npm run check:version
+npm run version:set -- v0.0.2
+```
+
+The check is part of `npm run check`. The setter updates all five version files consistently and rejects mismatched inputs or a decrease. Use it on `dev` when intentionally advancing the checked-in source version, and include those changes in the normal reviewed pull request.
+
+To reproduce a release, check out its tag, run `npm run version:set -- vX.Y.Z` with that tag's version, install locked dependencies, and build with the appropriate target and signing environment. This reproduces the version stamping; native toolchains and operating-system signing settings also affect the resulting bytes.
+
+See the official [Tauri updater documentation](https://v2.tauri.app/plugin/updater/), [Tauri GitHub pipeline guide](https://v2.tauri.app/distribute/pipelines/github/), and [tauri-action inputs](https://github.com/tauri-apps/tauri-action#usage) for signing and packaging details.

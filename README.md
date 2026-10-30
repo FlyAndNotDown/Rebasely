@@ -56,6 +56,12 @@ Git work trees refresh when files change. Repositories keep their own progress a
 
 ## Getting started
 
+### Install a release
+
+Download an installer for your platform from [GitHub Releases](https://github.com/FlyAndNotDown/Rebasely/releases). Releases use versions such as `v0.0.1` and include Windows x64, macOS Apple Silicon and Intel, and Linux x64 packages. The app can check for signed updates after installation.
+
+Git and the optional Perforce CLI remain external dependencies. Windows installers are currently unsigned by Authenticode, and macOS builds use ad-hoc signing without Apple notarization; first-time downloads can show operating-system security prompts. Releases in a private repository require GitHub access and are unavailable to anonymous updater requests.
+
 ### Prerequisites
 
 - **Node.js 22.13+ (22.x), 24.x, or 26+**, with npm.
@@ -103,9 +109,16 @@ npm run check:all
 | `npm run check` | English source policy, TypeScript, ESLint, and frontend tests |
 | `npm run check:rust` | Rust formatting, Clippy, and backend tests |
 | `npm run check:all` | Both check suites |
+| `npm run check:version` | Matching application versions in frontend, Tauri, and Cargo files |
 | `npm run vite:build` | Frontend typecheck and production build |
 
 The [GitHub check workflow](.github/workflows/check.yml) runs the frontend build and both check suites on Windows, macOS, and Linux.
+
+### Branches and releases
+
+Develop on `dev` or a topic branch based on it, and update `master` through a reviewed pull request. Only the repository owner can publish through the manual [Release workflow](.github/workflows/release.yml), selecting `master` and entering an explicit `vX.Y.Z` version. Publishing waits for successful native checks and all four signed updater builds. Pushes, merges, and tags do not publish automatically.
+
+See [the release guide](docs/releasing.md) for signing secrets, version rules, download packages, and recovery from failed builds.
 
 ### Architecture
 

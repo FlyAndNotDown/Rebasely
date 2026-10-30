@@ -30,7 +30,7 @@ export function AboutDialog({
                 <span className="sr-only">About </span>
                 Rebasely
               </DialogTitle>
-              <span className="font-mono text-[11px] text-muted-foreground">{version}</span>
+              <span className="font-mono text-[11px] text-muted-foreground">v{version}</span>
             </div>
           </div>
           <DialogDescription className="mt-4 text-sm leading-relaxed">
