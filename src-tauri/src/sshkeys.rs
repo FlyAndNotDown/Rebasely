@@ -172,7 +172,28 @@ fn generate_at(
     if !output.status.success() {
         return Err(failed_keygen(&output, passphrase));
     }
+    verify_generated_key(&keygen, &temporary_key, passphrase)?;
     import_at(dir, &temporary_key, passphrase)
+}
+
+fn verify_generated_key(keygen: &Path, private_key: &Path, passphrase: &str) -> AppResult<()> {
+    if passphrase.is_empty() {
+        return Ok(());
+    }
+    if !matches!(reveal_public(keygen, private_key, ""), Revealed::Encrypted) {
+        return Err(AppError::msg(
+            "ssh-keygen did not confirm that the new key is protected. The key was not added.",
+        ));
+    }
+    if !matches!(
+        reveal_public(keygen, private_key, passphrase),
+        Revealed::Open(_)
+    ) {
+        return Err(AppError::msg(
+            "ssh-keygen could not verify the requested passphrase. The key was not added.",
+        ));
+    }
+    Ok(())
 }
 
 fn import_at(dir: &Path, source: &Path, passphrase: &str) -> AppResult<SshKeyInfo> {
@@ -1114,6 +1135,31 @@ mod tests {
                 .mode();
             assert_eq!(mode & 0o777, 0o600);
         }
+    }
+
+    #[test]
+    fn generated_keys_must_have_the_requested_passphrase_before_publication() {
+        let Some(keygen) = find_ssh_keygen() else {
+            eprintln!("Skipping generated-key protection test: install ssh-keygen first.");
+            return;
+        };
+        let temporary = tempfile::tempdir().unwrap();
+        let unprotected = generate_at(
+            temporary.path(),
+            "id_unprotected",
+            "ed25519",
+            "alice@example.com",
+            "",
+        )
+        .unwrap();
+        assert!(!unprotected.encrypted);
+        let error = verify_generated_key(
+            &keygen,
+            &temporary.path().join("id_unprotected"),
+            "example protected passphrase",
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("The key was not added."));
     }
 
     #[test]
