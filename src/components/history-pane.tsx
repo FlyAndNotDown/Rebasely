@@ -58,6 +58,7 @@ import { graphWidth, laneColor, layoutCommitGraph, type GraphRow } from "@/lib/c
 import { useWindowedRows } from "@/lib/use-windowed-rows";
 import { cn } from "@/lib/utils";
 import { COMMIT_PAGE, useGitPick, type ResetMode } from "@/state/git-context";
+import { orderReplayCommits, replayCommitBatch } from "@/state/repository-actions";
 import type { CommitRef, CommitSummary } from "@/types/git";
 import { toast } from "sonner";
 
@@ -115,6 +116,7 @@ const CORNER_RADIUS = 5;
 
 export function HistoryPane() {
   const {
+    activeTabId,
     commits,
     commitsHasMore,
     commitsLoading,
@@ -132,6 +134,7 @@ export function HistoryPane() {
     setOpenPanel,
     undoLastCommit,
   } = useGitPick([
+    "activeTabId",
     "commits",
     "commitsHasMore",
     "commitsLoading",
@@ -230,7 +233,7 @@ export function HistoryPane() {
         case "revert-many":
           setConfirm({
             kind: "revert",
-            commits: [...action.commits].sort((left, right) => right.timestamp - left.timestamp),
+            commits: orderReplayCommits(action.commits, "revert"),
           });
           break;
         case "cherry-pick":
@@ -239,7 +242,7 @@ export function HistoryPane() {
         case "cherry-pick-many":
           setConfirm({
             kind: "cherry-pick",
-            commits: [...action.commits].sort((left, right) => left.timestamp - right.timestamp),
+            commits: orderReplayCommits(action.commits, "cherry-pick"),
           });
           break;
         case "copy-hashes":
@@ -522,15 +525,11 @@ export function HistoryPane() {
                 const next = confirm;
                 if (!next) return;
                 setConfirm(null);
-                void (async () => {
-                  for (const commit of next.commits) {
-                    const ok =
-                      next.kind === "revert"
-                        ? await revertCommit(commit.id)
-                        : await cherryPickCommit(commit.id);
-                    if (!ok) break;
-                  }
-                })();
+                void replayCommitBatch(
+                  activeTabId,
+                  next.commits,
+                  next.kind === "revert" ? revertCommit : cherryPickCommit,
+                );
               }}
             >
               {confirm?.kind === "revert" ? "Revert" : "Cherry-pick"}

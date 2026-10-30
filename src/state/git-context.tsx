@@ -17,6 +17,7 @@ import { toast } from "sonner";
 import { emptyBinaryDiff, errorMessage, expandHistoryRevs, GIT_MISSING, gitApi, isCancelled, subscribeGitMissing } from "@/lib/git";
 import { P4_MISSING, p4Api } from "@/lib/p4";
 import { normalizeRepoPath, sameRepoPath } from "@/lib/format";
+import { repositoryUndoAction } from "@/state/repository-actions";
 import { defaultPrefs, normalizePrefs, sameLayout } from "@/lib/prefs";
 import {
   COMMIT_PAGE,
@@ -195,7 +196,7 @@ interface GitContextValue {
   discard: (paths: string[]) => Promise<void>;
   applyLines: (path: string, staged: boolean, action: LineAction, lines: LineRef[]) => Promise<boolean>;
   commit: (message: string, amend?: boolean) => Promise<boolean>;
-  undoLastCommit: () => Promise<boolean>;
+  undoLastCommit: (tabId?: string) => Promise<boolean>;
   checkoutDetached: (oid: string) => Promise<boolean>;
   updateSubmodules: (paths: string[]) => Promise<boolean>;
   checkoutBranch: (name: string) => Promise<void>;
@@ -212,8 +213,8 @@ interface GitContextValue {
   pushTag: (remote: string, name: string) => Promise<boolean>;
   deleteRemoteTag: (remote: string, name: string) => Promise<boolean>;
   deleteBranch: (name: string, force?: boolean) => Promise<boolean | "unmerged">;
-  revertCommit: (oid: string) => Promise<boolean>;
-  cherryPickCommit: (oid: string) => Promise<boolean>;
+  revertCommit: (oid: string, tabId?: string) => Promise<boolean>;
+  cherryPickCommit: (oid: string, tabId?: string) => Promise<boolean>;
   rebaseOnto: (onto: string, label: string) => Promise<boolean>;
   rebaseInteractive: (onto: string, steps: RebaseStep[]) => Promise<boolean>;
   rebaseContinue: () => Promise<boolean>;
@@ -1848,8 +1849,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
   );
 
   const commitDraftNonce = useRef(0);
-  const undoLastCommit = useCallback(async () => {
-    const tabId = activeTabIdRef.current;
+  const undoLastCommit = useCallback(async (tabId = activeTabIdRef.current) => {
     let message = "";
     const ok = await runMutation(
       "Undoing the last commit",
@@ -1859,6 +1859,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
           return undone.snapshot;
         }),
       "Undid the last commit; its changes are staged",
+      { tabId },
     );
     if (ok) {
       commitDraftNonce.current += 1;
@@ -1879,7 +1880,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
       if (ok) {
         patchSession(tabId, { changeSelection: null, changeDiff: null });
         if (amend) toast.success("Amended commit");
-        else toast.success("Created commit", { action: { label: "Undo", onClick: () => void undoLastCommit() } });
+        else toast.success("Created commit", { action: repositoryUndoAction(tabId, undoLastCommit) });
       }
       return ok;
     },
@@ -2265,8 +2266,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
   }, [refreshAfterReplay]);
 
   const revertCommit = useCallback(
-    async (oid: string) => {
-      const tabId = activeTabIdRef.current;
+    async (oid: string, tabId = activeTabIdRef.current) => {
       const ok = await runMutation(
         `Reverting ${oid.slice(0, 7)}`,
         (repoPath) => gitApi.revertCommit(repoPath, oid),
@@ -2400,8 +2400,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
   );
 
   const cherryPickCommit = useCallback(
-    async (oid: string) => {
-      const tabId = activeTabIdRef.current;
+    async (oid: string, tabId = activeTabIdRef.current) => {
       const ok = await runMutation(
         `Cherry-picking ${oid.slice(0, 7)}`,
         (repoPath) => gitApi.cherryPickCommit(repoPath, oid),
