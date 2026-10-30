@@ -303,14 +303,16 @@ fn terminal_command(id: &str, path: &str, macos: bool, cli_available: bool) -> A
 }
 
 fn spawn_terminal(id: &str, path: &str) -> AppResult<()> {
-    let mut command = terminal_command(id, path, cfg!(target_os = "macos"), exists_in_path(id))?;
+    let command = terminal_command(id, path, cfg!(target_os = "macos"), exists_in_path(id))?;
 
     #[cfg(windows)]
-    {
+    let command = {
         use std::os::windows::process::CommandExt;
         const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
+        let mut command = command;
         command.creation_flags(CREATE_NEW_CONSOLE);
-    }
+        command
+    };
 
     crate::platform::spawn_detached(command)
         .map_err(|err| AppError::msg(format!("Could not open terminal: {err}")))?;
