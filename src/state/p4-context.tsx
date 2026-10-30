@@ -19,7 +19,8 @@ import { sameRepoPath } from "@/lib/format";
 import { useGitPick } from "@/state/git-context";
 import { repoTabId, type RepoTab } from "@/state/session";
 import { defaultChange, fileKey, refreshPendingSession, sameP4Connection, shownFile, updateP4Session, usableP4Session, type P4Session as Session, type P4View } from "@/state/p4-session";
-import { pendingDiffRequest, withP4Login } from "@/state/p4-requests";
+import { pendingDiffRequest, pendingRefreshRequest, withP4Login } from "@/state/p4-requests";
+import { acquireP4Mutation, invalidateP4Session } from "@/state/p4-mutations";
 import type { FileDiff } from "@/types/git";
 import type {
   P4Auth,
@@ -50,6 +51,8 @@ interface P4ContextValue {
   connection: P4Connection | null;
   pending: P4Changelist[];
   loading: boolean;
+  busy: boolean;
+  busyLabel: string;
   error: string | null;
   selectedChange: string;
   selectedFile: string | null;
@@ -69,7 +72,7 @@ interface P4ContextValue {
   selectFile: (depotPath: string | null, shelved?: boolean) => void;
   submitSelected: () => Promise<void>;
   saveSelected: () => Promise<void>;
-  createChange: (description: string) => Promise<void>;
+  createChange: (description: string) => Promise<boolean>;
   moveFiles: (depotPaths: string[], changeId: string) => Promise<void>;
   placeFiles: (
     files: { change: string; path: string; shelved: boolean }[],
@@ -133,6 +136,24 @@ export function P4Provider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submittedBusy, setSubmittedBusy] = useState<ReadonlySet<string>>(() => new Set());
+  const [mutationLabels, setMutationLabels] = useState<ReadonlyMap<string, string>>(() => new Map());
+  const mutationOwners = useRef(new Set<string>());
+  const lockMutation = useCallback((owner: Session, label: string) => {
+    const release = acquireP4Mutation(mutationOwners.current, owner.tabId);
+    if (!release) return null;
+    setMutationLabels((labels) => new Map(labels).set(owner.tabId, label));
+    let finished = false;
+    return () => {
+      if (finished) return;
+      finished = true;
+      release();
+      setMutationLabels((labels) => {
+        const next = new Map(labels);
+        next.delete(owner.tabId);
+        return next;
+      });
+    };
+  }, []);
   const [loginOpen, setLoginOpen] = useState(false);
   const [connectionOpen, setConnectionOpen] = useState(false);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
@@ -364,11 +385,11 @@ export function P4Provider({ children }: { children: ReactNode }) {
   const diffKey = connection && selectedFile ? fileKey(selectedChange, selectedFile, selectedShelved) : "";
   const diffLoading = diffKey !== "" && visibleSession?.diffFor !== diffKey;
 
-  const reloadPending = useCallback(async (target: Session, selectId?: string) => {
+  const reloadPending = useCallback(async (target: Session, selectId?: string, quiet = false) => {
     const owner = cache.current.get(target.tabId);
     if (!owner || !sameP4Connection(owner.connection, target.connection)) return;
     const token = nextToken(pendingTokens.current, target.tabId);
-    const pending = await guard(target.connection, () => p4Api.refreshPending(target.connection));
+    const pending = await pendingRefreshRequest(target.connection, quiet, (request) => guard(target.connection, request));
     if (pendingTokens.current.get(target.tabId) !== token) return;
     const latest = cache.current.get(target.tabId);
     if (!latest || !sameP4Connection(latest.connection, target.connection)) return;
@@ -382,7 +403,7 @@ export function P4Provider({ children }: { children: ReactNode }) {
     refreshing.current.add(current.tabId);
     const id = beginActivity("Refreshing workspace", current.connection.client);
     try {
-      await reloadPending(current);
+      await reloadPending(current, undefined, quiet);
     } catch (caught) {
       if (!quiet) report(caught);
     } finally {
@@ -443,6 +464,8 @@ export function P4Provider({ children }: { children: ReactNode }) {
   const submitSelected = useCallback(async () => {
     const current = sessionRef.current;
     if (!current) return;
+    const release = lockMutation(current, "Submitting changelist");
+    if (!release) return;
     const id = beginActivity("Submitting", current.selectedChange);
     try {
       await guard(current.connection, () =>
@@ -454,12 +477,15 @@ export function P4Provider({ children }: { children: ReactNode }) {
       report(caught);
     } finally {
       endActivity(id);
+      release();
     }
-  }, [beginActivity, endActivity, guard, reloadPending, report]);
+  }, [lockMutation, beginActivity, endActivity, guard, reloadPending, report]);
 
   const saveSelected = useCallback(async () => {
     const current = sessionRef.current;
     if (!current) return;
+    const release = lockMutation(current, "Saving changelist");
+    if (!release) return;
     const id = beginActivity("Saving changelist", current.selectedChange);
     try {
       const saved = await guard(current.connection, () =>
@@ -471,39 +497,51 @@ export function P4Provider({ children }: { children: ReactNode }) {
       report(caught);
     } finally {
       endActivity(id);
+      release();
     }
-  }, [beginActivity, endActivity, guard, reloadPending, report]);
+  }, [lockMutation, beginActivity, endActivity, guard, reloadPending, report]);
 
   const createChange = useCallback(
     async (description: string) => {
       const current = sessionRef.current;
-      if (!current) return;
+      if (!current) return false;
+      const release = lockMutation(current, "Creating changelist");
+      if (!release) return false;
       const id = beginActivity("Creating changelist");
       try {
         const saved = await guard(current.connection, () => p4Api.newChange(current.connection, description));
         toast.success(`Created change ${saved}`);
         await reloadPending(current, saved);
+        return true;
       } catch (caught) {
         report(caught);
+        return false;
       } finally {
         endActivity(id);
+        release();
       }
     },
-    [beginActivity, endActivity, guard, reloadPending, report],
+    [lockMutation, beginActivity, endActivity, guard, reloadPending, report],
   );
 
   const moveFiles = useCallback(
     async (depotPaths: string[], changeId: string) => {
       const current = sessionRef.current;
       if (!current || depotPaths.length === 0) return;
+      const release = lockMutation(current, "Moving files");
+      if (!release) return;
+      const id = beginActivity("Moving files");
       try {
         await guard(current.connection, () => p4Api.reopen(current.connection, changeId, depotPaths));
         await reloadPending(current, changeId);
       } catch (caught) {
         report(caught);
+      } finally {
+        endActivity(id);
+        release();
       }
     },
-    [guard, reloadPending, report],
+    [lockMutation, beginActivity, endActivity, guard, reloadPending, report],
   );
 
   const placeFiles = useCallback(
@@ -520,6 +558,8 @@ export function P4Provider({ children }: { children: ReactNode }) {
       if (shelf && shelved && files.every((file) => file.change === targetChange)) return;
       if (!shelf && !shelved && files.every((file) => file.change === targetChange)) return;
       const label = !shelved && !shelf ? "Moving" : shelved && !shelf ? "Unshelving" : "Shelving";
+      const release = lockMutation(current, label);
+      if (!release) return;
       const id = beginActivity(label, targetChange);
       try {
         await guard(current.connection, async () => {
@@ -556,15 +596,18 @@ export function P4Provider({ children }: { children: ReactNode }) {
         report(caught);
       } finally {
         endActivity(id);
+        release();
       }
     },
-    [beginActivity, endActivity, guard, reloadPending, report],
+    [lockMutation, beginActivity, endActivity, guard, reloadPending, report],
   );
 
   const revertPaths = useCallback(
     async (paths: string[], wipe: string[] = []) => {
       const current = sessionRef.current;
       if (!current || (paths.length === 0 && wipe.length === 0)) return;
+      const release = lockMutation(current, "Reverting");
+      if (!release) return;
       const id = beginActivity("Reverting");
       try {
         await guard(current.connection, () => p4Api.revert(current.connection, paths, wipe));
@@ -574,9 +617,10 @@ export function P4Provider({ children }: { children: ReactNode }) {
         report(caught);
       } finally {
         endActivity(id);
+        release();
       }
     },
-    [beginActivity, endActivity, guard, reloadPending, report],
+    [lockMutation, beginActivity, endActivity, guard, reloadPending, report],
   );
 
   const shelveFiles = useCallback(
@@ -584,6 +628,8 @@ export function P4Provider({ children }: { children: ReactNode }) {
       const current = sessionRef.current;
       const numbered = files.filter((file) => file.change !== "default");
       if (!current || numbered.length === 0) return false;
+      const release = lockMutation(current, "Shelving");
+      if (!release) return false;
       const id = beginActivity("Shelving");
       try {
         await guard(current.connection, async () => {
@@ -600,14 +646,17 @@ export function P4Provider({ children }: { children: ReactNode }) {
         return false;
       } finally {
         endActivity(id);
+        release();
       }
     },
-    [beginActivity, endActivity, guard, reloadPending, report],
+    [lockMutation, beginActivity, endActivity, guard, reloadPending, report],
   );
 
   const shelveSelected = useCallback(async () => {
     const current = sessionRef.current;
     if (!current) return;
+    const release = lockMutation(current, "Shelving");
+    if (!release) return;
     const id = beginActivity("Shelving", current.selectedChange);
     try {
       await guard(current.connection, () => p4Api.shelve(current.connection, current.selectedChange));
@@ -617,12 +666,15 @@ export function P4Provider({ children }: { children: ReactNode }) {
       report(caught);
     } finally {
       endActivity(id);
+      release();
     }
-  }, [beginActivity, endActivity, guard, reloadPending, report]);
+  }, [lockMutation, beginActivity, endActivity, guard, reloadPending, report]);
 
   const unshelveSelected = useCallback(async () => {
     const current = sessionRef.current;
     if (!current) return;
+    const release = lockMutation(current, "Unshelving");
+    if (!release) return;
     const id = beginActivity("Unshelving", current.selectedChange);
     try {
       await guard(current.connection, () => p4Api.unshelve(current.connection, current.selectedChange));
@@ -632,12 +684,15 @@ export function P4Provider({ children }: { children: ReactNode }) {
       report(caught);
     } finally {
       endActivity(id);
+      release();
     }
-  }, [beginActivity, endActivity, guard, reloadPending, report]);
+  }, [lockMutation, beginActivity, endActivity, guard, reloadPending, report]);
 
   const deleteSelectedShelf = useCallback(async () => {
     const current = sessionRef.current;
     if (!current) return;
+    const release = lockMutation(current, "Deleting shelf");
+    if (!release) return;
     const id = beginActivity("Deleting shelf", current.selectedChange);
     try {
       await guard(current.connection, () => p4Api.deleteShelf(current.connection, current.selectedChange));
@@ -647,8 +702,9 @@ export function P4Provider({ children }: { children: ReactNode }) {
       report(caught);
     } finally {
       endActivity(id);
+      release();
     }
-  }, [beginActivity, endActivity, guard, reloadPending, report]);
+  }, [lockMutation, beginActivity, endActivity, guard, reloadPending, report]);
 
   const resolveView = useCallback(
     async (path: string) => {
@@ -664,6 +720,8 @@ export function P4Provider({ children }: { children: ReactNode }) {
       const current = sessionRef.current;
       if (!current) return false;
       const label = mode === "yours" ? "Accepting yours" : mode === "theirs" ? "Accepting theirs" : "Merging";
+      const release = lockMutation(current, label);
+      if (!release) return false;
       const id = beginActivity(label, depotBase(path));
       try {
         await guard(current.connection, () => p4Api.resolveAccept(current.connection, path, mode));
@@ -675,26 +733,35 @@ export function P4Provider({ children }: { children: ReactNode }) {
         return false;
       } finally {
         endActivity(id);
+        release();
       }
     },
-    [beginActivity, endActivity, guard, reloadPending, report],
+    [lockMutation, beginActivity, endActivity, guard, reloadPending, report],
   );
 
   const revertUnchanged = useCallback(async () => {
     const current = sessionRef.current;
     if (!current) return;
+    const release = lockMutation(current, "Reverting unchanged");
+    if (!release) return;
+    const id = beginActivity("Reverting unchanged");
     try {
       await guard(current.connection, () => p4Api.revertUnchanged(current.connection));
       await reloadPending(current);
     } catch (caught) {
       report(caught);
+    } finally {
+      endActivity(id);
+      release();
     }
-  }, [guard, reloadPending, report]);
+  }, [lockMutation, beginActivity, endActivity, guard, reloadPending, report]);
 
   const sync = useCallback(
     async (paths: string[] = []) => {
       const current = sessionRef.current;
       if (!current) return;
+      const release = lockMutation(current, "Getting latest");
+      if (!release) return;
       const id = beginActivity("Getting latest", current.connection.client);
       try {
         const output = await guard(current.connection, () => p4Api.sync(current.connection, paths, id));
@@ -705,15 +772,18 @@ export function P4Provider({ children }: { children: ReactNode }) {
         report(caught);
       } finally {
         endActivity(id);
+        release();
       }
     },
-    [beginActivity, bumpFiles, endActivity, guard, reloadPending, report],
+    [lockMutation, beginActivity, bumpFiles, endActivity, guard, reloadPending, report],
   );
 
   const getRevision = useCallback(
     async (request: P4GetRevision) => {
       const current = sessionRef.current;
       if (!current) return "";
+      const release = lockMutation(current, request.preview ? "Previewing revision" : "Getting revision");
+      if (!release) return "";
       const id = beginActivity(request.preview ? "Previewing revision" : "Getting revision");
       try {
         const output = await guard(current.connection, () =>
@@ -730,14 +800,17 @@ export function P4Provider({ children }: { children: ReactNode }) {
         throw caught;
       } finally {
         endActivity(id);
+        release();
       }
     },
-    [beginActivity, bumpFiles, endActivity, guard, reloadPending, report],
+    [lockMutation, beginActivity, bumpFiles, endActivity, guard, reloadPending, report],
   );
 
   const reconcile = useCallback(async () => {
     const current = sessionRef.current;
     if (!current) return;
+    const release = lockMutation(current, "Reconciling");
+    if (!release) return;
     const id = beginActivity("Reconciling", current.connection.client);
     try {
       const output = await guard(current.connection, () => p4Api.reconcile(current.connection, id));
@@ -748,14 +821,17 @@ export function P4Provider({ children }: { children: ReactNode }) {
       report(caught);
     } finally {
       endActivity(id);
+      release();
     }
-  }, [beginActivity, bumpFiles, endActivity, guard, reloadPending, report]);
+  }, [lockMutation, beginActivity, bumpFiles, endActivity, guard, reloadPending, report]);
 
   const fileAction = useCallback(
     async (action: "edit" | "add" | "delete", paths: string[]) => {
       const current = sessionRef.current;
       if (!current || paths.length === 0) return;
       const label = action === "edit" ? "Opening for edit" : action === "add" ? "Marking for add" : "Marking for delete";
+      const release = lockMutation(current, label);
+      if (!release) return;
       const id = beginActivity(label);
       try {
         await guard(current.connection, () => p4Api.fileAction(current.connection, action, paths));
@@ -765,9 +841,10 @@ export function P4Provider({ children }: { children: ReactNode }) {
         report(caught);
       } finally {
         endActivity(id);
+        release();
       }
     },
-    [beginActivity, bumpFiles, endActivity, guard, reloadPending, report],
+    [lockMutation, beginActivity, bumpFiles, endActivity, guard, reloadPending, report],
   );
 
   const loadSubmitted = useCallback(
@@ -961,23 +1038,27 @@ export function P4Provider({ children }: { children: ReactNode }) {
       const current = sessionRef.current;
       const tab = activeTabRef.current;
       if (!current || tab.kind !== "repo") return;
+      const release = lockMutation(current, "Saving workspace");
+      if (!release) return;
       const id = beginActivity("Saving workspace", current.connection.client);
       try {
         const next = await guard(current.connection, () => p4Api.saveWorkspace(current.connection, root, stream));
         if (!sameRepoPath(current.connection.root, next.root)) {
+          cache.current.delete(current.tabId);
           retargetRepoTab(tab.id, next.root, next.client);
         } else {
           setTabMeta(tab.id, next.client);
-          reconnect();
+          invalidateP4Session(cache.current, current.tabId, activeTabRef.current.id, reconnect);
         }
       } catch (caught) {
         report(caught);
         throw caught;
       } finally {
         endActivity(id);
+        release();
       }
     },
-    [beginActivity, endActivity, guard, reconnect, report, retargetRepoTab, setTabMeta],
+    [lockMutation, beginActivity, endActivity, guard, reconnect, report, retargetRepoTab, setTabMeta],
   );
 
   const saveConnection = useCallback(
@@ -985,23 +1066,27 @@ export function P4Provider({ children }: { children: ReactNode }) {
       const current = sessionRef.current;
       const tab = activeTabRef.current;
       if (!current || tab.kind !== "repo") return;
+      const release = lockMutation(current, "Saving connection");
+      if (!release) return;
       const id = beginActivity("Saving connection", edit.client);
       try {
         const root = await p4Api.prepareClient(edit, edit.client);
         if (!sameRepoPath(current.connection.root, root)) {
+          cache.current.delete(current.tabId);
           retargetRepoTab(tab.id, root, edit.client);
         } else {
           setTabMeta(tab.id, edit.client);
-          reconnect();
+          invalidateP4Session(cache.current, current.tabId, activeTabRef.current.id, reconnect);
         }
       } catch (caught) {
         report(caught);
         throw caught;
       } finally {
         endActivity(id);
+        release();
       }
     },
-    [beginActivity, endActivity, reconnect, report, retargetRepoTab, setTabMeta],
+    [lockMutation, beginActivity, endActivity, reconnect, report, retargetRepoTab, setTabMeta],
   );
 
   const value = useMemo<P4ContextValue>(
@@ -1011,6 +1096,8 @@ export function P4Provider({ children }: { children: ReactNode }) {
       connection,
       pending: visibleSession?.pending ?? [],
       loading,
+      busy: mutationLabels.has(activePerforceId),
+      busyLabel: mutationLabels.get(activePerforceId) ?? "",
       error,
       selectedChange,
       selectedFile,
@@ -1069,6 +1156,8 @@ export function P4Provider({ children }: { children: ReactNode }) {
       saveWorkspace,
     }),
     [
+      activePerforceId,
+      mutationLabels,
       connection,
       createChange,
       deleteSelectedShelf,

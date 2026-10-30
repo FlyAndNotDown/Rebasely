@@ -9,7 +9,7 @@ const actionClass =
   "h-[calc(1.75rem-2px)]! w-[calc(1.75rem-2px)]! rounded-[6px] text-foreground hover:bg-background dark:hover:bg-background";
 
 export function P4Header() {
-  const { connection, refresh, sync, setConnectionOpen, setWorkspaceOpen } = useP4();
+  const { connection, busy, refresh, sync, setConnectionOpen, setWorkspaceOpen } = useP4();
   const client = connection?.client ?? "";
 
   return (
@@ -24,17 +24,17 @@ export function P4Header() {
         </HoverTip>
       ) : null}
       <div className="flex h-7 shrink-0 items-center gap-1.5 rounded-[min(var(--radius-md),12px)] border border-input bg-secondary px-0.5">
-        <HeaderButton label="Refresh" onClick={() => void refresh()}>
+        <HeaderButton label="Refresh" disabled={busy} onClick={() => void refresh()}>
           <RefreshCwIcon className="size-4" />
         </HeaderButton>
-        <HeaderButton label="Get latest" onClick={() => void sync()}>
+        <HeaderButton label="Get latest" disabled={busy} onClick={() => void sync()}>
           <DownloadIcon className="size-4" />
         </HeaderButton>
         <span className="h-3.5 w-px self-center bg-foreground/20" />
-        <HeaderButton label="Edit connection" onClick={() => setConnectionOpen(true)}>
+        <HeaderButton label="Edit connection" disabled={busy} onClick={() => setConnectionOpen(true)}>
           <CableIcon className="size-4" />
         </HeaderButton>
-        <HeaderButton label="Edit workspace" onClick={() => setWorkspaceOpen(true)}>
+        <HeaderButton label="Edit workspace" disabled={busy} onClick={() => setWorkspaceOpen(true)}>
           <FolderPenIcon className="size-4" />
         </HeaderButton>
       </div>
@@ -45,10 +45,12 @@ export function P4Header() {
 function HeaderButton({
   label,
   onClick,
+  disabled,
   children,
 }: {
   label: string;
   onClick: () => void;
+  disabled: boolean;
   children: ReactNode;
 }) {
   return (
@@ -61,6 +63,7 @@ function HeaderButton({
           className={cn(actionClass)}
           aria-label={label}
           onClick={onClick}
+          disabled={disabled}
         >
           {children}
         </Button>

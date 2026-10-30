@@ -61,6 +61,7 @@
   --diff-del-bg: oklch(0.95 0.04 25);
   --diff-del-char: color-mix(in oklch, var(--diff-del) 22%, var(--diff-del-bg));
   --diff-hunk: oklch(0.48 0.09 250);
+  --status-warning: oklch(0.48 0.12 70);
   --syntax-comment: #6a737d;
   --syntax-keyword: #cf222e;
   --syntax-string: #0a3069;
@@ -131,6 +132,7 @@
   --diff-del-bg: oklch(0.23 0.05 22);
   --diff-del-char: color-mix(in oklch, var(--diff-del) 34%, var(--diff-del-bg));
   --diff-hunk: oklch(0.76 0.08 250);
+  --status-warning: oklch(0.8 0.13 85);
   --syntax-comment: #8b949e;
   --syntax-keyword: #ff7b72;
   --syntax-string: #a5d6ff;
@@ -202,6 +204,7 @@
   --color-diff-del-bg: var(--diff-del-bg);
   --color-diff-del-char: var(--diff-del-char);
   --color-diff-hunk: var(--diff-hunk);
+  --color-status-warning: var(--status-warning);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);

@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Rebasely is a unified version control client. Review changes, follow history, and keep your work in one desktop workspace.">
+    <meta name="theme-color" content="#171717">
+    <script>
+      (() => {
+        let theme = "dark";
+        try {
+          const saved = localStorage.getItem("rebasely-site-theme");
+          if (["light", "dark", "system"].includes(saved)) theme = saved;
+        } catch {
+          // Keep the default when browser storage is unavailable.
+        }
+        const dark = theme === "dark" || (theme === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.classList.toggle("dark", dark);
+        document.documentElement.style.colorScheme = dark ? "dark" : "light";
+        document.documentElement.dataset.siteTheme = theme;
+      })();
+    </script>
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="Rebasely — a unified version control client">
+    <meta property="og:description" content="Review changes. Follow history. Keep your work in view.">
+    <meta property="og:image" content="https://flyandnotdown.github.io/Rebasely/assets/hero.svg">
+    <meta property="og:url" content="https://flyandnotdown.github.io/Rebasely/">
+    <link rel="canonical" href="https://flyandnotdown.github.io/Rebasely/">
+    <link rel="icon" type="image/svg+xml" href="./assets/mark.svg">
+    <title>Rebasely — a unified version control client</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./src/main.tsx"></script>
+  </body>
+</html>

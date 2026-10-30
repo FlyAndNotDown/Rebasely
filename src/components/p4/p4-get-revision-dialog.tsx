@@ -11,6 +11,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { HoverTip } from "@/components/ui/tooltip";
 import { relativeToRoot } from "@/lib/p4";
 import { cn } from "@/lib/utils";
 import { useP4 } from "@/state/p4-context";
@@ -31,7 +32,7 @@ export function P4GetRevisionDialog({
   path: string | null;
   onOpenChange: (open: boolean) => void;
 }) {
-  const { connection, getRevision } = useP4();
+  const { connection, getRevision, busy: workspaceBusy } = useP4();
   const [seen, setSeen] = useState<string | null>(null);
   const [latest, setLatest] = useState(true);
   const [kind, setKind] = useState<(typeof KINDS)[number]["id"]>("revision");
@@ -58,10 +59,11 @@ export function P4GetRevisionDialog({
   const specify = !latest;
   const placeholder = KINDS.find((item) => item.id === kind)?.placeholder ?? "";
   const needsValue = specify && !value.trim();
+  const blocked = busy !== null || workspaceBusy;
   const relative = path && connection ? relativeToRoot(connection.root, path) || path : "";
 
   async function run(previewing: boolean) {
-    if (!path || busy || needsValue) return;
+    if (!path || blocked || needsValue) return;
     setBusy(previewing ? "preview" : "sync");
     try {
       const output = await getRevision({
@@ -102,7 +104,7 @@ export function P4GetRevisionDialog({
               name="get-revision-mode"
               className="size-3.5 accent-foreground"
               checked={latest}
-              disabled={busy !== null}
+              disabled={blocked}
               onChange={() => {
                 setLatest(true);
                 setPreview("");
@@ -117,7 +119,7 @@ export function P4GetRevisionDialog({
                 name="get-revision-mode"
                 className="size-3.5 accent-foreground"
                 checked={specify}
-                disabled={busy !== null}
+                disabled={blocked}
                 onChange={() => {
                   setLatest(false);
                   setPreview("");
@@ -128,7 +130,7 @@ export function P4GetRevisionDialog({
             <select
               aria-label="Revision type"
               value={kind}
-              disabled={!specify || busy !== null}
+              disabled={!specify || blocked}
               onChange={(event) => {
                 setKind(event.target.value as (typeof KINDS)[number]["id"]);
                 setValue("");
@@ -144,7 +146,7 @@ export function P4GetRevisionDialog({
             </select>
             <Input
               value={value}
-              disabled={!specify || busy !== null}
+              disabled={!specify || blocked}
               placeholder={placeholder}
               spellCheck={false}
               className="min-w-40 flex-1 font-mono"
@@ -158,27 +160,31 @@ export function P4GetRevisionDialog({
             <p className="text-xs text-muted-foreground">Options</p>
             <Option
               checked={force}
-              disabled={busy !== null}
+              disabled={blocked}
               onCheckedChange={setForce}
-              label="Force operation (replace the file even if you already have that revision)"
+              label="Force overwrite"
+              tip="Replace the file even when you already have that revision."
             />
             <Option
               checked={safe}
-              disabled={busy !== null}
+              disabled={blocked}
               onCheckedChange={setSafe}
-              label="Safe update (don't overwrite files changed without being checked out)"
+              label="Safe update"
+              tip="Keep files changed without being checked out."
             />
             <Option
               checked={filesOnly}
-              disabled={busy !== null || !specify || kind !== "changelist"}
+              disabled={blocked || !specify || kind !== "changelist"}
               onCheckedChange={setFilesOnly}
-              label="Only get revisions for files listed in the changelist"
+              label="Changelist files only"
+              tip="Get revisions only for files listed in this changelist."
             />
             <Option
               checked={removeMissing}
-              disabled={busy !== null || !specify || kind !== "label"}
+              disabled={blocked || !specify || kind !== "label"}
               onCheckedChange={setRemoveMissing}
-              label="Remove files from the workspace if they are not in the label"
+              label="Remove files missing from label"
+              tip="Remove workspace files that are absent from this label."
             />
           </div>
           {preview ? (
@@ -188,7 +194,7 @@ export function P4GetRevisionDialog({
           ) : null}
         </div>
         <DialogFooter className="sm:justify-between">
-          <Button type="button" variant="outline" disabled={busy !== null || needsValue} onClick={() => void run(true)}>
+          <Button type="button" variant="outline" disabled={blocked || needsValue} onClick={() => void run(true)}>
             {busy === "preview" ? <Loader2Icon className="animate-spin" /> : null}
             Preview
           </Button>
@@ -196,7 +202,7 @@ export function P4GetRevisionDialog({
             <Button type="button" variant="outline" disabled={busy !== null} onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="button" disabled={busy !== null || needsValue} onClick={() => void run(false)}>
+            <Button type="button" disabled={blocked || needsValue} onClick={() => void run(false)}>
               {busy === "sync" ? <Loader2Icon className="animate-spin" /> : null}
               Get revision
             </Button>
@@ -212,11 +218,13 @@ function Option({
   disabled,
   onCheckedChange,
   label,
+  tip,
 }: {
   checked: boolean;
   disabled: boolean;
   onCheckedChange: (checked: boolean) => void;
   label: string;
+  tip: string;
 }) {
   return (
     <label className={cn("flex items-start gap-2 text-xs leading-snug", disabled && "opacity-50")}>
@@ -226,7 +234,7 @@ function Option({
         className="mt-0.5"
         onCheckedChange={(next) => onCheckedChange(next === true)}
       />
-      <span>{label}</span>
+      <HoverTip label={tip}><span>{label}</span></HoverTip>
     </label>
   );
 }

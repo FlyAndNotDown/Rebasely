@@ -280,7 +280,10 @@ pub fn valid_client_name(name: &str) -> bool {
 
 pub fn valid_depot_path(path: &str) -> bool {
     let path = path.trim();
-    path.starts_with("//") && path.len() > 2 && !path.contains([' ', '\\', '?', '*', '#', '@'])
+    path.starts_with("//")
+        && path.len() > 2
+        && !path.contains(['\\', '?', '*', '#', '@', '"'])
+        && !path.chars().any(char::is_control)
 }
 
 /// Paths from `p4 diff -sr` can be local paths (`C:\work\client\file.txt`),
@@ -646,6 +649,11 @@ fn is_indented(line: &str) -> bool {
 
 pub fn classic_client_spec(client: &str, user: &str, root: &str, depot_path: &str) -> String {
     let view = depot_view(depot_path);
+    let view = if view.contains(' ') {
+        format!("\"{view}\"")
+    } else {
+        view
+    };
     format!(
         "Client:\t{client}\nOwner:\t{user}\nRoot:\t{root}\nDescription:\n\tCreated by Rebasely.\n\nOptions:\tnoallwrite noclobber nocompress unlocked nomodtime normdir noaltsync\nSubmitOptions:\tsubmitunchanged\nLineEnd:\tlocal\nView:\n\t{view} //{client}/...\n"
     )
@@ -771,13 +779,28 @@ Files:
         assert!(!valid_client_name("alice main"));
         assert!(!valid_client_name(".hidden"));
         assert!(valid_depot_path("//depot/main"));
+        assert!(valid_depot_path("//depot/shared files/read me.txt"));
+        assert!(valid_depot_path("//depot/file%23name.txt"));
         assert!(!valid_depot_path("depot/main"));
+        assert!(!valid_depot_path("//depot/main\nView:"));
+        assert!(!valid_depot_path("//depot/main\""));
         assert_eq!(normalize_charset(" UTF8 "), "utf8");
         assert_eq!(normalize_charset("nope"), "");
         assert!(known_p4_value("alice"));
         assert!(!known_p4_value("*unknown*"));
         assert!(!known_p4_value("*error*"));
         assert!(!known_p4_value("none"));
+    }
+
+    #[test]
+    fn classic_views_quote_depot_directories_containing_spaces() {
+        let spec = classic_client_spec(
+            "alice_main",
+            "alice",
+            "/work/client",
+            "//depot/shared files",
+        );
+        assert!(spec.contains("\"//depot/shared files/...\" //alice_main/..."));
     }
 
     #[test]

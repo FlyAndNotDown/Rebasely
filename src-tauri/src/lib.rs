@@ -1565,6 +1565,8 @@ fn silence_browser_shortcuts(_window: &tauri::WebviewWindow) {}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let mut context = tauri::generate_context!();
+    platform::configure_main_webview(context.config_mut());
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -1581,6 +1583,7 @@ pub fn run() {
             reveal_main_window(|| {
                 let _ = window.show();
                 let _ = window.set_focus();
+                let _ = webview.set_focus();
             });
         })
         .setup(|app| {
@@ -1605,6 +1608,8 @@ pub fn run() {
                         reveal_main_window(|| {
                             let _ = window.show();
                             let _ = window.set_focus();
+                            let webview: &tauri::Webview = window.as_ref();
+                            let _ = webview.set_focus();
                         });
                     }
                 });
@@ -1762,6 +1767,6 @@ pub fn run() {
             sync_watches,
             sync_window_chrome
         ])
-        .run(tauri::generate_context!())
+        .run(context)
         .expect("error while running Rebasely");
 }

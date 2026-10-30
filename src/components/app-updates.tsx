@@ -7,6 +7,7 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { HoverTip } from "@/components/ui/tooltip";
 import { updateBusy, type UpdateSnapshot } from "@/state/app-updates";
 import { appUpdates, useAppUpdates } from "@/state/use-app-updates";
 import { useGitPick } from "@/state/git-context";
@@ -17,7 +18,7 @@ function versionLabel(value: string) {
 
 function statusLabel(state: UpdateSnapshot) {
   if (state.request === "restart") return "Restarting Rebasely…";
-  if (state.request === "check" || state.status === "checking") return "Checking GitHub Releases…";
+  if (state.request === "check" || state.status === "checking") return "Checking for updates…";
   switch (state.status) {
     case "current": return "You are up to date.";
     case "available": return `${versionLabel(state.update?.version ?? "")} is available.`;
@@ -30,7 +31,7 @@ function statusLabel(state: UpdateSnapshot) {
     case "installing": return "Installing update. Rebasely may close to finish installation.";
     case "installed": return "Update installed. Restart Rebasely when your work is saved.";
     case "error": return "The update could not be completed.";
-    default: return state.request === "install" ? "Preparing update…" : "No update check has run in this session.";
+    default: return state.request === "install" ? "Preparing update…" : "Check for a new version.";
   }
 }
 
@@ -67,19 +68,25 @@ export function UpdatesSettings() {
           <h3 id="updates-title" className="text-sm font-medium">Application updates</h3>
           <p className="mt-1 text-xs text-muted-foreground">Installed version {versionLabel(version)}</p>
         </div>
+        <HoverTip label="Checks at startup. Check again at any time.">
         <Button variant="outline" size="sm" disabled={busy || state.status === "installed"} onClick={() => void appUpdates.check()}>
           <RefreshCwIcon className={state.request === "check" || state.status === "checking" ? "motion-safe:animate-spin" : ""} />
           {state.request === "check" || state.status === "checking" ? "Checking…" : "Check for updates"}
         </Button>
+        </HoverTip>
       </div>
-      <p className="text-xs text-muted-foreground">Checks run once at startup and when you click Check for updates.</p>
       <div role={state.status === "error" ? "alert" : "status"} className="grid gap-2 text-sm">
         <p className={state.status === "error" ? "text-destructive" : "text-muted-foreground"}>
           {state.status === "current" ? <CheckIcon className="mr-1.5 inline size-3.5" /> : null}
           {statusLabel(state)}
         </p>
-        {state.error ? <p className="break-words text-xs text-destructive">{state.error}</p> : null}
-        {state.status === "error" ? <p className="text-xs text-muted-foreground">Check your connection, then retry. Updates require a published public GitHub release.</p> : null}
+        {state.error ? (
+          <details className="text-xs text-muted-foreground">
+            <summary className="w-fit cursor-pointer rounded-sm focus-visible:outline-2 focus-visible:outline-ring">Details</summary>
+            <p className="mt-2 break-words">{state.error}</p>
+          </details>
+        ) : null}
+        {state.status === "error" ? <p className="text-xs text-muted-foreground">Check your connection and try again.</p> : null}
         {state.status === "downloading" ? (
           <div
             role="progressbar"
@@ -111,7 +118,7 @@ export function UpdatesSettings() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Install {versionLabel(update?.version ?? "")}?</DialogTitle>
-            <DialogDescription>Save your work before continuing. The update will be downloaded and verified, then installed. On Windows, Rebasely closes to run the installer; open it again after installation.</DialogDescription>
+            <DialogDescription>Save your work first. Rebasely may close during installation.</DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setConfirm(false)}>Cancel</Button>

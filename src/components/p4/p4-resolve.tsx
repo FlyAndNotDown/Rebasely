@@ -13,7 +13,7 @@ export function P4Resolve({
   path: string;
   onResolved: () => void;
 }) {
-  const { resolveView, resolveAccept } = useP4();
+  const { resolveView, resolveAccept, busy: workspaceBusy } = useP4();
   const [view, setView] = useState<P4ResolveView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<"yours" | "theirs" | "merge" | null>(null);
@@ -39,6 +39,7 @@ export function P4Resolve({
   }, [path, resolveView]);
 
   async function accept(mode: "yours" | "theirs" | "merge") {
+    if (busy || workspaceBusy) return;
     setBusy(mode);
     const ok = await resolveAccept(path, mode);
     setBusy(null);
@@ -56,7 +57,7 @@ export function P4Resolve({
         </span>
       </div>
       <div className="flex shrink-0 flex-wrap items-center gap-2 border-b px-3 py-2">
-        <p className="min-w-0 flex-1 truncate text-xs text-muted-foreground" title={view?.summary}>
+        <p role={loading ? "status" : undefined} className="min-w-0 flex-1 truncate text-xs text-muted-foreground" title={view?.summary}>
           {loading ? "Loading resolve" : (view?.summary ?? "Needs resolve")}
         </p>
         <div className="flex items-center gap-1.5">
@@ -64,7 +65,7 @@ export function P4Resolve({
             type="button"
             size="sm"
             variant="outline"
-            disabled={loading || busy !== null}
+            disabled={loading || busy !== null || workspaceBusy}
             onClick={() => void accept("yours")}
           >
             Accept yours
@@ -73,7 +74,7 @@ export function P4Resolve({
             type="button"
             size="sm"
             variant="outline"
-            disabled={loading || busy !== null}
+            disabled={loading || busy !== null || workspaceBusy}
             onClick={() => void accept("theirs")}
           >
             Accept theirs
@@ -81,7 +82,7 @@ export function P4Resolve({
           <Button
             type="button"
             size="sm"
-            disabled={loading || busy !== null || Boolean(error) || !content}
+            disabled={loading || busy !== null || workspaceBusy || Boolean(error) || !content}
             onClick={() => void accept("merge")}
           >
             Merge
@@ -89,7 +90,7 @@ export function P4Resolve({
         </div>
       </div>
       {error ? (
-        <div className="flex flex-1 items-center justify-center p-6 text-center text-sm text-destructive">
+        <div role="alert" className="flex flex-1 items-center justify-center p-6 text-center text-sm text-destructive">
           {error}
         </div>
       ) : view?.comparable ? (

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type MouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { ArchiveIcon, ArchiveRestoreIcon, ChevronDownIcon, GitMergeIcon, PlusIcon, Trash2Icon, Undo2Icon } from "lucide-react";
+import { ArchiveIcon, ArchiveRestoreIcon, ChevronDownIcon, GitMergeIcon, Loader2Icon, PlusIcon, Trash2Icon, Undo2Icon } from "lucide-react";
 import { ChangeBadge } from "@/components/p4/change-badge";
 import { FileStatusIcon } from "@/components/p4/file-status-icon";
 import { FileStatusTip, fileStatusText } from "@/components/p4/file-status-tip";
@@ -130,7 +130,7 @@ export function P4Pending() {
   }, []);
 
   function beginPointer(event: ReactPointerEvent, file: PendingDragFile) {
-    if (event.button !== 0) return;
+    if (event.button !== 0 || p4.busy) return;
     pointerDrag.current?.();
     const pointerId = event.pointerId;
     const startX = event.clientX;
@@ -201,6 +201,7 @@ export function P4Pending() {
         {entry.status === "conflict" ? (
           <>
             <ContextMenuItem
+              disabled={p4.busy}
               onClick={() => {
                 chooseFile(file.change, file.path, false);
                 setResolving({ change: file.change, path: file.path });
@@ -214,6 +215,7 @@ export function P4Pending() {
         ) : null}
         <ContextMenuItem
           variant="destructive"
+          disabled={p4.busy}
           onClick={() => {
             const next = openedSelection(p4.pending, picked, file);
             setRevertRequest({
@@ -227,6 +229,7 @@ export function P4Pending() {
         </ContextMenuItem>
         {canShelve ? (
           <ContextMenuItem
+            disabled={p4.busy}
             onClick={() => {
               void shelveOpened(openedSelection(p4.pending, picked, file));
             }}
@@ -266,7 +269,7 @@ export function P4Pending() {
           <div className="absolute inset-0 flex min-h-0 flex-col">
             <div className="flex h-10 shrink-0 items-center justify-between border-b px-3">
               <span className="text-sm font-medium">Pending</span>
-              <Button type="button" size="xs" variant="ghost" onClick={() => setCreating(true)}>
+              <Button type="button" size="xs" variant="ghost" disabled={p4.busy} onClick={() => setCreating(true)}>
                 <PlusIcon />
                 New
               </Button>
@@ -325,7 +328,7 @@ export function P4Pending() {
                       </ContextMenuTrigger>
                       <ContextMenuContent className="w-36">
                         <ContextMenuItem
-                          disabled={change.id === "default" || changeOpened.length === 0}
+                          disabled={p4.busy || change.id === "default" || changeOpened.length === 0}
                           onClick={() => {
                             p4.selectChange(change.id);
                             void p4.shelveSelected();
@@ -392,6 +395,7 @@ export function P4Pending() {
                               changeShelved.length === 0 ? undefined : (
                               <ContextMenuContent className="w-36">
                                 <ContextMenuItem
+                                  disabled={p4.busy}
                                   onClick={() => {
                                     p4.selectChange(change.id);
                                     void p4.unshelveSelected();
@@ -403,6 +407,7 @@ export function P4Pending() {
                                 <ContextMenuSeparator />
                                 <ContextMenuItem
                                   variant="destructive"
+                                  disabled={p4.busy}
                                   onClick={() => {
                                     p4.selectChange(change.id);
                                     setDeletingShelf(true);
@@ -425,6 +430,7 @@ export function P4Pending() {
             </div>
             <div className="shrink-0 border-t p-3">
               <Textarea
+                disabled={p4.busy}
                 value={p4.description}
                 onChange={(event) => p4.setDescription(event.target.value)}
                 placeholder="Changelist description"
@@ -434,16 +440,17 @@ export function P4Pending() {
                 <Button
                   type="button"
                   size="sm"
-                  disabled={!p4.description.trim() || opened.length === 0}
+                  disabled={p4.busy || !p4.description.trim() || opened.length === 0}
                   onClick={() => void p4.submitSelected()}
                 >
-                  Submit
+                  {p4.busyLabel === "Submitting changelist" ? <Loader2Icon className="animate-spin" /> : null}
+                  {p4.busyLabel === "Submitting changelist" ? "Submitting" : "Submit changelist"}
                 </Button>
                 <Button
                   type="button"
                   size="sm"
                   variant="outline"
-                  disabled={opened.length === 0}
+                  disabled={p4.busy || opened.length === 0}
                   onClick={() => setRevertRequest({ paths: opened.map((file) => file.depotPath), wipe: [] })}
                 >
                   Revert
@@ -467,8 +474,9 @@ export function P4Pending() {
       </ResizablePanelGroup>
       <NewChangeDialog
         open={creating}
+        busy={p4.busy}
         onOpenChange={setCreating}
-        onCreate={(description) => void p4.createChange(description)}
+        onCreate={p4.createChange}
       />
       <RevertDialog
         request={revertRequest}
@@ -483,6 +491,7 @@ export function P4Pending() {
       />
       <DeleteShelfDialog
         open={deletingShelf}
+        changeId={p4.selectedChange}
         onOpenChange={setDeletingShelf}
         onConfirm={() => {
           setDeletingShelf(false);
@@ -706,18 +715,21 @@ function fileTip(file: { depotPath: string; detail: string; action: string }) {
 
 function NewChangeDialog({
   open,
+  busy,
   onOpenChange,
   onCreate,
 }: {
   open: boolean;
+  busy: boolean;
   onOpenChange: (open: boolean) => void;
-  onCreate: (description: string) => void;
+  onCreate: (description: string) => Promise<boolean>;
 }) {
   const [description, setDescription] = useState("");
   return (
     <Dialog
       open={open}
       onOpenChange={(next) => {
+        if (busy) return;
         if (!next) setDescription("");
         onOpenChange(next);
       }}
@@ -729,24 +741,26 @@ function NewChangeDialog({
         </DialogHeader>
         <Textarea
           value={description}
+          disabled={busy}
           autoFocus
           placeholder="Description"
           onChange={(event) => setDescription(event.target.value)}
         />
         <DialogFooter>
-          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+          <Button type="button" variant="outline" disabled={busy} onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
           <Button
             type="button"
-            disabled={!description.trim()}
-            onClick={() => {
-              onCreate(description.trim());
+            disabled={busy || !description.trim()}
+            onClick={async () => {
+              if (!await onCreate(description.trim())) return;
               setDescription("");
               onOpenChange(false);
             }}
           >
-            Create
+            {busy ? <Loader2Icon className="animate-spin" /> : null}
+            {busy ? "Creating" : "Create"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -756,10 +770,12 @@ function NewChangeDialog({
 
 function DeleteShelfDialog({
   open,
+  changeId,
   onOpenChange,
   onConfirm,
 }: {
   open: boolean;
+  changeId: string;
   onOpenChange: (open: boolean) => void;
   onConfirm: () => void;
 }) {
@@ -767,7 +783,7 @@ function DeleteShelfDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Delete shelf?</DialogTitle>
+          <DialogTitle>Delete shelf {changeId}?</DialogTitle>
           <DialogDescription>
             This removes the shelved files for this changelist from the server. Opened files stay in the workspace.
           </DialogDescription>

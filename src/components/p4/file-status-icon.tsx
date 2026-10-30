@@ -27,28 +27,28 @@ export function FileStatusIcon({ status, className }: { status?: string; classNa
 
 function statusMark(status: string): { iconClass: string; badge: ReactNode } | null {
   if (status === "stale") {
-    return { iconClass: "text-yellow-200", badge: <CircleAlertIcon className="size-2.5 text-yellow-200" /> };
+    return { iconClass: "text-status-warning", badge: <CircleAlertIcon className="size-2.5 text-status-warning" /> };
   }
   if (status === "conflict") {
-    return { iconClass: "text-orange-300", badge: <TriangleAlertIcon className="size-2.5 text-orange-300" /> };
+    return { iconClass: "text-status-warning", badge: <TriangleAlertIcon className="size-2.5 text-status-warning" /> };
   }
   if (status === "other") {
-    return { iconClass: "text-red-300", badge: <LockIcon className="size-2.5 text-red-300" /> };
+    return { iconClass: "text-destructive", badge: <LockIcon className="size-2.5 text-destructive" /> };
   }
   if (status === "edit") {
-    return { iconClass: "text-sky-300", badge: <PencilIcon className="size-2.5 text-sky-300" /> };
+    return { iconClass: "text-diff-hunk", badge: <PencilIcon className="size-2.5 text-diff-hunk" /> };
   }
   if (status === "clean") {
-    return { iconClass: "text-muted-foreground", badge: <CheckIcon className="size-2.5 text-zinc-400" /> };
+    return { iconClass: "text-muted-foreground", badge: <CheckIcon className="size-2.5 text-muted-foreground" /> };
   }
   if (status === "add") {
-    return { iconClass: "text-green-300", badge: <PlusIcon className="size-2.5 text-green-300" /> };
+    return { iconClass: "text-diff-add", badge: <PlusIcon className="size-2.5 text-diff-add" /> };
   }
   if (status === "delete") {
-    return { iconClass: "text-red-300", badge: <MinusIcon className="size-2.5 text-red-300" /> };
+    return { iconClass: "text-diff-del", badge: <MinusIcon className="size-2.5 text-diff-del" /> };
   }
   if (status === "integrate") {
-    return { iconClass: "text-violet-300", badge: <GitMergeIcon className="size-2.5 text-violet-300" /> };
+    return { iconClass: "text-diff-hunk", badge: <GitMergeIcon className="size-2.5 text-diff-hunk" /> };
   }
   if (status === "local") {
     return { iconClass: "text-muted-foreground", badge: <CircleHelpIcon className="size-2.5 text-muted-foreground" /> };

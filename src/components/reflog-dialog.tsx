@@ -88,8 +88,7 @@ function ReflogList({ onClose }: { onClose: () => void }) {
       <DialogHeader>
         <DialogTitle>Reflog</DialogTitle>
         <DialogDescription>
-          Every place HEAD has been, newest first. Reset or branch from an entry to get back work
-          that a reset, rebase, or amend left behind.
+          Recover work from recent HEAD positions.
         </DialogDescription>
       </DialogHeader>
       <ScrollArea className="min-h-0 flex-1 rounded-md border">
@@ -100,8 +99,8 @@ function ReflogList({ onClose }: { onClose: () => void }) {
           <span className="w-20 shrink-0 text-right">When</span>
           <span className="size-6 shrink-0" />
         </div>
-        {error ? <p className="p-4 text-sm text-destructive">{error}</p> : null}
-        {!error && entries === null ? <p className="p-4 text-sm text-muted-foreground">Loading…</p> : null}
+        {error ? <p role="alert" className="p-4 text-sm text-destructive">{error}</p> : null}
+        {!error && entries === null ? <p role="status" className="p-4 text-sm text-muted-foreground">Loading…</p> : null}
         {entries?.length === 0 ? <p className="p-4 text-sm text-muted-foreground">The reflog is empty.</p> : null}
         {entries?.map((entry) => {
           const { action, detail } = splitMessage(entry.message);

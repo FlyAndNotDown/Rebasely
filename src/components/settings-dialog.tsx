@@ -4,11 +4,12 @@ import {
   CheckIcon,
   ChevronDownIcon,
   CircleAlertIcon,
+  InfoIcon,
   KeyRoundIcon,
   ListIcon,
   PlusIcon,
   SlidersHorizontalIcon,
-  XIcon,
+  Trash2Icon,
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { toast } from "sonner";
@@ -20,6 +21,9 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -366,7 +370,7 @@ function SettingsForm() {
         <div className="p-6">
           {incomplete ? (
             <div role="alert" className="mb-4 flex items-center gap-3 rounded-lg border border-destructive/30 px-3 py-2 text-sm">
-              <p className="min-w-0 flex-1">Some settings could not be loaded. Other settings remain available.</p>
+              <p className="min-w-0 flex-1">Some settings could not be loaded.</p>
               <Button variant="outline" size="sm" onClick={() => setReload((value) => value + 1)}>Retry</Button>
             </div>
           ) : null}
@@ -375,8 +379,7 @@ function SettingsForm() {
               <DialogHeader>
                 <DialogTitle>Git</DialogTitle>
                 <DialogDescription>
-                  The Git executable Rebasely runs, plus identity, fetching, and the diff and merge tools in your
-                  global Git config.
+                  Executable, global identity, and tools.
                 </DialogDescription>
               </DialogHeader>
               <div className="mt-6 grid gap-8">
@@ -390,7 +393,7 @@ function SettingsForm() {
                   onRemove={removeGitExecutable}
                   onAdd={() => void addGitExecutable()}
                 />
-                <FieldGroup title="Identity">
+                <FieldGroup title="Identity" hint="Saved to your global Git configuration. Repository settings take precedence.">
                   {identityReady ? (
                     <>
                       <div className="grid gap-2">
@@ -445,6 +448,7 @@ function SettingsForm() {
                     }}
                   />
                   <label className="flex items-start gap-2 text-sm">
+                    <HoverTip label="Remove tracking references for branches deleted on the remote.">
                     <Checkbox
                       className="mt-0.5"
                       checked={prune}
@@ -454,15 +458,11 @@ function SettingsForm() {
                         void persistPrefs({ fetchPrune });
                       }}
                     />
-                    <span>
-                      Prune when fetching
-                      <span className="block text-xs text-muted-foreground">
-                        Removes remote branches that were deleted on the remote.
-                      </span>
-                    </span>
+                    </HoverTip>
+                    <span>Prune when fetching</span>
                   </label>
                 </FieldGroup>
-                <FieldGroup title="Diff and merge">
+                <FieldGroup title="Diff and merge" hint="Saved to your global Git configuration. Uses Git's configured diff and merge tools.">
                   {loaded && !toolConfigReady ? (
                     <p className="text-sm text-muted-foreground">Choose a Git executable above to configure diff and merge tools.</p>
                   ) : <>
@@ -491,7 +491,7 @@ function SettingsForm() {
               <DialogHeader>
                 <DialogTitle>Perforce</DialogTitle>
                 <DialogDescription>
-                  The p4 executable Rebasely runs, and how often an open workspace refreshes.
+                  Executable and workspace refresh.
                 </DialogDescription>
               </DialogHeader>
               <div className="mt-6 grid gap-8">
@@ -529,7 +529,7 @@ function SettingsForm() {
               <DialogHeader>
                 <DialogTitle>General</DialogTitle>
                 <DialogDescription>
-                  Application updates, appearance, and the apps used to open a repository.
+                  Updates, appearance, and external apps.
                 </DialogDescription>
               </DialogHeader>
               <div className="mt-6 grid gap-8">
@@ -727,31 +727,12 @@ function GitExecutableSection({
             <DropdownMenuItem
               key={path}
               className="min-w-0"
-              onSelect={(event) => {
-                if (event.target instanceof Element && event.target.closest("[data-remove-git]")) {
-                  event.preventDefault();
-                }
-              }}
               onClick={() => onSelect(path)}
             >
               <span className="min-w-4">
                 {sameGitPath(gitPath, path) ? <CheckIcon className="size-3.5" /> : null}
               </span>
               <GitExecutableLabel path={path} />
-              <button
-                type="button"
-                data-remove-git=""
-                className="shrink-0 rounded-sm p-0.5 text-muted-foreground hover:text-foreground"
-                aria-label={`Remove ${displayPath(path)}`}
-                onPointerDown={(event) => event.stopPropagation()}
-                onClick={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  onRemove(path);
-                }}
-              >
-                <XIcon className="size-3.5" />
-              </button>
             </DropdownMenuItem>
           ))}
           {pathGit || extras.length > 0 ? <DropdownMenuSeparator /> : null}
@@ -761,10 +742,11 @@ function GitExecutableSection({
             </span>
             Add Git executable
           </DropdownMenuItem>
+          <ExecutableRemovalMenu paths={extras} onRemove={onRemove} />
         </DropdownMenuContent>
       </DropdownMenu>
       {unusable ? (
-        <p className="flex items-start gap-1.5 text-xs text-destructive" role="status">
+        <p className="flex items-start gap-1.5 text-xs text-destructive" role="alert">
           <CircleAlertIcon className="mt-0.5 size-3.5 shrink-0" />
           <span>
             {extras.length === 0
@@ -846,31 +828,12 @@ function P4ExecutableSection({
             <DropdownMenuItem
               key={path}
               className="min-w-0"
-              onSelect={(event) => {
-                if (event.target instanceof Element && event.target.closest("[data-remove-p4]")) {
-                  event.preventDefault();
-                }
-              }}
               onClick={() => onSelect(path)}
             >
               <span className="min-w-4">
                 {sameP4Path(p4Path, path) ? <CheckIcon className="size-3.5" /> : null}
               </span>
               <GitExecutableLabel path={path} />
-              <button
-                type="button"
-                data-remove-p4=""
-                className="shrink-0 rounded-sm p-0.5 text-muted-foreground hover:text-foreground"
-                aria-label={`Remove ${displayPath(path)}`}
-                onPointerDown={(event) => event.stopPropagation()}
-                onClick={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  onRemove(path);
-                }}
-              >
-                <XIcon className="size-3.5" />
-              </button>
             </DropdownMenuItem>
           ))}
           {pathP4 || extras.length > 0 ? <DropdownMenuSeparator /> : null}
@@ -880,10 +843,11 @@ function P4ExecutableSection({
             </span>
             Add p4 executable
           </DropdownMenuItem>
+          <ExecutableRemovalMenu paths={extras} onRemove={onRemove} />
         </DropdownMenuContent>
       </DropdownMenu>
       {unusable ? (
-        <p className="flex items-start gap-1.5 text-xs text-destructive" role="status">
+        <p className="flex items-start gap-1.5 text-xs text-destructive" role="alert">
           <CircleAlertIcon className="mt-0.5 size-3.5 shrink-0" />
           <span>
             {extras.length === 0
@@ -896,11 +860,37 @@ function P4ExecutableSection({
   );
 }
 
-function FieldGroup({ title, children }: { title: string; children: ReactNode }) {
+function ExecutableRemovalMenu({ paths, onRemove }: { paths: string[]; onRemove: (path: string) => void }) {
+  if (paths.length === 0) return null;
+  return (
+    <DropdownMenuSub>
+      <DropdownMenuSubTrigger>
+        <Trash2Icon />
+        Remove executable
+      </DropdownMenuSubTrigger>
+      <DropdownMenuSubContent className="max-h-72 max-w-96 overflow-y-auto [scrollbar-width:thin]">
+        {paths.map((path) => (
+          <DropdownMenuItem key={path} onSelect={() => onRemove(path)}>
+            <GitExecutableLabel path={path} />
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuSubContent>
+    </DropdownMenuSub>
+  );
+}
+
+function FieldGroup({ title, hint, children }: { title: string; hint?: string; children: ReactNode }) {
   return (
     <section className="grid gap-4">
       <h3 className="flex items-center gap-3 text-sm font-semibold tracking-wide text-foreground">
         <span>{title}</span>
+        {hint ? (
+          <HoverTip label={hint}>
+            <Button variant="ghost" size="icon-xs" aria-label={`About ${title.toLowerCase()}`} className="text-muted-foreground">
+              <InfoIcon />
+            </Button>
+          </HoverTip>
+        ) : null}
         <span className="h-px flex-1 bg-border" />
       </h3>
       {children}
@@ -1019,6 +1009,7 @@ function ToolPicker({
       {custom ? (
         <div className="flex gap-2">
           <Input
+            aria-label={`${label} executable path`}
             value={value}
             onChange={(event) => onChange(event.target.value)}
             placeholder="Path to an executable"
@@ -1029,7 +1020,7 @@ function ToolPicker({
         </div>
       ) : null}
       {missing ? (
-        <p className="flex items-center gap-1.5 text-xs text-destructive" role="status">
+        <p className="flex items-center gap-1.5 text-xs text-destructive" role="alert">
           <CircleAlertIcon className="size-3.5 shrink-0" />
           Executable not found
         </p>

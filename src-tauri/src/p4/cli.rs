@@ -400,6 +400,51 @@ pub fn run_p4_diff(env: &P4Env, args: &[&str]) -> AppResult<String> {
     finish_diff(output.status.success(), stdout, stderr)
 }
 
+/// File previews are bounded independently of normal command and progress output.
+pub fn read_file_prefix(env: &P4Env, spec: &str, limit: usize) -> AppResult<(Vec<u8>, bool)> {
+    let mut command = prepared(require_p4()?, env, &["print", "-q", spec]);
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = command
+        .spawn()
+        .map_err(|err| p4_start_error(command.get_program(), err))?;
+    let stderr = child.stderr.take();
+    let errors = thread::spawn(move || {
+        let mut bytes = Vec::new();
+        if let Some(mut pipe) = stderr {
+            let _ = pipe.by_ref().take(65_536).read_to_end(&mut bytes);
+            let _ = std::io::copy(&mut pipe, &mut std::io::sink());
+        }
+        bytes
+    });
+    let mut bytes = Vec::new();
+    let read = child
+        .stdout
+        .take()
+        .expect("piped stdout")
+        .take((limit as u64).saturating_add(1))
+        .read_to_end(&mut bytes);
+    let truncated = bytes.len() > limit;
+    if truncated || read.is_err() {
+        kill_pid(child.id());
+    }
+    let status = child.wait();
+    let stderr = errors.join().unwrap_or_default();
+    read?;
+    let status = status?;
+    if !truncated {
+        finish_parts(
+            status.success(),
+            String::new(),
+            String::from_utf8_lossy(&stderr).into_owned(),
+        )?;
+    }
+    bytes.truncate(limit);
+    Ok((bytes, truncated))
+}
+
 fn finish_diff(ok: bool, stdout: String, stderr: String) -> AppResult<String> {
     if ok || looks_like_diff(&stdout) {
         return Ok(stdout);
@@ -522,6 +567,8 @@ fn prepared(program: PathBuf, env: &P4Env, args: &[&str]) -> Command {
         // Detection can run before a client root exists.
     } else if env.cwd.is_dir() {
         command.current_dir(&env.cwd);
+        // On Unix p4 prefers an inherited PWD over the process working directory.
+        command.arg("-d").arg(&env.cwd);
     }
     if !env.port.is_empty() {
         command.arg("-p").arg(&env.port);
@@ -624,10 +671,45 @@ fn looks_like_diff(text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        is_p4_executable_name, normalize_extra_p4_paths, validate_p4_choice, P4Env, P4Jobs,
+        is_p4_executable_name, normalize_extra_p4_paths, prepared, validate_p4_choice, P4Env,
+        P4Jobs,
     };
     use std::path::Path;
     use std::sync::Arc;
+
+    #[test]
+    fn workspace_commands_override_the_launch_directory_and_connection() {
+        let temporary = tempfile::tempdir().unwrap();
+        let env = P4Env {
+            cwd: temporary.path().to_path_buf(),
+            port: "ssl:perforce.example.com:1666".into(),
+            user: "alice".into(),
+            client: "dev-pc".into(),
+            charset: "utf8".into(),
+        };
+        let command = prepared("p4".into(), &env, &["reconcile", "-e", "-a", "-d"]);
+        let args: Vec<_> = command.get_args().collect();
+        assert_eq!(command.get_current_dir(), Some(temporary.path()));
+        assert_eq!(args[0], "-d");
+        assert_eq!(args[1], temporary.path());
+        assert_eq!(
+            &args[2..],
+            [
+                "-p",
+                "ssl:perforce.example.com:1666",
+                "-u",
+                "alice",
+                "-c",
+                "dev-pc",
+                "-C",
+                "utf8",
+                "reconcile",
+                "-e",
+                "-a",
+                "-d",
+            ]
+        );
+    }
 
     #[test]
     fn depot_search_replacements_and_cancellation_stay_in_their_workspace() {

@@ -132,13 +132,16 @@ export function RepoStructure({ onReady }: { onReady?: (repoPath: string) => voi
             onToggle={() => setOpenSections((current) => ({ ...current, submodules: !current.submodules }))}
             action={
               <HoverTip label="Update all submodules">
-                <button
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label="Update all submodules"
                   type="button"
                   className="flex size-6 shrink-0 items-center justify-center rounded-sm hover:bg-muted hover:text-foreground"
                   onClick={() => void updateSubmodules([])}
                 >
                   <RefreshCwIcon className="size-3.5" />
-                </button>
+                </Button>
               </HoverTip>
             }
           />
@@ -212,13 +215,16 @@ export function RepoStructure({ onReady }: { onReady?: (repoPath: string) => voi
                 onToggle={() => setOpenSections((current) => ({ ...current, worktrees: !current.worktrees }))}
                 action={
                   <HoverTip label="New worktree">
-                    <button
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      aria-label="New worktree"
                       type="button"
                       className="flex size-6 shrink-0 items-center justify-center rounded-sm hover:bg-muted hover:text-foreground"
                       onClick={() => setAdding(true)}
                     >
                       <PlusIcon className="size-3.5" />
-                    </button>
+                    </Button>
                   </HoverTip>
                 }
               />

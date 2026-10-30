@@ -894,24 +894,30 @@ function TreeRows({
             </button>
             {remoteSection && onAddRemote ? (
               <HoverTip label="Add remote">
-                <button
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label="Add remote"
                   type="button"
                   className="flex size-6 shrink-0 items-center justify-center rounded-sm hover:bg-muted hover:text-foreground"
                   onClick={onAddRemote}
                 >
                   <PlusIcon className="size-3.5" />
-                </button>
+                </Button>
               </HoverTip>
             ) : null}
             {tags && onCreateTag ? (
               <HoverTip label="Create tag">
-                <button
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label="Create tag"
                   type="button"
                   className="flex size-6 shrink-0 items-center justify-center rounded-sm hover:bg-muted hover:text-foreground"
                   onClick={onCreateTag}
                 >
                   <PlusIcon className="size-3.5" />
-                </button>
+                </Button>
               </HoverTip>
             ) : null}
           </div>
@@ -1056,7 +1062,11 @@ function WatchButton({
 }) {
   return (
     <HoverTip label={title}>
-    <button
+    <Button
+      variant="ghost"
+      size="icon-xs"
+      aria-label={title}
+      aria-pressed={active}
       type="button"
       className={cn(
         "flex size-6 shrink-0 items-center justify-center rounded-sm hover:bg-muted",
@@ -1065,7 +1075,7 @@ function WatchButton({
       onClick={onClick}
     >
       <EyeIcon className="size-3.5" />
-    </button>
+    </Button>
     </HoverTip>
   );
 }

@@ -177,10 +177,10 @@ export function ConflictEditor({
   }
 
   if (loading) {
-    return <p className="p-4 text-sm text-muted-foreground">Loading conflict…</p>;
+    return <p role="status" className="p-4 text-sm text-muted-foreground">Loading conflict…</p>;
   }
   if (error) {
-    return <p className="p-4 text-sm text-destructive">{error}</p>;
+    return <p role="alert" className="p-4 text-sm text-destructive">{error}</p>;
   }
   if (binary) {
     return (

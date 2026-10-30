@@ -100,6 +100,19 @@ export function SshKeysSettings({ email }: { email: string }) {
     return next;
   }
 
+  async function retryLoad() {
+    if (busy) return;
+    setBusy(true);
+    setLoadError("");
+    try {
+      await reload();
+    } catch (error) {
+      setLoadError(errorMessage(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   useEffect(() => {
     let cancelled = false;
     void gitApi
@@ -253,10 +266,11 @@ export function SshKeysSettings({ email }: { email: string }) {
             </Button>
           </div>
         ) : loadError ? (
-          <p className="flex items-start gap-1.5 text-sm text-destructive" role="status">
-            <CircleAlertIcon className="mt-0.5 size-3.5 shrink-0" />
-            {loadError}
-          </p>
+          <div className="flex items-start gap-2" role="alert">
+            <CircleAlertIcon className="mt-0.5 size-3.5 shrink-0 text-destructive" />
+            <p className="min-w-0 flex-1 break-words text-sm text-destructive">{loadError}</p>
+            <Button variant="outline" size="sm" disabled={busy} onClick={() => void retryLoad()}>Retry</Button>
+          </div>
         ) : (
           <Skeleton className="h-8 w-full" role="status" aria-label="Loading SSH keys" />
         )}

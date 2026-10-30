@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { emptyBinaryDiff } from "@/lib/git";
 import { P4_LOGIN, p4Api } from "@/lib/p4";
 import type { P4Connection } from "@/types/p4";
-import { pendingDiffRequest, withP4Login } from "./p4-requests";
+import { pendingDiffRequest, pendingRefreshRequest, withP4Login } from "./p4-requests";
 
 const connection: P4Connection = {
   root: "C:\\work\\client", port: "ssl:perforce.example.com:1666", user: "alice", client: "dev-pc",
@@ -12,6 +12,24 @@ const connection: P4Connection = {
 afterEach(() => vi.restoreAllMocks());
 
 describe("Perforce credential retries", () => {
+  it("keeps a background refresh non-interactive after its ticket expires", async () => {
+    const refresh = vi.spyOn(p4Api, "refreshPending").mockRejectedValue(P4_LOGIN);
+    const interactive = vi.fn();
+    await expect(pendingRefreshRequest(connection, true, interactive)).rejects.toBe(P4_LOGIN);
+    expect(refresh).toHaveBeenCalledOnce();
+    expect(interactive).not.toHaveBeenCalled();
+  });
+
+  it("lets a user-started refresh log in and retry its original workspace", async () => {
+    const refresh = vi.spyOn(p4Api, "refreshPending").mockRejectedValueOnce(P4_LOGIN).mockResolvedValueOnce([]);
+    const login = vi.fn(async () => {});
+    const result = await pendingRefreshRequest(connection, false, (request) => withP4Login(request, login));
+    expect(result).toEqual([]);
+    expect(login).toHaveBeenCalledOnce();
+    expect(refresh).toHaveBeenCalledTimes(2);
+    expect(refresh).toHaveBeenLastCalledWith(connection);
+  });
+
   it("creates a fresh opened-file diff request after logging in", async () => {
     const diff = emptyBinaryDiff("a.bin");
     const opened = vi.spyOn(p4Api, "openedDiff").mockRejectedValueOnce(new Error(P4_LOGIN)).mockResolvedValueOnce(diff);

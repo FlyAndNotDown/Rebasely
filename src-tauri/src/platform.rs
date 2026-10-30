@@ -8,6 +8,22 @@ use std::process::Stdio;
 
 use crate::error::{AppError, AppResult};
 
+// Preserve WKWebView's opaque painting path; document CSS supplies the theme.
+#[cfg(target_os = "macos")]
+pub(crate) fn configure_main_webview(config: &mut tauri::Config) {
+    if let Some(window) = config
+        .app
+        .windows
+        .iter_mut()
+        .find(|window| window.label == "main")
+    {
+        window.background_color = None;
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn configure_main_webview(_: &mut tauri::Config) {}
+
 pub(crate) fn background_command(program: impl AsRef<OsStr>) -> Command {
     let mut command = crate::locate::command(program);
     configure_background(&mut command);

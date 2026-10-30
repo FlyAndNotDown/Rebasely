@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { Button } from "@/components/ui/button";
 import {
@@ -11,13 +11,8 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { gitApi } from "@/lib/git";
+import { createAskpassQueue, type AskpassPrompt } from "@/lib/askpass-queue";
 import { useActivities } from "@/state/git-context";
-
-interface AskpassPrompt {
-  id: number;
-  prompt: string;
-  activityId: string | null;
-}
 
 const SECRET = /password|passphrase|token|pin\b|secret/i;
 const YES_NO = /\(yes\/no/i;
@@ -25,13 +20,17 @@ const YES_NO = /\(yes\/no/i;
 /** Answers the username, password, and passphrase prompts git and ssh raise. */
 export function AskpassDialog() {
   const activities = useActivities();
-  const [prompts, setPrompts] = useState<AskpassPrompt[]>([]);
+  const [queue] = useState(() => createAskpassQueue(
+    (id, answer) => gitApi.answerAskpass(id, answer),
+    (activityId) => gitApi.cancelActivity(activityId),
+  ));
+  const prompts = useSyncExternalStore(queue.subscribe, queue.getSnapshot, queue.getSnapshot);
 
   useEffect(() => {
     let disposed = false;
     let unlisten: (() => void) | undefined;
     void listen<AskpassPrompt>("askpass-prompt", (event) => {
-      setPrompts((current) => [...current, event.payload]);
+      if (!disposed) queue.enqueue(event.payload);
     }).then((fn) => {
       if (disposed) fn();
       else unlisten = fn;
@@ -39,8 +38,9 @@ export function AskpassDialog() {
     return () => {
       disposed = true;
       unlisten?.();
+      queue.dispose();
     };
-  }, []);
+  }, [queue]);
 
   const running = (item: AskpassPrompt) =>
     !item.activityId || activities.some((activity) => activity.id === item.activityId);
@@ -49,12 +49,8 @@ export function AskpassDialog() {
   // prompt frees the thread waiting on it.
   useEffect(() => {
     const live = new Set(activities.map((activity) => activity.id));
-    for (const item of prompts) {
-      if (item.activityId && !live.has(item.activityId)) {
-        void gitApi.answerAskpass(item.id, null).catch(() => undefined);
-      }
-    }
-  }, [prompts, activities]);
+    queue.releaseInactive(live);
+  }, [prompts, activities, queue]);
 
   const current = prompts.find(running) ?? null;
   const activity = current?.activityId
@@ -62,8 +58,7 @@ export function AskpassDialog() {
     : undefined;
 
   function respond(item: AskpassPrompt, answer: string | null) {
-    setPrompts((list) => list.filter((entry) => entry.id !== item.id));
-    void gitApi.answerAskpass(item.id, answer).catch(() => undefined);
+    void queue.respond(item.id, answer);
   }
 
   return (

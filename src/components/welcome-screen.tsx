@@ -27,7 +27,7 @@ export function WelcomeScreen() {
           <div>
             <h1 className="text-2xl font-medium tracking-tight">Rebasely</h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              Open a local repository, or open a remote one, to review changes and history.
+              Your work, in one place.
             </p>
           </div>
         </div>
