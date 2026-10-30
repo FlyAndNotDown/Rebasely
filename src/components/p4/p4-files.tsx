@@ -187,24 +187,24 @@ export function P4Files() {
     const path = p4TreeTarget(entry.path, entry.dir);
     return (
       <ContextMenuContent className="w-48">
-        <ContextMenuItem onClick={() => void p4.sync([path])}>
+        <ContextMenuItem disabled={p4.busy} onClick={() => void p4.sync([path])}>
           <DownloadIcon />
           Get latest
         </ContextMenuItem>
-        <ContextMenuItem onClick={() => setRevisionPath(path)}>
+        <ContextMenuItem disabled={p4.busy} onClick={() => setRevisionPath(path)}>
           <HistoryIcon />
           Get revision
         </ContextMenuItem>
         <ContextMenuSeparator />
-        <ContextMenuItem onClick={() => void p4.fileAction("edit", [path])}>
+        <ContextMenuItem disabled={p4.busy} onClick={() => void p4.fileAction("edit", [path])}>
           <FilePenIcon />
           Check out
         </ContextMenuItem>
-        <ContextMenuItem onClick={() => void p4.fileAction("add", [path])}>
+        <ContextMenuItem disabled={p4.busy} onClick={() => void p4.fileAction("add", [path])}>
           <PlusIcon />
           Mark for add
         </ContextMenuItem>
-        <ContextMenuItem onClick={() => void p4.fileAction("delete", [path])}>
+        <ContextMenuItem disabled={p4.busy} onClick={() => void p4.fileAction("delete", [path])}>
           <Trash2Icon />
           Mark for delete
         </ContextMenuItem>
