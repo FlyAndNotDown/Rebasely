@@ -119,6 +119,7 @@ Inspecting a live Git or Perforce workspace while debugging is allowed. Copying 
 ## Commits
 
 - Make all development changes on `dev` or a topic branch based on `dev`. Commit and push routine work to `dev`; do not push directly to `master`.
+- Create a pull request only when the repository owner explicitly requests one. Permission to commit or push does not authorize creating a pull request, including a draft.
 - Update `master` through a reviewed pull request from `dev`. Only the repository owner may explicitly authorize an exceptional direct push.
 - Use `FlyAndNotDown <johnkindem@qq.com>` as the public Git author and committer identity.
 - Release tags use `vX.Y.Z`. Publishing a release requires the repository owner to run the manual GitHub release workflow and enter the version explicitly.
