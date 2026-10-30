@@ -1,7 +1,8 @@
 [package]
 name = "rebasely"
 version = "0.0.1"
-description = "A desktop client for Git and Perforce"
+description = "A unified version control client"
+license = "MIT"
 edition = "2021"
 
 [lib]

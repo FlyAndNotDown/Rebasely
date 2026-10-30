@@ -1,6 +1,6 @@
 # Working on Rebasely
 
-Rebasely is a desktop client for Git and Perforce, built with React, TypeScript, Tauri 2, and Rust. Changes should preserve the behavior of the underlying command-line tools and keep large repositories responsive.
+Rebasely is a unified version control client, built with React, TypeScript, Tauri 2, and Rust. It supports Git and Perforce. Changes should preserve the behavior of the underlying command-line tools and keep large repositories responsive.
 
 ## Project map
 
@@ -11,6 +11,8 @@ Rebasely is a desktop client for Git and Perforce, built with React, TypeScript,
 | `src/state/` | Repository sessions, asynchronous actions, refreshes, and selection |
 | `src/lib/` | Typed command clients and reusable, testable UI logic |
 | `src/types/` | TypeScript models for the Rust command boundary |
+| `site/` | Self-contained website deployed to GitHub Pages |
+| `docs/` | Development, release, and security guides |
 | `src-tauri/src/lib.rs` | Tauri commands, event wiring, and blocking-work dispatch |
 | `src-tauri/src/git/` | Git commands, parsers, history, diffs, and operations |
 | `src-tauri/src/p4/` | Perforce executable selection, parsing, and workspace operations |
@@ -26,6 +28,7 @@ Use the npm scripts in `package.json` and the committed lockfiles. Development r
 | `npm run dev` | Start the Tauri desktop app with Vite |
 | `npm run vite:build` | Check TypeScript and build the frontend |
 | `npm run check:source` | Reject Han characters and invalid UTF-8 in repository text |
+| `npm run check:site` | Validate website links, assets, and JavaScript syntax |
 | `npm run check` | Run the source policy, TypeScript, ESLint, and Vitest |
 | `npm run check:rust` | Run rustfmt, Clippy with warnings denied, and Rust tests |
 | `npm run check:all` | Run both frontend and Rust checks |
@@ -33,7 +36,7 @@ Use the npm scripts in `package.json` and the committed lockfiles. Development r
 
 Run the checks for the code you change. For a change across the command boundary, run both suites. Documentation-only changes need content, link, and asset checks; do not add tests just to exercise prose. Report any check you could not run.
 
-The GitHub workflow checks Windows, macOS, and Linux natively. A successful Windows check does not establish that the other platforms work; distinguish local results from pending CI results.
+The GitHub workflow checks Windows x64, macOS Apple Silicon, and Linux x64 natively. A successful Windows check does not establish that the other platforms work; distinguish local results from pending CI results.
 
 The Check workflow runs only when a pull request targeting `master` is opened, updated, or reopened. Do not add push, schedule, or manual triggers to Check. Ordinary branch pushes and merges must not start it. Preserve each successful native job's checked-source tree notice; owner-triggered releases use these notices to verify the merged source without repeating checks after a merge.
 

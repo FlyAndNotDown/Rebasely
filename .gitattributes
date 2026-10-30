@@ -2,7 +2,8 @@
 # A Windows core.autocrlf checkout otherwise expects CRLF, then reports a
 # file as modified when a tool saves it with LF even though the normalized
 # text is unchanged. Cargo.toml is the file that hits this.
-* text=auto eol=lf
+# Store assets directly in Git, including when a global LFS filter is configured.
+* text=auto eol=lf -filter
 
 *.png -text -diff -eol
 *.ico -text -diff -eol
