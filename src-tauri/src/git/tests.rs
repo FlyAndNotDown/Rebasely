@@ -359,6 +359,26 @@ fn safe_repo_path_rejects_escapes() {
 }
 
 #[test]
+fn unstaging_an_edited_new_file_preserves_its_worktree_contents() {
+    let (root, repo) = temp_repo();
+    fs::write(root.join("new.txt"), "staged\n").unwrap();
+    stage_paths(&repo, &["new.txt".to_string()]).unwrap();
+    fs::write(root.join("new.txt"), "edited after staging\n").unwrap();
+
+    unstage_paths(&repo, &["new.txt".to_string()]).unwrap();
+
+    assert_eq!(
+        fs::read_to_string(root.join("new.txt")).unwrap(),
+        "edited after staging\n"
+    );
+    let status = status_snapshot(&repo).unwrap();
+    assert!(status.staged.is_empty());
+    assert_eq!(status.unstaged.len(), 1);
+    assert_eq!(status.unstaged[0].kind, "untracked");
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
 fn pathspec_chunks_split_long_lists() {
     let paths: Vec<String> = (0..3000).map(|n| format!("dir/file-{n:05}.txt")).collect();
     let chunks = pathspec_chunks(&paths);

@@ -28,7 +28,11 @@ pub fn unstage_paths(repo: &Repository, paths: &[String]) -> AppResult<()> {
     if head_oid(repo).is_some() {
         run_git_pathspecs(root, &["reset", "-q", "HEAD"], &specs)?;
     } else {
-        run_git_pathspecs(root, &["rm", "-q", "--cached", "--ignore-unmatch"], &specs)?;
+        run_git_pathspecs(
+            root,
+            &["rm", "-q", "--cached", "--force", "--ignore-unmatch"],
+            &specs,
+        )?;
     }
     Ok(())
 }
@@ -95,7 +99,11 @@ pub fn discard_paths(repo: &Repository, paths: &[String]) -> AppResult<()> {
         if has_head {
             run_git_pathspecs(root, &["reset", "-q", "HEAD"], &specs)?;
         } else {
-            run_git_pathspecs(root, &["rm", "-q", "--cached", "--ignore-unmatch"], &specs)?;
+            run_git_pathspecs(
+                root,
+                &["rm", "-q", "--cached", "--force", "--ignore-unmatch"],
+                &specs,
+            )?;
         }
         for (_, full) in &not_in_head {
             remove_worktree_path(full)?;
