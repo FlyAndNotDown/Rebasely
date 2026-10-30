@@ -495,11 +495,7 @@ fn diff_from_section(path: &str, binary: bool, body: &str) -> FileDiff {
             in_hunk = true;
             continue;
         }
-        if !in_hunk
-            || line.starts_with("--- ")
-            || line.starts_with("+++ ")
-            || line.starts_with('\\')
-        {
+        if !in_hunk || line.starts_with('\\') {
             continue;
         }
         let Some(origin) = line.chars().next() else {
@@ -847,5 +843,23 @@ error: something failed for //depot/main/Other.ini#1
             created_change_id("Change 1234 created."),
             Some("1234".into())
         );
+    }
+
+    #[test]
+    fn hunk_content_that_looks_like_file_headers_keeps_its_line_numbers() {
+        let diff = parse_single_diff(
+            "--- //depot/main/file.txt\n+++ //depot/main/file.txt\n\
+@@ -3,2 +3,2 @@\n--- old\n+++ new\n context\n",
+            "//depot/main/file.txt",
+        );
+        assert_eq!(diff.lines.len(), 4);
+        assert_eq!(diff.lines[1].kind, "delete");
+        assert_eq!(diff.lines[1].content, "-- old");
+        assert_eq!(diff.lines[1].old_lineno, Some(3));
+        assert_eq!(diff.lines[2].kind, "add");
+        assert_eq!(diff.lines[2].content, "++ new");
+        assert_eq!(diff.lines[2].new_lineno, Some(3));
+        assert_eq!(diff.lines[3].old_lineno, Some(4));
+        assert_eq!(diff.lines[3].new_lineno, Some(4));
     }
 }
