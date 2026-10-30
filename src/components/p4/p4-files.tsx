@@ -21,7 +21,7 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/componen
 import { HoverTip } from "@/components/ui/tooltip";
 import { FileTreeSkeleton, HistorySkeleton } from "@/components/skeletons";
 import { normalizeRepoPath } from "@/lib/format";
-import { errorMessage, gitApi } from "@/lib/git";
+import { errorMessage, gitApi, isCancelled } from "@/lib/git";
 import { joinRoot, type SearchNode } from "@/lib/file-search";
 import { changeSummary, p4Api, relativeToRoot } from "@/lib/p4";
 import { useFileQuery } from "@/lib/use-file-query";
@@ -36,6 +36,7 @@ export function P4Files() {
   const [query, setQuery] = useState("");
   const [mode, setMode] = useState<"workspace" | "depot">("workspace");
   const connection = p4.connection;
+  const connectionKey = JSON.stringify(connection);
   const searchFiles = useCallback(
     async (needle: string) => {
       if (!connection) return { hits: [], truncated: false, scope: "" };
@@ -45,17 +46,20 @@ export function P4Files() {
           : await p4Api.searchFiles(connection, needle);
       } catch (caught) {
         const message = errorMessage(caught);
-        if (message && message !== "Login cancelled") toast.error(message);
+        if (message && message !== "Login cancelled" && !isCancelled(caught)) toast.error(message);
         throw caught;
       }
     },
     [connection, mode],
   );
-  const fileQuery = useFileQuery(`${mode}:${root}`, query, searchFiles, mode === "depot" ? 450 : 200);
+  const fileQuery = useFileQuery(`${mode}:${connectionKey}`, query, searchFiles, mode === "depot" ? 450 : 200);
   useEffect(() => {
-    if (mode === "depot" && query.trim()) return;
-    void p4Api.cancelDepotSearch();
-  }, [mode, query]);
+    const target = JSON.parse(connectionKey) as P4Connection | null;
+    if (!target) return;
+    const cancel = () => { void p4Api.cancelDepotSearch(target).catch(() => {}); };
+    if (mode !== "depot" || !query.trim()) cancel();
+    return cancel;
+  }, [connectionKey, mode, query]);
   const searchNodes = useMemo<SearchNode[]>(() => {
     if (!fileQuery.result) return [];
     return fileQuery.result.hits

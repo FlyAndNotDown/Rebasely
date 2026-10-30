@@ -640,12 +640,14 @@ pub fn list_depot(connection: &P4Connection, path: &str) -> AppResult<Vec<P4DirE
     Ok(entries)
 }
 
-pub fn cancel_depot_search() {
-    cli::DEPOT_FILE_SEARCH.cancel();
+pub fn cancel_depot_search(connection: &P4Connection) {
+    cli::cancel_depot_search(&env_for(connection));
 }
 
 pub fn search_depot(connection: &P4Connection, query: &str) -> AppResult<P4FileSearch> {
     let env = env_for(connection);
+    let job = cli::depot_search_job(&env);
+    let generation = job.begin();
     let plan = depot_search_plan(connection, &env, query)?;
     if plan.roots.is_empty() {
         return Ok(P4FileSearch {
@@ -658,7 +660,6 @@ pub fn search_depot(connection: &P4Connection, query: &str) -> AppResult<P4FileS
     // this stream. Scan the stream (or an explicit //depot prefix) instead, and
     // kill the previous scan when the query changes. Status comes from a later
     // fstat, which would add another round trip on top of the scan.
-    let generation = cli::DEPOT_FILE_SEARCH.begin();
     let mut hits = Vec::new();
     let mut seen = BTreeSet::new();
     let mut truncated = false;
@@ -669,7 +670,7 @@ pub fn search_depot(connection: &P4Connection, query: &str) -> AppResult<P4FileS
         }
         let remaining = DEPOT_SEARCH_LIMIT - hits.len();
         let spec = format!("{root}/.../*{}*", plan.needle);
-        let Some(records) = tracked_depot_files(&env, &spec, remaining, generation)? else {
+        let Some(records) = tracked_depot_files(&job, &env, &spec, remaining, generation)? else {
             return Ok(P4FileSearch {
                 hits: Vec::new(),
                 truncated: false,
@@ -814,20 +815,21 @@ fn plain_depot_name(name: &str) -> bool {
 }
 
 fn tracked_depot_files(
+    job: &cli::P4Job,
     env: &P4Env,
     spec: &str,
     limit: usize,
     generation: u64,
 ) -> AppResult<Option<Vec<ZtagRecord>>> {
     let limit = limit.to_string();
-    match cli::DEPOT_FILE_SEARCH.run(env, &["-ztag", "files", "-m", &limit, spec], generation) {
+    match job.run(env, &["-ztag", "files", "-m", &limit, spec], generation) {
         Ok(None) => Ok(None),
         Ok(Some(stdout)) => Ok(Some(parse_ztag(&stdout))),
         Err(error) => {
             let message = error.to_string().to_lowercase();
             if message.contains("no such file") || message.contains("no file(s)") {
                 Ok(Some(Vec::new()))
-            } else if cli::DEPOT_FILE_SEARCH.current() != generation {
+            } else if job.current() != generation {
                 Ok(None)
             } else {
                 Err(error)

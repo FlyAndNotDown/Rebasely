@@ -85,7 +85,7 @@ export const p4Api = {
     call<P4EntryStatus[]>("p4_listing_status", { connection, directory, depot }),
   searchDepot: (connection: P4Connection, query: string) =>
     call<P4FileSearch>("p4_search_depot", { connection, query }),
-  cancelDepotSearch: () => call<void>("p4_cancel_depot_search"),
+  cancelDepotSearch: (connection: P4Connection) => call<void>("p4_cancel_depot_search", { connection }),
   searchFiles: (connection: P4Connection, query: string) =>
     call<P4FileSearch>("p4_search_files", { connection, query }),
   saveWorkspace: (connection: P4Connection, root: string, stream: string) =>

@@ -3,12 +3,13 @@
 //! Flags on the command line carry the workspace (`-p`, `-u`, `-c`), so an
 //! inherited `P4CONFIG` cannot silently switch servers mid-command.
 
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::thread;
 use std::time::Duration;
 
@@ -226,26 +227,23 @@ pub(crate) fn kill_pid(pid: u32) {
 /// kill the previous child or several full scans pile up on the server.
 pub struct P4Job {
     generation: AtomicU64,
-    pid: AtomicU32,
+    pid: Mutex<Option<u32>>,
 }
 
 impl P4Job {
     pub const fn new() -> Self {
         Self {
             generation: AtomicU64::new(0),
-            pid: AtomicU32::new(0),
+            pid: Mutex::new(None),
         }
     }
 
     pub fn cancel(&self) {
-        let _ = self.generation.fetch_add(1, Ordering::SeqCst);
-        self.kill_current();
+        self.advance();
     }
 
     pub fn begin(&self) -> u64 {
-        let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
-        self.kill_current();
-        generation
+        self.advance()
     }
 
     pub fn current(&self) -> u64 {
@@ -284,10 +282,21 @@ impl P4Job {
         }
     }
 
-    fn kill_current(&self) {
-        let pid = self.pid.swap(0, Ordering::SeqCst);
-        if pid != 0 {
+    fn advance(&self) -> u64 {
+        let mut current = self.pid.lock().unwrap_or_else(|err| err.into_inner());
+        let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
+        let previous = current.take();
+        drop(current);
+        if let Some(pid) = previous {
             kill_pid(pid);
+        }
+        generation
+    }
+
+    fn clear_pid(&self, pid: u32) {
+        let mut current = self.pid.lock().unwrap_or_else(|err| err.into_inner());
+        if *current == Some(pid) {
+            *current = None;
         }
     }
 
@@ -310,22 +319,18 @@ impl P4Job {
             .spawn()
             .map_err(|err| AppError::msg(err.to_string()))?;
         let pid = child.id();
+        let mut current = self.pid.lock().unwrap_or_else(|err| err.into_inner());
         if self.current() != generation {
+            drop(current);
             kill_pid(pid);
             let _ = child.wait();
             return Ok(None);
         }
-        self.pid.store(pid, Ordering::SeqCst);
-        if self.current() != generation {
-            self.kill_current();
-            let _ = child.wait();
-            return Ok(None);
-        }
+        *current = Some(pid);
+        drop(current);
         match child.wait_with_output() {
             Ok(output) => {
-                let _ = self
-                    .pid
-                    .compare_exchange(pid, 0, Ordering::SeqCst, Ordering::SeqCst);
+                self.clear_pid(pid);
                 if self.current() != generation {
                     Ok(None)
                 } else {
@@ -333,9 +338,7 @@ impl P4Job {
                 }
             }
             Err(err) => {
-                let _ = self
-                    .pid
-                    .compare_exchange(pid, 0, Ordering::SeqCst, Ordering::SeqCst);
+                self.clear_pid(pid);
                 if self.current() != generation {
                     Ok(None)
                 } else {
@@ -346,7 +349,48 @@ impl P4Job {
     }
 }
 
-pub static DEPOT_FILE_SEARCH: P4Job = P4Job::new();
+#[derive(Default)]
+struct P4Jobs {
+    jobs: Mutex<HashMap<P4Env, Weak<P4Job>>>,
+}
+
+impl P4Jobs {
+    fn get(&self, env: &P4Env) -> Arc<P4Job> {
+        let mut jobs = self.jobs.lock().unwrap_or_else(|err| err.into_inner());
+        jobs.retain(|_, job| job.strong_count() != 0);
+        if let Some(job) = jobs.get(env).and_then(Weak::upgrade) {
+            return job;
+        }
+        let job = Arc::new(P4Job::new());
+        jobs.insert(env.clone(), Arc::downgrade(&job));
+        job
+    }
+
+    fn cancel(&self, env: &P4Env) {
+        let job = self
+            .jobs
+            .lock()
+            .unwrap_or_else(|err| err.into_inner())
+            .get(env)
+            .and_then(Weak::upgrade);
+        if let Some(job) = job {
+            job.cancel();
+        }
+    }
+}
+
+fn depot_search_jobs() -> &'static P4Jobs {
+    static JOBS: OnceLock<P4Jobs> = OnceLock::new();
+    JOBS.get_or_init(P4Jobs::default)
+}
+
+pub fn depot_search_job(env: &P4Env) -> Arc<P4Job> {
+    depot_search_jobs().get(env)
+}
+
+pub fn cancel_depot_search(env: &P4Env) {
+    depot_search_jobs().cancel(env);
+}
 
 fn p4_command(program: impl AsRef<std::ffi::OsStr>) -> Command {
     let mut command = crate::locate::command(program);
@@ -359,7 +403,7 @@ fn p4_command(program: impl AsRef<std::ffi::OsStr>) -> Command {
     command
 }
 
-#[derive(Clone)]
+#[derive(Clone, Eq, Hash, PartialEq)]
 pub struct P4Env {
     pub cwd: PathBuf,
     pub port: String,
@@ -609,8 +653,53 @@ fn looks_like_diff(text: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_p4_executable_name, normalize_extra_p4_paths, validate_p4_choice};
+    use super::{
+        is_p4_executable_name, normalize_extra_p4_paths, validate_p4_choice, P4Env, P4Jobs,
+    };
     use std::path::Path;
+    use std::sync::Arc;
+
+    #[test]
+    fn depot_search_replacements_and_cancellation_stay_in_their_workspace() {
+        let jobs = P4Jobs::default();
+        let first = P4Env {
+            cwd: Path::new("/work/client").to_path_buf(),
+            port: "ssl:perforce.example.com:1666".into(),
+            user: "alice".into(),
+            client: "dev-pc".into(),
+            charset: "utf8".into(),
+        };
+        let first_job = jobs.get(&first);
+        let first_generation = first_job.begin();
+
+        let mut second = first.clone();
+        second.client = "build-pc".into();
+        let second_job = jobs.get(&second);
+        let second_generation = second_job.begin();
+        assert!(!Arc::ptr_eq(&first_job, &second_job));
+        assert_eq!(first_job.current(), first_generation);
+
+        let replacement = jobs.get(&first);
+        assert!(Arc::ptr_eq(&first_job, &replacement));
+        assert_ne!(replacement.begin(), first_generation);
+        assert_eq!(second_job.current(), second_generation);
+
+        jobs.cancel(&first);
+        assert_eq!(second_job.current(), second_generation);
+        jobs.cancel(&second);
+        assert_ne!(second_job.current(), second_generation);
+
+        for index in 0..4 {
+            let mut different = first.clone();
+            match index {
+                0 => different.cwd = Path::new("/work/other").to_path_buf(),
+                1 => different.port = "ssl:other.example.com:1666".into(),
+                2 => different.user = "bob".into(),
+                _ => different.charset.clear(),
+            }
+            assert!(!Arc::ptr_eq(&first_job, &jobs.get(&different)));
+        }
+    }
 
     #[test]
     fn accepts_only_a_file_named_p4() {

@@ -1104,8 +1104,12 @@ async fn p4_search_depot(
 }
 
 #[tauri::command]
-async fn p4_cancel_depot_search() {
-    p4::cancel_depot_search();
+async fn p4_cancel_depot_search(connection: p4::P4Connection) -> AppResult<()> {
+    blocking(move || {
+        p4::cancel_depot_search(&connection);
+        Ok(())
+    })
+    .await
 }
 
 #[tauri::command]

@@ -1,5 +1,17 @@
-import { describe, expect, it } from "vitest";
-import { syncSummary } from "./p4";
+import { describe, expect, it, vi } from "vitest";
+import { invoke } from "@tauri-apps/api/core";
+import { p4Api, syncSummary } from "./p4";
+
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn().mockResolvedValue(undefined) }));
+
+it("cancels only the depot search belonging to the supplied connection", async () => {
+  const connection = {
+    root: "C:\\work\\client", port: "ssl:perforce.example.com:1666", user: "alice", client: "dev-pc",
+    charset: "utf8", stream: null, server: "",
+  };
+  await p4Api.cancelDepotSearch(connection);
+  expect(invoke).toHaveBeenLastCalledWith("p4_cancel_depot_search", { connection });
+});
 
 describe("syncSummary", () => {
   it("counts updated, added, and deleted files", () => {
