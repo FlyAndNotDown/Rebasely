@@ -77,7 +77,7 @@ function githubFixture() {
       path: ".github/workflows/check.yml", repository: { full_name: repository },
       pull_requests: [{ number: 42, head: { sha: head } }],
     }],
-    jobs: ["Check on ubuntu-24.04", "Check on windows-latest", "Check on macos-latest"].map((name, index) => ({
+    jobs: ["Check (Linux)", "Check (Windows)", "Check (macOS arm64)"].map((name, index) => ({
       name, status: "completed", conclusion: "success", check_run_url: `https://api.github.com/repos/${repository}/check-runs/${101 + index}`,
     })),
     annotations: new Map([101, 102, 103].map((id) => [id, [{ annotation_level: "notice", title: "Rebasely checked source", message: tree }]])),
@@ -119,6 +119,22 @@ describe("release preflight", () => {
     for (const id of [101, 102, 103]) {
       expect(input.github.paginate).toHaveBeenCalledWith(input.github.rest.checks.listAnnotations, expect.objectContaining({ check_run_id: id }));
     }
+  });
+
+  it("accepts prior native job names without weakening source proofs", async () => {
+    const input = githubFixture();
+    ["Check on ubuntu-24.04", "Check on windows-latest", "Check on macos-latest"].forEach((name, index) => {
+      input.lists.jobs[index].name = name;
+    });
+    await expect(preflight({ ...input, tag: "v1.0.0" })).resolves.toBeUndefined();
+    input.lists.annotations.set(101, []);
+    await expect(preflight({ ...input, tag: "v1.0.0" })).rejects.toThrow("does not prove the current master source tree");
+  });
+
+  it("rejects duplicate native jobs across old and new names", async () => {
+    const input = githubFixture();
+    input.lists.jobs.push({ ...input.lists.jobs[0], name: "Check on ubuntu-24.04" });
+    await expect(preflight({ ...input, tag: "v1.0.0" })).rejects.toThrow("Required native check");
   });
 
   it("ignores mutable PR snapshots after the dev branch is reused", async () => {
@@ -308,7 +324,7 @@ describe("release updater manifest", () => {
   it("assembles every platform in one manifest with versioned public asset URLs", () => {
     const manifest = buildUpdaterManifest(fixture());
     expect(manifest.version).toBe("0.0.1");
-    expect(Object.keys(manifest.platforms).sort()).toEqual(["darwin-aarch64", "darwin-x86_64", "linux-x86_64", "linux-x86_64-deb", "windows-x86_64"]);
+    expect(Object.keys(manifest.platforms).sort()).toEqual(["darwin-aarch64", "linux-x86_64", "linux-x86_64-deb", "windows-x86_64"]);
     expect(manifest.platforms).toHaveProperty("windows-x86_64.url", expect.stringContaining("/v0.0.1/Rebasely_v0.0.1_windows_x64.exe"));
     expect(manifest.platforms).toHaveProperty("darwin-aarch64.signature", signature);
     expect(manifest.platforms).toHaveProperty("linux-x86_64-deb.url", expect.stringMatching(/\.deb$/));
@@ -372,7 +388,7 @@ describe("release updater manifest", () => {
   });
 
   it("refuses partial uploads, missing signatures, and missing installer packages", () => {
-    for (const missing of ["Rebasely_v0.0.1_linux_x64.AppImage", "Rebasely_v0.0.1_windows_x64.exe.sig", "Rebasely_v0.0.1_macos_x64.dmg"]) {
+    for (const missing of ["Rebasely_v0.0.1_linux_x64.AppImage", "Rebasely_v0.0.1_windows_x64.exe.sig", "Rebasely_v0.0.1_macos_arm64.dmg"]) {
       const input = fixture();
       input.assets = input.assets.filter((asset: { name: string }) => asset.name !== missing);
       expect(() => buildUpdaterManifest(input)).toThrow("Required release asset");

@@ -18,7 +18,7 @@ concurrency:
 
 jobs:
   validate:
-    name: Validate owner, version, and checked revision
+    name: Validate
     if: >-
       github.ref == 'refs/heads/master' &&
       github.actor == github.repository_owner &&
@@ -34,15 +34,17 @@ jobs:
       version: ${{ steps.validate.outputs.version }}
       tag: ${{ steps.validate.outputs.tag }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+      - name: Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 24
           package-manager-cache: false
-      - name: Validate release request
+      - name: Preflight
         id: validate
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         env:
@@ -55,7 +57,7 @@ jobs:
             await preflight({ github, context, core, tag: process.env.RELEASE_TAG });
 
   draft:
-    name: Create draft release
+    name: Draft
     needs: validate
     if: >-
       github.actor == github.repository_owner &&
@@ -70,11 +72,12 @@ jobs:
     outputs:
       release_id: ${{ steps.draft.outputs.release_id }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - name: Create draft at the validated commit
+      - name: Create draft
         id: draft
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         env:
@@ -87,7 +90,7 @@ jobs:
             await createDraft({ github, context, core, tag: process.env.RELEASE_TAG });
 
   build:
-    name: Build ${{ matrix.asset }}
+    name: Build (${{ matrix.platform }})
     needs: [validate, draft]
     if: >-
       github.actor == github.repository_owner &&
@@ -104,56 +107,55 @@ jobs:
             target: x86_64-pc-windows-msvc
             bundles: nsis
             asset: windows_x64
+            platform: Windows x64
             config: >-
               --config '{"bundle":{"createUpdaterArtifacts":true}}'
           - os: macos-15
             target: aarch64-apple-darwin
             bundles: app,dmg
             asset: macos_arm64
-            config: >-
-              --config '{"bundle":{"createUpdaterArtifacts":true,"macOS":{"signingIdentity":"-"}}}'
-          - os: macos-15-intel
-            target: x86_64-apple-darwin
-            bundles: app,dmg
-            asset: macos_x64
+            platform: macOS arm64
             config: >-
               --config '{"bundle":{"createUpdaterArtifacts":true,"macOS":{"signingIdentity":"-"}}}'
           - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             bundles: appimage,deb
             asset: linux_x64
+            platform: Linux x64
             config: >-
               --config '{"bundle":{"createUpdaterArtifacts":true}}'
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+      - name: Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 24
           package-manager-cache: false
-      - name: Install Linux system dependencies
+      - name: System packages
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev \
             build-essential curl wget file libxdo-dev libssl-dev \
             libayatana-appindicator3-dev librsvg2-dev patchelf xdg-utils
-      - name: Install Rust target
-        run: rustup toolchain install stable --profile minimal --target ${{ matrix.target }}
-      - name: Select Rust
-        run: rustup default stable
-      - name: Stamp the explicit version in the build checkout
+      - name: Rust
+        run: |
+          rustup toolchain install stable --profile minimal --target ${{ matrix.target }}
+          rustup default stable
+      - name: Set version
         env:
           RELEASE_TAG: ${{ needs.validate.outputs.tag }}
         run: node scripts/release-version.mjs set "$RELEASE_TAG"
         shell: bash
-      - name: Install locked frontend dependencies
+      - name: Dependencies
         run: npm ci
-      - name: Check version consistency
+      - name: Version check
         run: npm run check:version
-      - name: Build signed updater packages and upload to the draft
+      - name: Build packages
         uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -171,7 +173,7 @@ jobs:
           args: --ci --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} ${{ matrix.config }} -- --locked
 
   publish:
-    name: Verify all packages and publish
+    name: Publish
     needs: [validate, draft, build]
     if: >-
       github.actor == github.repository_owner &&
@@ -184,11 +186,12 @@ jobs:
       checks: read
       pull-requests: read
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - name: Assemble the complete updater manifest and publish
+      - name: Publish release
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         env:
           RELEASE_TAG: ${{ needs.validate.outputs.tag }}
@@ -199,3 +202,12 @@ jobs:
             const path = require('node:path');
             const { publishRelease } = await import(pathToFileURL(path.join(process.env.GITHUB_WORKSPACE, 'scripts/release-github.mjs')).href);
             await publishRelease({ github, context, core, tag: process.env.RELEASE_TAG, releaseId: process.env.RELEASE_ID });
+
+  website:
+    name: Website
+    needs: publish
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/pages.yml

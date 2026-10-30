@@ -14,50 +14,58 @@ concurrency:
 
 jobs:
   native:
-    name: Check on ${{ matrix.os }}
+    name: Check (${{ matrix.platform }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, windows-latest, macos-latest]
+        include:
+          - os: ubuntu-24.04
+            platform: Linux
+          - os: windows-latest
+            platform: Windows
+          - os: macos-15
+            platform: macOS arm64
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+      - name: Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 24
           package-manager-cache: false
-      - name: Install Linux system dependencies
+      - name: System packages
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev \
             build-essential curl wget file libxdo-dev libssl-dev \
             libayatana-appindicator3-dev librsvg2-dev
-      - name: Install Rust
-        run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy
-      - name: Select Rust
-        run: rustup default stable
-      - name: Cache Rust dependencies
+      - name: Rust
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+          rustup default stable
+      - name: Rust cache
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: "src-tauri -> target"
           cache-workspace-crates: "false"
           cache-on-failure: "true"
           cache-bin: "false"
-      - name: Install frontend dependencies
+      - name: Dependencies
         run: npm ci
-      - name: Check frontend
+      - name: Frontend checks
         run: npm run check
-      - name: Build frontend
+      - name: Frontend build
         run: npm run vite:build
-      - name: Build askpass integration helper
+      - name: Askpass helper
         run: cargo build --manifest-path src-tauri/Cargo.toml --locked --bin rebasely
-      - name: Check Rust
+      - name: Rust checks
         run: npm run check:rust
-      - name: Record checked source
+      - name: Source proof
         shell: bash
         run: |
           git diff --quiet HEAD --

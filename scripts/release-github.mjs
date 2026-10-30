@@ -53,8 +53,14 @@ async function assertCheckedRevision(github, context) {
     owner, repo, run_id: latest.id, filter: "latest", per_page: 100,
   });
   const native = [];
-  for (const name of ["Check on ubuntu-24.04", "Check on windows-latest", "Check on macos-latest"]) {
-    const matches = jobs.filter((job) => job.name === name);
+  // Keep existing checked-source proofs valid across the job-name migration.
+  for (const names of [
+    ["Check (Linux)", "Check on ubuntu-24.04"],
+    ["Check (Windows)", "Check on windows-latest"],
+    ["Check (macOS arm64)", "Check on macos-latest"],
+  ]) {
+    const name = names[0];
+    const matches = jobs.filter((job) => names.includes(job.name));
     if (matches.length !== 1 || matches[0].status !== "completed" || matches[0].conclusion !== "success") {
       throw new Error(`Required native check did not succeed: ${name}.`);
     }
@@ -111,7 +117,7 @@ export async function createDraft({ github, context, core, tag }) {
   const { data: release } = await github.rest.repos.createRelease({
     ...context.repo, tag_name: tag, target_commitish: context.sha,
     name: `Rebasely ${tag}`, draft: true, prerelease: false,
-    body: `Source revision: \`${context.sha}\`.\n\nUpdate packages carry Tauri updater signatures. Windows installers are not Authenticode signed; macOS builds use ad-hoc signing and are not notarized.`,
+    body: `Source revision: \`${context.sha}\`.`,
     generate_release_notes: true,
   });
   core.setOutput("release_id", release.id);
@@ -124,7 +130,6 @@ export function releaseAssets(tag) {
   return [
     { platform: "windows-x86_64", name: `${prefix}windows_x64.exe` },
     { platform: "darwin-aarch64", name: `${prefix}macos_arm64.app.tar.gz`, installer: `${prefix}macos_arm64.dmg` },
-    { platform: "darwin-x86_64", name: `${prefix}macos_x64.app.tar.gz`, installer: `${prefix}macos_x64.dmg` },
     { platform: "linux-x86_64", name: `${prefix}linux_x64.AppImage` },
     { platform: "linux-x86_64-deb", name: `${prefix}linux_x64.deb` },
   ];
