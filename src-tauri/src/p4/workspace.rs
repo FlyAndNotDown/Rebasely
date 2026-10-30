@@ -2811,7 +2811,7 @@ fn connection_after_create(env: &P4Env, root: &Path, stream: &str) -> AppResult<
         .filter(|value| known_p4_value(value));
     Ok(P4Connection {
         root: root.to_string_lossy().into_owned(),
-        port: first_text(record.get("serverAddress"), &env.port),
+        port: first_text(Some(&env.port), &field(&record, "serverAddress")),
         user: first_text(record.get("userName"), &env.user),
         client: first_text(record.get("clientName"), &env.client),
         charset: env.charset.clone(),
@@ -3166,7 +3166,7 @@ fn connection_from_info(start: &Path, env: &P4Env, stdout: &str) -> Option<P4Con
         .filter(|value| known_p4_value(value));
     Some(P4Connection {
         root: root_path.to_string_lossy().into_owned(),
-        port: first_text(record.get("serverAddress"), &env.port),
+        port: first_text(Some(&env.port), &field(&record, "serverAddress")),
         user: first_text(record.get("userName"), &env.user),
         client,
         charset: env.charset.clone(),
@@ -3961,6 +3961,28 @@ Description:
             )
             .unwrap(),
             r"\\server\share\client\a.txt"
+        );
+    }
+
+    #[test]
+    fn workspace_discovery_keeps_the_reachable_endpoint_instead_of_server_identity() {
+        let root = Path::new("/work/client");
+        let mut env = P4Env {
+            cwd: root.to_path_buf(),
+            port: "ssl:perforce.example.com:1666".into(),
+            user: "alice".into(),
+            client: "dev-pc".into(),
+            charset: String::new(),
+        };
+        let info = "... clientName dev-pc\n... clientRoot /work/client\n... serverAddress internal.example.com:1666\n... userName alice\n";
+        assert_eq!(
+            connection_from_info(root, &env, info).unwrap().port,
+            env.port
+        );
+        env.port.clear();
+        assert_eq!(
+            connection_from_info(root, &env, info).unwrap().port,
+            "internal.example.com:1666"
         );
     }
 
