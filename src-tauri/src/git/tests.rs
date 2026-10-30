@@ -379,6 +379,85 @@ fn unstaging_an_edited_new_file_preserves_its_worktree_contents() {
 }
 
 #[test]
+fn discarding_an_untracked_symlink_preserves_its_target() {
+    let (root, repo) = temp_repo();
+    commit_file(&repo, &root, "target.txt", "keep this\n", "base");
+    let link = root.join("link.txt");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(root.join("target.txt"), &link).unwrap();
+    #[cfg(windows)]
+    if let Err(err) = std::os::windows::fs::symlink_file(root.join("target.txt"), &link) {
+        if err.raw_os_error() == Some(1314) {
+            eprintln!("Skipping symlink test: Windows symlink privileges are unavailable");
+            let _ = fs::remove_dir_all(&root);
+            return;
+        }
+        panic!("Could not create test symlink: {err}");
+    }
+
+    discard_paths(&repo, &["link.txt".to_string()]).unwrap();
+
+    assert_eq!(
+        fs::read_to_string(root.join("target.txt")).unwrap(),
+        "keep this\n"
+    );
+    assert!(fs::symlink_metadata(&link).is_err());
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn discarding_a_directory_keeps_siblings_and_rejects_parent_traversal() {
+    let (root, repo) = temp_repo();
+    fs::create_dir_all(root.join("loose").join("nested")).unwrap();
+    fs::create_dir_all(root.join("loose-other")).unwrap();
+    fs::write(
+        root.join("loose").join("nested").join("remove.txt"),
+        "remove\n",
+    )
+    .unwrap();
+    fs::write(root.join("loose-other").join("keep.txt"), "keep\n").unwrap();
+
+    assert!(discard_paths(&repo, &["../outside.txt".to_string()]).is_err());
+    discard_paths(&repo, &["loose".to_string()]).unwrap();
+
+    assert!(!root.join("loose").exists());
+    assert_eq!(
+        fs::read_to_string(root.join("loose-other").join("keep.txt")).unwrap(),
+        "keep\n"
+    );
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[cfg(windows)]
+#[test]
+fn clearing_readonly_on_a_symlink_does_not_change_its_target() {
+    let (root, _) = temp_repo();
+    let target = root.join("target.txt");
+    let link = root.join("link.txt");
+    fs::write(&target, "keep\n").unwrap();
+    if let Err(err) = std::os::windows::fs::symlink_file(&target, &link) {
+        if err.raw_os_error() == Some(1314) {
+            eprintln!("Skipping symlink test: Windows symlink privileges are unavailable");
+            let _ = fs::remove_dir_all(&root);
+            return;
+        }
+        panic!("Could not create test symlink: {err}");
+    }
+    let original_permissions = fs::metadata(&target).unwrap().permissions();
+    let mut readonly = original_permissions.clone();
+    readonly.set_readonly(true);
+    fs::set_permissions(&target, readonly).unwrap();
+
+    let result = clear_readonly(&link);
+    let target_stayed_readonly = fs::metadata(&target).unwrap().permissions().readonly();
+    fs::set_permissions(&target, original_permissions).unwrap();
+
+    result.unwrap();
+    assert!(target_stayed_readonly);
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
 fn pathspec_chunks_split_long_lists() {
     let paths: Vec<String> = (0..3000).map(|n| format!("dir/file-{n:05}.txt")).collect();
     let chunks = pathspec_chunks(&paths);

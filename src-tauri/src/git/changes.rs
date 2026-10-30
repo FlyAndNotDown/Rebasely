@@ -48,21 +48,62 @@ pub(super) fn is_untracked(repo: &Repository, rel: &str) -> bool {
 }
 
 pub(super) fn remove_worktree_path(full: &Path) -> AppResult<()> {
-    if full.is_dir() {
+    let metadata = match fs::symlink_metadata(full) {
+        Ok(metadata) => metadata,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(err) => return Err(err.into()),
+    };
+    let directory = metadata.is_dir();
+    #[cfg(windows)]
+    let directory = {
+        use std::os::windows::fs::FileTypeExt;
+        directory || metadata.file_type().is_symlink_dir()
+    };
+    if directory {
         fs::remove_dir_all(full)?;
-    } else if full.exists() {
+    } else {
         fs::remove_file(full)?;
     }
     Ok(())
 }
 
+/// Resolve parent directories for containment, but preserve the final entry so
+/// discarding a symlink removes the link instead of the file it points to.
+fn discard_entry_path(repo: &Repository, relative: &str) -> AppResult<PathBuf> {
+    safe_repo_path(relative)?;
+    let root = workdir(repo)?.canonicalize()?;
+    let candidate = root.join(relative);
+    let mut parent = candidate.parent();
+    while let Some(path) = parent {
+        match path.canonicalize() {
+            Ok(canonical) => {
+                if !canonical.starts_with(&root) {
+                    return Err(AppError::msg("Path is outside the repository"));
+                }
+                return Ok(candidate);
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => parent = path.parent(),
+            Err(err) => return Err(err.into()),
+        }
+    }
+    Err(AppError::msg("Path is outside the repository"))
+}
+
 /// Git on Windows cannot overwrite a read-only file. Elsewhere it replaces the
 /// file, and clearing the flag would make it world-writable.
 pub(super) fn clear_readonly(full: &Path) -> AppResult<()> {
-    if !cfg!(windows) || !full.is_file() {
+    if !cfg!(windows) {
         return Ok(());
     }
-    let mut perms = fs::metadata(full)?.permissions();
+    let metadata = match fs::symlink_metadata(full) {
+        Ok(metadata) => metadata,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(err) => return Err(err.into()),
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Ok(());
+    }
+    let mut perms = metadata.permissions();
     if perms.readonly() {
         #[allow(clippy::permissions_set_readonly_false)]
         perms.set_readonly(false);
@@ -80,7 +121,7 @@ pub fn discard_paths(repo: &Repository, paths: &[String]) -> AppResult<()> {
         if rel.is_empty() {
             continue;
         }
-        let full = ensure_inside_workdir(repo, &rel)?;
+        let full = discard_entry_path(repo, &rel)?;
         if is_untracked(repo, &rel) {
             remove_worktree_path(&full)?;
             continue;
