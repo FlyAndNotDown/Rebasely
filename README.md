@@ -1,129 +1,158 @@
-# Rebasely
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/hero-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="docs/assets/hero-light.svg">
+  <img alt="Rebasely — a desktop client for Git and Perforce" src="docs/assets/hero-light.svg" width="100%">
+</picture>
 
-Rebasely is a desktop client for Git and Perforce. Git covers the working tree, history, and branch operations. A Perforce tab is an online client workspace: pending changelists, submitted history, and the files on disk.
+<p align="center">
+  <strong>Git repositories. Perforce workspaces. One desktop app.</strong><br>
+  Review changes, explore history, and keep your work in view.
+</p>
 
-It is a native window built with Tauri 2. The interface is React. Repository work runs in Rust by calling `git` or `p4`, so what the window shows is what those tools themselves would do. Several repositories stay open in tabs, and the open set is restored on the next launch.
+<p align="center">
+  <a href="https://v2.tauri.app/"><img alt="Tauri 2" src="https://img.shields.io/badge/Tauri-2-24C8D8?style=flat-square&logo=tauri&logoColor=white"></a>
+  <a href="https://react.dev/"><img alt="React 19" src="https://img.shields.io/badge/React-19-149ECA?style=flat-square&logo=react&logoColor=white"></a>
+  <a href="https://www.rust-lang.org/"><img alt="Rust backend" src="https://img.shields.io/badge/Backend-Rust-D88A57?style=flat-square&logo=rust&logoColor=white"></a>
+</p>
 
-## Design
+<p align="center">
+  <a href="#features">Features</a> ·
+  <a href="#getting-started">Getting started</a> ·
+  <a href="#development">Development</a> ·
+  <a href="#keyboard-shortcuts">Shortcuts</a>
+</p>
 
-The window is a view of a real Git repository. Staging, commits, rebase, and push invoke `git` itself, so Git LFS, hooks, commit and tag signing, and sparse checkout follow the same rules as the command line.
+---
 
-Every repository read and write goes through `git` and the result is parsed in Rust. The UI never starts Git on its own; every call is a Tauri command.
+Rebasely brings a visual working tree, commit graph, and Perforce changelists into a native window. Open several repositories in tabs, switch between Git and Perforce, and pick up where you left off on the next launch.
 
-Long-running commands can be cancelled. Cancelling stops the Git process and the helpers it launched, then removes lock files that command created. Credential prompts return to the window through an askpass helper. Background fetches run with prompts turned off, so an automatic refresh does not open a password dialog.
+Repository operations run through the `git` and `p4` executables. Git hooks, LFS filters, signing, and sparse checkout follow the same behavior as the command line.
 
-The work tree is watched for changes and the open snapshot refreshes from disk.
+## Features
 
-## What it covers
+### Git, from working tree to history
 
-**Changes.** Stage, unstage, and discard a file, a hunk, or a single line. Commit, amend, commit and push, and undo the last commit. Changed files can be shown as a list or a folder tree, with multi-select and keyboard control. Selected files can be stashed or added to `.gitignore`.
-
-**Diffs.** Inline or side by side, with syntax highlighting and hidden whitespace. Images compare side by side, by swipe, or as an onion skin.
-
-**History.** A commit graph with multi-select, comparison of two commits or branches, and search by author, path, content, or date. Reflog is available when a branch needs to be put back.
-
-**Branches and remotes.** Create, check out, and delete branches. Delete a branch on the remote as well. Push and delete tags. Fetch, pull with merge or rebase, push, and publish a branch. Each of those can be cancelled, and credentials are requested in the app.
-
-**Rewriting history.** Merge, rebase, interactive rebase, cherry-pick, revert, and reset. A rebase or cherry-pick in progress continues from the commit box, including an edited message. Conflicts resolve per hunk, or in the configured merge tool.
-
-**Stash, files, and structure.** Save, apply, pop, and drop stashes, and diff a stash file by file. Browse the tree with blame and per-file history. Submodules and worktrees are listed and operated on from the same window. Create and apply patches.
-
-**Workspace.** Open, clone, and switch repositories in tabs. Recents and the open tabs come back on launch. Open a file in an editor, or a diff in the configured diff tool. A command palette (`Ctrl+K`) lists the same actions as the keyboard shortcuts. The theme is light, dark, or system, and the window chrome follows the resolved theme.
-
-**Perforce.** A workspace stays connected to the server. Pending changelists can be submitted, shelved, reverted, and moved. Submitted history and file revisions come from the server. Get latest and reconcile update the client root. The `p4` executable, server, user, and charset are chosen in Settings.
-
-## Architecture
-
-```text
-React workspace
-  changes, history, stash, files, dialogs
-        │  Tauri commands
-        ▼
-Rust backend
-  ├── git         status, log, blame, diffs, writes, remotes
-  ├── p4          workspaces, changelists, sync, shelve
-  ├── askpass     credential prompts back into the window
-  ├── notify      work-tree refresh
-  └── session     open tabs and recents
-```
-
-Disk and process work runs off the UI thread. Session saves stay ordered on the main thread so rapid tab changes land in the sequence they were sent.
-
-Commands the user starts can be cancelled by id. A background fetch uses the same Git path with terminal prompts, the askpass dialog, and the system credential window suppressed, and fails quietly if authentication is required.
-
-## Repository layout
-
-```text
-src/                      React application
-  components/             panes, dialogs, and UI primitives
-  state/                  tabs, session, and the command clients
-  lib/                    diffs, commit graph, shortcuts, formatting
-src-tauri/src/
-  git/                    Git repository operations
-  p4/                     Perforce workspace operations
-  askpass.rs              credential helper
-  watch.rs                work-tree notifications
-  session.rs              restored tabs
-  recents.rs              recently opened repositories
-  editor.rs               external editors
-  terminal.rs             external terminals
-  prefs.rs                window preferences
-```
-
-## Stack
-
-| Layer | Choice |
+| Workflow | What you can do |
 | --- | --- |
-| Window | Tauri 2 |
-| Interface | React 19, TypeScript, Vite, Tailwind CSS, shadcn/ui |
-| Repository | Rust and the `git` executable |
-| Watching | `notify` |
+| **Review changes** | Stage, unstage, or discard a file, hunk, or individual line. Select multiple files in a list or folder tree. |
+| **Compare revisions** | Read inline or side-by-side diffs with syntax highlighting and whitespace filtering. Compare images side by side, with a swipe, or as an onion skin. |
+| **Explore history** | Follow a commit graph, compare commits or branches, and search by author, path, content, or date. Browse files with blame and file history. |
+| **Shape commits** | Commit, amend, undo, merge, rebase, cherry-pick, revert, and reset. Edit interactive rebase steps and resolve conflicts per hunk or in your merge tool. |
+| **Work with remotes** | Fetch, pull, push, and publish branches. Create, check out, push, or delete tags; manage local and remote branches. |
+| **Move work around** | Save and inspect stashes, create or apply patches, and manage submodules and worktrees. |
 
-Release builds use a single codegen unit, link-time optimization, and stripped symbols.
+### Perforce, built around the workspace
 
-## Requirements
+- **Changelists in context.** Inspect pending and submitted changes; submit, shelve, unshelve, revert, or move selected files between changelists.
+- **Depot and local files together.** Browse both trees, search by file or folder name, and jump between a depot path and its workspace file.
+- **Revision history at hand.** Inspect file revisions and their diffs, get a chosen revision, or sync to latest.
+- **A connected workspace.** Reconcile local changes, resolve pending conflicts, and choose the executable, server, user, client, and charset for your connection.
 
-- Node.js 22+
-- Rust (stable)
-- Git on `PATH`
+### A workspace that stays out of the way
 
-## Develop
+Tabs and recent repositories survive restarts. Light, dark, and system themes follow your preference. A command palette and keyboard shortcuts keep frequent actions close. Open a repository in your terminal, a file in your editor, or a change in your configured diff tool.
+
+Git work trees refresh when files change. Repositories keep their own progress and in-flight work, so operations in one tab do not take over another. Long-running Git operations can be cancelled, credentials return through an in-app prompt, and background fetches stay quiet when authentication is needed.
+
+## Getting started
+
+### Prerequisites
+
+- **Node.js 22.13+ (22.x), or 24+**, with npm.
+- **Rust stable**, with `rustfmt` and `clippy` for development checks.
+- **Git**, available on `PATH` or selected in the app's Settings.
+- **Perforce CLI (`p4`)**, if you plan to use Perforce workspaces.
+- Your platform's [Tauri 2 system dependencies](https://v2.tauri.app/start/prerequisites/):
+
+| Platform | Native build dependencies |
+| --- | --- |
+| Windows | Microsoft C++ Build Tools and WebView2 |
+| macOS | Xcode Command Line Tools |
+| Linux | WebKitGTK and the development libraries listed for your distribution |
+
+### Run the app
+
+From the repository root:
 
 ```bash
-npm install
+npm ci
 npm run dev
 ```
 
-## Check
+This starts Vite and opens the Tauri desktop app. Open an existing Git repository or clone one from the welcome screen. To use Perforce, install `p4` and connect a client workspace to your server.
 
-```bash
-npm run check       # typecheck, lint, and frontend tests
-npm run check:rust  # rustfmt, clippy, and the Rust tests
-npm run check:all   # both
-```
-
-
-## Build
+### Build
 
 ```bash
 npm run build
 ```
 
-## Shortcuts
+Tauri builds the frontend and Rust backend, then creates the platform's application bundles under `src-tauri/target/release/bundle/`.
 
-Shortcuts use Ctrl on Windows and Linux, and Command on macOS.
+## Development
+
+### Checks
+
+```bash
+rustup component add rustfmt clippy
+npm run check:all
+```
+
+| Command | Checks |
+| --- | --- |
+| `npm run check` | TypeScript, ESLint, and frontend tests |
+| `npm run check:rust` | Rust formatting, Clippy, and backend tests |
+| `npm run check:all` | Both check suites |
+| `npm run vite:build` | Frontend typecheck and production build |
+
+
+### Architecture
+
+```text
+React + TypeScript
+  panes · dialogs · repository state
+                │
+          Tauri commands
+                │
+          Rust backend
+       ┌────────┴────────┐
+     Git CLI         Perforce CLI
+```
+
+The frontend calls typed command clients; Rust owns filesystem and process work. Blocking work runs off the UI thread. Shared backend modules handle credential prompts, filesystem watching, editor and terminal integration, and persisted preferences and sessions.
+
+<details>
+<summary><strong>Repository map</strong></summary>
+
+| Path | Responsibility |
+| --- | --- |
+| `src/components/` | Git and Perforce panes, dialogs, and shared UI |
+| `src/state/` | Repository state, sessions, and refresh coordination |
+| `src/lib/` | Command clients, diffs, commit graphs, formatting, and shortcuts |
+| `src/types/` | Frontend command and data types |
+| `src-tauri/src/git/` | Git commands, parsers, and repository operations |
+| `src-tauri/src/p4/` | Perforce connections, parsers, and workspace operations |
+| `src-tauri/src/lib.rs` | Tauri command registration and backend integration |
+
+</details>
+
+For contributions, keep changes focused, add tests where behavior changes, and follow [the project guidelines](AGENTS.md). Use invented repositories and credentials in examples and test fixtures.
+
+## Keyboard shortcuts
+
+Use <kbd>Ctrl</kbd> on Windows and Linux, or <kbd>⌘</kbd> on macOS. The table lists shared and Git workspace shortcuts; the command palette shows the actions available in the current workspace.
 
 | Action | Shortcut |
 | --- | --- |
-| Command palette | `Ctrl+K` or `F1` |
-| Open repository | `Ctrl+O` |
-| Close repository | `Ctrl+W` |
-| Next / previous tab | `Ctrl+Tab` / `Ctrl+Shift+Tab` |
-| Changes, History, Stash, Files | `Ctrl+1` … `Ctrl+4` |
-| Fetch, pull, push | `Ctrl+Shift+F`, `Ctrl+Shift+L`, `Ctrl+Shift+U` |
-| New branch | `Ctrl+Shift+N` |
-| Stash all | `Ctrl+Shift+S` |
-| Reflog | `Ctrl+Shift+R` |
-| Open in editor | `Ctrl+E` |
-| Open terminal | `` Ctrl+` `` |
-| Settings | `Ctrl+,` |
+| Command palette | <kbd>Ctrl</kbd> + <kbd>K</kbd> or <kbd>F1</kbd> |
+| Open / close repository | <kbd>Ctrl</kbd> + <kbd>O</kbd> / <kbd>W</kbd> |
+| Next / previous tab | <kbd>Ctrl</kbd> + <kbd>Tab</kbd> / <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Tab</kbd> |
+| Changes / history / stash / files | <kbd>Ctrl</kbd> + <kbd>1</kbd> / <kbd>2</kbd> / <kbd>3</kbd> / <kbd>4</kbd> |
+| Fetch / pull / push | <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F</kbd> / <kbd>L</kbd> / <kbd>U</kbd> |
+| New branch | <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>N</kbd> |
+| Stash all / reflog | <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>S</kbd> / <kbd>R</kbd> |
+| Open in editor | <kbd>Ctrl</kbd> + <kbd>E</kbd> |
+| Open terminal | <kbd>Ctrl</kbd> + <kbd>`</kbd> |
+| Settings | <kbd>Ctrl</kbd> + <kbd>,</kbd> |
+
+In Perforce workspaces, <kbd>Ctrl</kbd> + <kbd>1</kbd>, <kbd>2</kbd>, and <kbd>3</kbd> open Pending, History, and Workspace. <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F</kbd> runs Get latest.

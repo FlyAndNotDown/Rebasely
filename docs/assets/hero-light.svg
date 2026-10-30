@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="400" viewBox="0 0 1280 400" fill="none" role="img" aria-labelledby="title desc">
+  <title id="title">Rebasely</title>
+  <desc id="desc">A desktop client for Git and Perforce, illustrated with branching revision paths.</desc>
+  <defs>
+    <linearGradient id="surface" x1="0" y1="0" x2="1280" y2="400" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FAFAFB"/>
+      <stop offset="1" stop-color="#F1F3F7"/>
+    </linearGradient>
+    <linearGradient id="fade" x1="580" y1="0" x2="1280" y2="0" gradientUnits="userSpaceOnUse">
+      <stop stop-color="white" stop-opacity="0"/>
+      <stop offset="0.3" stop-color="white"/>
+      <stop offset="0.9" stop-color="white"/>
+      <stop offset="1" stop-color="white" stop-opacity="0"/>
+    </linearGradient>
+    <pattern id="grid" width="28" height="28" patternUnits="userSpaceOnUse">
+      <circle cx="1" cy="1" r="0.8" fill="#A8B0BF" fill-opacity="0.6"/>
+    </pattern>
+    <mask id="graph-mask"><rect x="580" width="700" height="400" fill="url(#fade)"/></mask>
+    <clipPath id="clip"><rect width="1280" height="400" rx="24"/></clipPath>
+  </defs>
+  <g clip-path="url(#clip)">
+    <rect width="1280" height="400" fill="url(#surface)"/>
+    <g mask="url(#graph-mask)">
+      <rect x="580" width="700" height="400" fill="url(#grid)"/>
+      <path d="M588 200H1292" stroke="#3A86FF" stroke-width="3"/>
+      <path d="M740 200C800 200 800 116 860 116H1192M940 116C1000 116 1000 200 1060 200" stroke="#12A57D" stroke-width="3"/>
+      <path d="M820 200C880 200 880 284 940 284H1292" stroke="#845EF7" stroke-width="3"/>
+      <g fill="#F5F6F9" stroke-width="3">
+        <g stroke="#3A86FF"><circle cx="686" cy="200" r="8"/><circle cx="820" cy="200" r="8"/><circle cx="1060" cy="200" r="8"/><circle cx="1192" cy="200" r="8"/></g>
+        <g stroke="#12A57D"><circle cx="860" cy="116" r="8"/><circle cx="940" cy="116" r="8"/><circle cx="1108" cy="116" r="8"/></g>
+        <g stroke="#845EF7"><circle cx="940" cy="284" r="8"/><circle cx="1066" cy="284" r="8"/><circle cx="1192" cy="284" r="8"/></g>
+      </g>
+      <circle cx="1060" cy="200" r="3" fill="#3A86FF"/>
+      <circle cx="940" cy="116" r="3" fill="#12A57D"/>
+    </g>
+    <rect x="80" y="75" width="58" height="58" rx="14" fill="#18181B"/>
+    <g transform="translate(91 86) scale(1.5)" stroke="#F4F4F5" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M15 6a9 9 0 0 0-9 9V3"/>
+      <circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/>
+    </g>
+    <text x="77" y="234" fill="#18181B" font-family="Geist, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="78" font-weight="600" letter-spacing="-4">Rebasely</text>
+    <text x="83" y="285" fill="#636D80" font-family="'Geist Mono', 'SFMono-Regular', Consolas, monospace" font-size="13" font-weight="500" letter-spacing="3.5">GIT + PERFORCE</text>
+    <rect x="0.5" y="0.5" width="1279" height="399" rx="23.5" stroke="#DBDFE7"/>
+  </g>
+</svg>
