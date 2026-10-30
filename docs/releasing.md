@@ -37,6 +37,8 @@ The workflow checks the owner's identity, including the actor who initiates a re
 
 Dependency versions remain locked. Stamping does not commit changes or push to `dev` or `master`. The release tag identifies the reviewed source commit; the explicit workflow input determines the version embedded in its bundles. Before publishing, the workflow checks that `master` still points to that revision and that its native checks remain successful.
 
+Ordinary local `npm run build` uses `createUpdaterArtifacts: false` and does not require the private updater key. Every release matrix entry explicitly overrides this setting to `true`, so release builds require the signing secret and generate signed updater packages. The macOS release entries also apply ad-hoc signing without changing the normal local packaging settings.
+
 ## Release assets and updates
 
 | Platform | Installer | Signed updater package |
@@ -67,6 +69,6 @@ npm run version:set -- v0.0.2
 
 The check is part of `npm run check`. The setter updates all five version files consistently and rejects mismatched inputs or a decrease. Use it on `dev` when intentionally advancing the checked-in source version, and include those changes in the normal reviewed pull request.
 
-To reproduce a release, check out its tag, run `npm run version:set -- vX.Y.Z` with that tag's version, install locked dependencies, and build with the appropriate target and signing environment. This reproduces the version stamping; native toolchains and operating-system signing settings also affect the resulting bytes.
+To reproduce a release, check out its tag, run `npm run version:set -- vX.Y.Z` with that tag's version, install locked dependencies, and use the release workflow's target, bundles, and configuration override with the signing environment. In particular, enable `bundle.createUpdaterArtifacts` for signed update packages. This reproduces the version stamping; native toolchains and operating-system signing settings also affect the resulting bytes.
 
 See the official [Tauri updater documentation](https://v2.tauri.app/plugin/updater/), [Tauri GitHub pipeline guide](https://v2.tauri.app/distribute/pipelines/github/), and [tauri-action inputs](https://github.com/tauri-apps/tauri-action#usage) for signing and packaging details.

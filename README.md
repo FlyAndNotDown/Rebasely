@@ -95,6 +95,8 @@ npm run build
 
 Tauri builds the frontend and Rust backend, then creates the platform's application bundles under `src-tauri/target/release/bundle/`.
 
+Local builds do not require the private updater signing key. The release workflow explicitly enables signed updater artifacts for published packages.
+
 ## Development
 
 ### Checks
