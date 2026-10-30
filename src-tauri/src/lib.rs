@@ -1571,7 +1571,7 @@ pub fn run() {
         .manage(WatchState::default())
         .manage(updater::UpdateManager::default());
     #[cfg(target_os = "macos")]
-    let builder = builder.menu(|app| macos_menu(app));
+    let builder = builder.menu(macos_menu);
     builder
         .on_page_load(|webview, payload| {
             if payload.event() != PageLoadEvent::Finished || payload.url().scheme() == "about" {
