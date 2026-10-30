@@ -42,39 +42,70 @@ describe("release authorization", () => {
 function githubFixture() {
   vi.stubEnv("GITHUB_TRIGGERING_ACTOR", "maintainer");
   const sha = "a".repeat(40);
+  const head = "b".repeat(40);
+  const tree = "c".repeat(40);
   const context = { eventName: "workflow_dispatch", ref: "refs/heads/master", actor: "maintainer", sha, repo: { owner: "maintainer", repo: "sample-app" } };
   const lists = {
     tags: [{ name: "v0.0.1" }],
     releases: [] as { id?: number; tag_name: string }[],
-    runs: [{ id: 7, run_number: 2, head_sha: sha, status: "completed", conclusion: "success" }],
-    jobs: ["Check on ubuntu-24.04", "Check on windows-latest", "Check on macos-latest"].map((name) => ({ name, conclusion: "success" })),
+    pulls: [{
+      number: 42, state: "closed", merged_at: "2026-01-01T00:00:00Z", merge_commit_sha: sha,
+      base: { ref: "master", repo: { full_name: repository } }, head: { sha: head },
+    }],
+    runs: [{
+      id: 7, run_number: 2, head_sha: head, status: "completed", conclusion: "success", event: "pull_request",
+      path: ".github/workflows/check.yml", repository: { full_name: repository },
+      pull_requests: [{ number: 42, head: { sha: head } }],
+    }],
+    jobs: ["Check on ubuntu-24.04", "Check on windows-latest", "Check on macos-latest"].map((name, index) => ({
+      name, status: "completed", conclusion: "success", check_run_url: `https://api.github.com/repos/${repository}/check-runs/${101 + index}`,
+    })),
+    annotations: new Map([101, 102, 103].map((id) => [id, [{ annotation_level: "notice", title: "Rebasely checked source", message: tree }]])),
   };
   const github = {
     rest: {
-      repos: { getBranch: vi.fn(async () => ({ data: { commit: { sha } } })), listTags: vi.fn(), listReleases: vi.fn() },
+      repos: {
+        getBranch: vi.fn(async () => ({ data: { commit: { sha } } })),
+        getCommit: vi.fn(async () => ({ data: { sha, commit: { tree: { sha: tree } } } })),
+        listPullRequestsAssociatedWithCommit: vi.fn(), listTags: vi.fn(), listReleases: vi.fn(),
+      },
       actions: { listWorkflowRuns: vi.fn(), listJobsForWorkflowRun: vi.fn() },
+      checks: { listAnnotations: vi.fn() },
     },
-    paginate: vi.fn(async (method: unknown) => {
+    paginate: vi.fn(async (method: unknown, parameters: { check_run_id?: number } = {}) => {
       if (method === github.rest.repos.listTags) return lists.tags;
       if (method === github.rest.repos.listReleases) return lists.releases;
+      if (method === github.rest.repos.listPullRequestsAssociatedWithCommit) return lists.pulls;
       if (method === github.rest.actions.listWorkflowRuns) return lists.runs;
       if (method === github.rest.actions.listJobsForWorkflowRun) return lists.jobs;
+      if (method === github.rest.checks.listAnnotations) return lists.annotations.get(parameters.check_run_id ?? 0) ?? [];
       throw new Error("Unexpected test API call");
     }),
   };
   const core = { setOutput: vi.fn(), info: vi.fn() };
-  return { github, context, core, lists };
+  return { github, context, core, lists, tree };
 }
 
 describe("release preflight", () => {
-  it("accepts an owner request only after all native checks on the exact revision", async () => {
+  it("uses the merged PR head for checks and requires the exact final master tree", async () => {
     const input = githubFixture();
     await preflight({ ...input, tag: "v1.0.0" });
     expect(input.core.setOutput).toHaveBeenCalledWith("version", "1.0.0");
     expect(input.core.setOutput).toHaveBeenCalledWith("tag", "v1.0.0");
     expect(input.github.paginate).toHaveBeenCalledWith(input.github.rest.actions.listWorkflowRuns, expect.objectContaining({
-      head_sha: input.context.sha, branch: "master", event: "push", workflow_id: "check.yml",
+      head_sha: input.lists.pulls[0].head.sha, event: "pull_request", workflow_id: "check.yml",
     }));
+    expect(input.lists.pulls[0].head.sha).not.toBe(input.context.sha);
+    for (const id of [101, 102, 103]) {
+      expect(input.github.paginate).toHaveBeenCalledWith(input.github.rest.checks.listAnnotations, expect.objectContaining({ check_run_id: id }));
+    }
+  });
+
+  it("ignores mutable PR snapshots after the dev branch is reused", async () => {
+    const input = githubFixture();
+    input.lists.runs[0].pull_requests = [{ number: 99, head: { sha: "d".repeat(40) } }];
+    await expect(preflight({ ...input, tag: "v1.0.0" })).resolves.toBeUndefined();
+    expect(input.core.setOutput).toHaveBeenCalledWith("tag", "v1.0.0");
   });
 
   it("rejects a collaborator rerun before any API calls", async () => {
@@ -91,13 +122,62 @@ describe("release preflight", () => {
     await expect(preflight({ ...advanced, tag: "v1.0.0" })).rejects.toThrow("master advanced");
     const failed = githubFixture();
     failed.lists.runs[0].conclusion = "failure";
-    await expect(preflight({ ...failed, tag: "v1.0.0" })).rejects.toThrow("exact master revision");
+    await expect(preflight({ ...failed, tag: "v1.0.0" })).rejects.toThrow("latest Check workflow must succeed");
     const wrongRevision = githubFixture();
-    wrongRevision.lists.runs[0].head_sha = "b".repeat(40);
-    await expect(preflight({ ...wrongRevision, tag: "v1.0.0" })).rejects.toThrow("exact master revision");
+    wrongRevision.lists.runs[0].head_sha = wrongRevision.context.sha;
+    await expect(preflight({ ...wrongRevision, tag: "v1.0.0" })).rejects.toThrow("latest Check workflow must succeed");
     const missingNative = githubFixture();
     missingNative.lists.jobs.pop();
     await expect(preflight({ ...missingNative, tag: "v1.0.0" })).rejects.toThrow("Required native check");
+  });
+
+  it("does not fall back to an older success after the latest PR run fails", async () => {
+    const input = githubFixture();
+    input.lists.runs.push({ ...input.lists.runs[0], id: 8, run_number: 3, conclusion: "failure" });
+    await expect(preflight({ ...input, tag: "v1.0.0" })).rejects.toThrow("latest Check workflow must succeed");
+    expect(input.core.setOutput).not.toHaveBeenCalled();
+  });
+
+  it("requires the exact merged PR, master base, and repository", async () => {
+    const inputs = [githubFixture(), githubFixture(), githubFixture(), githubFixture(), githubFixture()];
+    inputs[0].lists.pulls[0].base.ref = "dev";
+    inputs[1].lists.pulls[0].base.repo.full_name = "maintainer/other-app";
+    inputs[2].lists.pulls[0].merge_commit_sha = "d".repeat(40);
+    inputs[3].lists.pulls[0].state = "open";
+    inputs[4].lists.pulls = [];
+    for (const input of inputs) {
+      await expect(preflight({ ...input, tag: "v1.0.0" })).rejects.toThrow("merged pull request targeting");
+      expect(input.core.setOutput).not.toHaveBeenCalled();
+    }
+  });
+
+  it("ignores push runs and runs from another workflow or repository", async () => {
+    const inputs = [githubFixture(), githubFixture(), githubFixture()];
+    inputs[0].lists.runs[0].event = "push";
+    inputs[1].lists.runs[0].path = ".github/workflows/other.yml";
+    inputs[2].lists.runs[0].repository.full_name = "maintainer/other-app";
+    for (const input of inputs) {
+      await expect(preflight({ ...input, tag: "v1.0.0" })).rejects.toThrow("latest Check workflow must succeed");
+    }
+  });
+
+  it("rejects missing, duplicate, wrong-level, or stale source tree annotations", async () => {
+    const inputs = [githubFixture(), githubFixture(), githubFixture(), githubFixture()];
+    inputs[0].lists.annotations.set(101, []);
+    const duplicate = { annotation_level: "notice", title: "Rebasely checked source", message: inputs[1].tree };
+    inputs[1].lists.annotations.set(102, [duplicate, duplicate]);
+    inputs[2].lists.annotations.set(103, [{ annotation_level: "warning", title: "Rebasely checked source", message: inputs[2].tree }]);
+    inputs[3].lists.annotations.set(101, [{ annotation_level: "notice", title: "Rebasely checked source", message: "d".repeat(40) }]);
+    for (const input of inputs) {
+      await expect(preflight({ ...input, tag: "v1.0.0" })).rejects.toThrow("does not prove the current master source tree");
+      expect(input.core.setOutput).not.toHaveBeenCalled();
+    }
+  });
+
+  it("refuses an annotation reference outside the current repository", async () => {
+    const input = githubFixture();
+    input.lists.jobs[0].check_run_url = "https://api.github.com/repos/maintainer/other-app/check-runs/101";
+    await expect(preflight({ ...input, tag: "v1.0.0" })).rejects.toThrow("Invalid check-run reference");
   });
 
   it("rejects existing tags and reserved drafts without producing release outputs", async () => {
@@ -131,7 +211,7 @@ function publishFixture() {
   const github = {
     ...input.github,
     rest: { ...input.github.rest, repos, git },
-    paginate: vi.fn(async (method: unknown) => method === repos.listReleaseAssets ? [] : input.github.paginate(method)),
+    paginate: vi.fn(async (method: unknown, parameters: { check_run_id?: number } = {}) => method === repos.listReleaseAssets ? [] : input.github.paginate(method, parameters)),
   };
   return { ...input, github, release, tag, releaseId: "99" };
 }

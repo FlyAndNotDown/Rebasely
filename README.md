@@ -114,11 +114,11 @@ npm run check:all
 | `npm run check:version` | Matching application versions in frontend, Tauri, and Cargo files |
 | `npm run vite:build` | Frontend typecheck and production build |
 
-The [GitHub check workflow](.github/workflows/check.yml) runs the frontend build and both check suites on Windows, macOS, and Linux.
+The [GitHub check workflow](.github/workflows/check.yml) runs the frontend build and both check suites on Windows, macOS, and Linux when a pull request targeting `master` is opened, updated, or reopened. Ordinary branch pushes do not run it; updates pushed to an open pull request rerun checks through its `synchronize` event.
 
 ### Branches and releases
 
-Develop on `dev` or a topic branch based on it, and update `master` through a reviewed pull request. Only the repository owner can publish through the manual [Release workflow](.github/workflows/release.yml), selecting `master` and entering an explicit `vX.Y.Z` version. Publishing waits for successful native checks and all four signed updater builds. Pushes, merges, and tags do not publish automatically.
+Develop on `dev` or a topic branch based on it, and update `master` through a reviewed pull request. Only the repository owner can publish through the manual [Release workflow](.github/workflows/release.yml), selecting `master` and entering an explicit `vX.Y.Z` version. Publishing requires successful native checks proving that the merged source matches the tested pull request, plus all four signed updater builds. Pushes, merges, and tags do not publish automatically.
 
 See [the release guide](docs/releasing.md) for signing secrets, version rules, download packages, and recovery from failed builds.
 

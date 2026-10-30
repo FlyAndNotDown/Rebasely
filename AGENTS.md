@@ -35,6 +35,8 @@ Run the checks for the code you change. For a change across the command boundary
 
 The GitHub workflow checks Windows, macOS, and Linux natively. A successful Windows check does not establish that the other platforms work; distinguish local results from pending CI results.
 
+The Check workflow runs only when a pull request targeting `master` is opened, updated, or reopened. Do not add push, schedule, or manual triggers to Check. Ordinary branch pushes and merges must not start it. Preserve each successful native job's checked-source tree notice; owner-triggered releases use these notices to verify the merged source without repeating checks after a merge.
+
 ## Dependency selection
 
 - A newly selected direct Rust component must have at least 500 GitHub stars on its source repository when adopted. Verify the primary repository, maintenance status, license, platform support, and API fit before adding it; a download count is not a substitute for the star requirement.

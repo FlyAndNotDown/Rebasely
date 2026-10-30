@@ -24,21 +24,63 @@ async function assertCheckedRevision(github, context) {
   const { owner, repo } = context.repo;
   const { data: master } = await github.rest.repos.getBranch({ owner, repo, branch: "master" });
   if (master.commit.sha !== context.sha) throw new Error("master advanced; dispatch a new release from its current revision.");
+  const [{ data: commit }, pulls] = await Promise.all([
+    github.rest.repos.getCommit({ owner, repo, ref: context.sha }),
+    github.paginate(github.rest.repos.listPullRequestsAssociatedWithCommit, { owner, repo, commit_sha: context.sha, per_page: 100 }),
+  ]);
+  const tree = commit.commit?.tree?.sha;
+  if (commit.sha !== context.sha || !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(tree ?? "")) {
+    throw new Error("Could not determine the current master source tree.");
+  }
+  const repository = `${owner}/${repo}`.toLowerCase();
+  const pull = pulls.filter((value) => value.state === "closed" && value.merged_at
+    && value.merge_commit_sha === context.sha && value.base?.ref === "master"
+    && value.base?.repo?.full_name?.toLowerCase() === repository && value.head?.sha)
+    .sort((a, b) => Date.parse(b.merged_at) - Date.parse(a.merged_at) || b.number - a.number)[0];
+  if (!pull) throw new Error("Current master must come from a merged pull request targeting this repository's master branch.");
   const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
-    owner, repo, workflow_id: "check.yml", branch: "master", event: "push", head_sha: context.sha, per_page: 100,
+    owner, repo, workflow_id: "check.yml", event: "pull_request", head_sha: pull.head.sha, per_page: 100,
   });
-  const latest = runs.sort((a, b) => b.run_number - a.run_number)[0];
-  if (!latest || latest.head_sha !== context.sha || latest.status !== "completed" || latest.conclusion !== "success") {
-    throw new Error("Wait for the Check workflow to succeed on this exact master revision before releasing.");
+  // GitHub can update run.pull_requests snapshots when a source branch is reused.
+  // The immutable run head and the recorded checkout tree identify the tested source.
+  const latest = runs.filter((run) => run.event === "pull_request" && run.head_sha === pull.head.sha
+    && run.path === ".github/workflows/check.yml" && run.repository?.full_name?.toLowerCase() === repository)
+    .sort((a, b) => b.run_number - a.run_number)[0];
+  if (!latest || latest.status !== "completed" || latest.conclusion !== "success") {
+    throw new Error("The merged pull request's latest Check workflow must succeed before releasing.");
   }
   const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
     owner, repo, run_id: latest.id, filter: "latest", per_page: 100,
   });
+  const native = [];
   for (const name of ["Check on ubuntu-24.04", "Check on windows-latest", "Check on macos-latest"]) {
-    if (!jobs.some((job) => job.name === name && job.conclusion === "success")) {
+    const matches = jobs.filter((job) => job.name === name);
+    if (matches.length !== 1 || matches[0].status !== "completed" || matches[0].conclusion !== "success") {
       throw new Error(`Required native check did not succeed: ${name}.`);
     }
+    native.push(matches[0]);
   }
+  await Promise.all(native.map(async (job) => {
+    const prefix = new URL(`/repos/${owner}/${repo}/check-runs/`, context.apiUrl ?? "https://api.github.com");
+    let checkRun;
+    try {
+      checkRun = new URL(job.check_run_url);
+    } catch {
+      throw new Error(`Invalid check-run reference for ${job.name}.`);
+    }
+    const id = checkRun.pathname.slice(prefix.pathname.length);
+    if (checkRun.origin !== prefix.origin || !checkRun.pathname.toLowerCase().startsWith(prefix.pathname.toLowerCase())
+      || checkRun.search || checkRun.hash || !/^\d+$/.test(id) || !Number.isSafeInteger(Number(id))) {
+      throw new Error(`Invalid check-run reference for ${job.name}.`);
+    }
+    const annotations = await github.paginate(github.rest.checks.listAnnotations, {
+      owner, repo, check_run_id: Number(id), per_page: 100,
+    });
+    const notices = annotations.filter((annotation) => annotation.title === "Rebasely checked source");
+    if (notices.length !== 1 || notices[0].annotation_level !== "notice" || notices[0].message !== tree) {
+      throw new Error(`Native check does not prove the current master source tree: ${job.name}. Update the pull request against master and rerun its checks.`);
+    }
+  }));
 }
 
 export async function preflight({ github, context, core, tag }) {
