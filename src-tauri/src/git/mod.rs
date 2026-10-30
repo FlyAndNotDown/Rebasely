@@ -258,7 +258,9 @@ pub struct StashInfo {
 }
 
 pub fn strip_verbatim_prefix(path: &str) -> String {
-    let path = path.trim();
+    if !cfg!(windows) {
+        return path.to_string();
+    }
     if let Some(rest) = path.strip_prefix(r"\\?\UNC\") {
         format!(r"\\{rest}")
     } else if let Some(rest) = path.strip_prefix(r"\\?\") {
@@ -273,7 +275,12 @@ fn strip_verbatim_path(path: PathBuf) -> PathBuf {
 }
 
 fn to_git_path(path: &str) -> String {
-    path.replace('\\', "/").trim_matches('/').to_string()
+    let path = if cfg!(windows) {
+        path.replace('\\', "/")
+    } else {
+        path.to_string()
+    };
+    path.trim_matches('/').to_string()
 }
 
 fn looks_binary_path(path: &str) -> bool {
@@ -332,17 +339,30 @@ fn workdir_owned(repo: &Repository) -> AppResult<PathBuf> {
 
 fn ensure_inside_workdir(repo: &Repository, relative: &str) -> AppResult<PathBuf> {
     let root = workdir_owned(repo)?.canonicalize()?;
+    let relative = safe_repo_path(relative)?;
     let candidate = root.join(relative.replace('/', std::path::MAIN_SEPARATOR_STR));
-    if let Ok(canonical) = candidate.canonicalize() {
-        if !canonical.starts_with(&root) {
-            return Err(AppError::msg("Path is outside the repository"));
+    let mut ancestor = candidate.as_path();
+    loop {
+        match fs::symlink_metadata(ancestor) {
+            Ok(_) => {
+                let canonical = ancestor.canonicalize()?;
+                if !canonical.starts_with(&root) {
+                    return Err(AppError::msg("Path is outside the repository"));
+                }
+                return Ok(if ancestor == candidate {
+                    canonical
+                } else {
+                    candidate
+                });
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                ancestor = ancestor
+                    .parent()
+                    .ok_or_else(|| AppError::msg("Path is outside the repository"))?;
+            }
+            Err(error) => return Err(error.into()),
         }
-        return Ok(canonical);
     }
-    if !candidate.starts_with(&root) {
-        return Err(AppError::msg("Path is outside the repository"));
-    }
-    Ok(candidate)
 }
 
 pub fn canonical_workdir(repo: &Repository) -> AppResult<PathBuf> {
@@ -351,7 +371,11 @@ pub fn canonical_workdir(repo: &Repository) -> AppResult<PathBuf> {
 }
 
 fn safe_repo_path(path: &str) -> AppResult<String> {
-    let path = path.trim().replace('\\', "/");
+    let path = if cfg!(windows) {
+        path.replace('\\', "/")
+    } else {
+        path.to_string()
+    };
     let path = path.trim_matches('/');
     if path.is_empty() {
         return Ok(String::new());
@@ -370,106 +394,32 @@ fn short_id(id: &str) -> String {
 }
 
 pub fn open_in_file_manager(path: &str) -> AppResult<()> {
-    let path = strip_verbatim_prefix(path);
-    let command = if cfg!(windows) {
-        let mut command = crate::locate::command("explorer");
-        command.arg(&path);
-        command
-    } else if cfg!(target_os = "macos") {
-        let mut command = crate::locate::command("open");
-        command.arg(&path);
-        command
-    } else {
-        let mut command = crate::locate::command("xdg-open");
-        command.arg(&path);
-        command
-    };
-    spawn_folder(command)
+    crate::platform::open_path(Path::new(&strip_verbatim_prefix(path)))
 }
 
-/// Opens the file manager with `path` selected.
+/// Opens the file manager with the final path entry selected.
 pub fn reveal_in_file_manager(path: &str) -> AppResult<()> {
-    let path = strip_verbatim_prefix(path);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        let mut command = crate::locate::command("explorer");
-        // Explorer parses its own arguments and needs the quotes after the comma.
-        command.raw_arg(format!("/select,\"{}\"", path.replace('/', "\\")));
-        spawn_folder(command)
-    }
-    #[cfg(target_os = "macos")]
-    {
-        let mut command = crate::locate::command("open");
-        command.arg("-R").arg(&path);
-        spawn_folder(command)
-    }
-    #[cfg(not(any(windows, target_os = "macos")))]
-    reveal_linux(&path)
-}
-
-fn spawn_folder(mut command: Command) -> AppResult<()> {
-    command
-        .spawn()
-        .map_err(|err| AppError::msg(format!("Could not open folder: {err}")))?;
-    Ok(())
-}
-
-/// `file:///home/me/My%20File.txt`. Commas and spaces are encoded so `dbus-send`
-/// keeps the URI as one argument.
-#[cfg(any(test, not(any(windows, target_os = "macos"))))]
-fn file_uri(path: &str) -> String {
-    let mut out = String::from("file://");
-    for byte in path.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'/' => {
-                out.push(byte as char);
-            }
-            _ => {
-                const HEX: &[u8; 16] = b"0123456789ABCDEF";
-                out.push('%');
-                out.push(HEX[(byte >> 4) as usize] as char);
-                out.push(HEX[(byte & 0x0f) as usize] as char);
-            }
-        }
-    }
-    out
-}
-
-#[cfg(not(any(windows, target_os = "macos")))]
-fn reveal_linux(path: &str) -> AppResult<()> {
-    let uri = file_uri(path);
-    let shown = crate::locate::command("dbus-send")
-        .args([
-            "--session",
-            "--dest=org.freedesktop.FileManager1",
-            "--type=method_call",
-            "/org/freedesktop/FileManager1",
-            "org.freedesktop.FileManager1.ShowItems",
-            &format!("array:string:{uri}"),
-            "string:",
-        ])
-        .status()
-        .is_ok_and(|status| status.success());
-    if shown {
-        return Ok(());
-    }
-    let parent = Path::new(path).parent().unwrap_or(Path::new(path));
-    let mut command = crate::locate::command("xdg-open");
-    command.arg(parent);
-    spawn_folder(command)
+    crate::platform::reveal_path(Path::new(&strip_verbatim_prefix(path)))
 }
 
 #[cfg(test)]
-mod file_uri_tests {
-    use super::file_uri;
+mod native_path_tests {
+    use super::*;
 
     #[test]
-    fn encodes_spaces_and_commas() {
-        assert_eq!(
-            file_uri("/home/me/My File.txt"),
-            "file:///home/me/My%20File.txt"
-        );
-        assert_eq!(file_uri("/home/me/a,b.txt"), "file:///home/me/a%2Cb.txt");
+    fn preserves_spaces_in_repository_file_names() {
+        let name = " leading and trailing spaces ";
+        assert_eq!(safe_repo_path(name).unwrap(), name);
+        assert_eq!(to_git_path(name), name);
+        assert_eq!(strip_verbatim_prefix(name), name);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn preserves_backslashes_in_posix_file_names() {
+        let name = r"folder/with\backslash.txt";
+        assert_eq!(safe_repo_path(name).unwrap(), name);
+        assert_eq!(to_git_path(name), name);
+        assert_eq!(strip_verbatim_prefix(r"\\?\literal"), r"\\?\literal");
     }
 }

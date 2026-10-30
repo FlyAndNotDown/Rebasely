@@ -5,7 +5,7 @@
 //! installed under the home directory or by Snap are easy to miss.
 
 use std::ffi::{OsStr, OsString};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
 
@@ -40,26 +40,46 @@ pub(crate) fn child_path() -> Option<OsString> {
 }
 
 pub(crate) fn which(name: &str) -> Option<PathBuf> {
-    let mut names = vec![name.to_string()];
-    let pathext = if name.contains('.') {
-        None
-    } else {
+    let pathext = if cfg!(windows) && !name.contains('.') {
         std::env::var("PATHEXT").ok()
+    } else {
+        None
     };
+    find_in(&search_path().dirs, name, pathext.as_deref())
+}
+
+fn find_in(dirs: &[PathBuf], name: &str, pathext: Option<&str>) -> Option<PathBuf> {
+    let mut names = vec![name.to_string()];
     if let Some(pathext) = pathext {
         for ext in pathext.split(';').filter(|ext| !ext.is_empty()) {
             names.push(format!("{name}{ext}"));
         }
     }
-    for dir in &search_path().dirs {
+    for dir in dirs {
         for candidate_name in &names {
             let candidate = dir.join(candidate_name);
-            if candidate.is_file() {
+            if is_executable(&candidate) {
                 return Some(on_disk_name(candidate));
             }
         }
     }
     None
+}
+
+pub(crate) fn is_executable(path: &Path) -> bool {
+    let Ok(metadata) = std::fs::metadata(path) else {
+        return false;
+    };
+    if !metadata.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        metadata.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    true
 }
 
 /// Quotes one shell word, for `sh -c` and for Git tool commands.
@@ -71,7 +91,7 @@ pub(crate) fn quote_shell(text: &str) -> String {
 pub(crate) fn expand_path(template: &str) -> Option<PathBuf> {
     if let Some(rest) = template.strip_prefix("~/") {
         let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))?;
-        return expand_env(&PathBuf::from(home).join(rest).to_string_lossy());
+        return Some(PathBuf::from(home).join(expand_env(rest)?));
     }
     expand_env(template)
 }
@@ -93,21 +113,26 @@ pub(crate) fn expand_env(template: &str) -> Option<PathBuf> {
 /// Windows treats `git.EXE` and `git.exe` as the same file, and `PATHEXT` is
 /// uppercase, so the probe path is not the name stored on disk.
 pub(crate) fn on_disk_name(candidate: PathBuf) -> PathBuf {
-    let Some(wanted) = candidate.file_name() else {
-        return candidate;
-    };
-    let Some(dir) = candidate.parent() else {
-        return candidate;
-    };
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return candidate;
-    };
-    for entry in entries.flatten() {
-        if entry.file_name().eq_ignore_ascii_case(wanted) {
-            return dir.join(entry.file_name());
+    #[cfg(not(windows))]
+    return candidate;
+    #[cfg(windows)]
+    {
+        let Some(wanted) = candidate.file_name() else {
+            return candidate;
+        };
+        let Some(dir) = candidate.parent() else {
+            return candidate;
+        };
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return candidate;
+        };
+        for entry in entries.flatten() {
+            if entry.file_name().eq_ignore_ascii_case(wanted) {
+                return dir.join(entry.file_name());
+            }
         }
+        candidate
     }
-    candidate
 }
 
 fn search_path() -> &'static SearchPath {
@@ -188,12 +213,13 @@ fn login_shell_path() -> Option<OsString> {
         "/bin/zsh".to_string()
     };
     let mut command = Command::new(shell);
+    crate::platform::configure_background(&mut command);
     command.args(["-lc", "printf '%s\\n' \"$PATH\""]);
     command.stdin(Stdio::null());
     command.stdout(Stdio::piped());
     command.stderr(Stdio::null());
     command.env("TERM", "dumb");
-    let mut child = command.spawn().ok()?;
+    let child = command.spawn().ok()?;
     let pid = child.id();
     let (sender, receiver) = mpsc::channel();
     std::thread::spawn(move || {
@@ -202,11 +228,7 @@ fn login_shell_path() -> Option<OsString> {
     let output = match receiver.recv_timeout(Duration::from_secs(2)) {
         Ok(Ok(output)) => output,
         _ => {
-            let _ = Command::new("kill")
-                .args(["-9", &pid.to_string()])
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status();
+            crate::platform::kill_process_tree(pid);
             return None;
         }
     };
@@ -223,7 +245,9 @@ fn login_shell_path() -> Option<OsString> {
 
 #[cfg(test)]
 mod tests {
-    use super::quote_shell;
+    use super::{find_in, is_executable, quote_shell};
+    use std::fs;
+    use std::path::PathBuf;
 
     #[test]
     fn quotes_a_shell_word() {
@@ -233,5 +257,43 @@ mod tests {
             quote_shell("/tmp/o'brien/script"),
             "'/tmp/o'\\''brien/script'"
         );
+    }
+
+    #[test]
+    fn searches_files_with_platform_executable_rules() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root =
+            std::env::temp_dir().join(format!("rebasely-locate-{}-{unique}", std::process::id()));
+        let first = root.join("first");
+        let second = root.join("second");
+        fs::create_dir_all(&first).unwrap();
+        fs::create_dir_all(&second).unwrap();
+        let name = if cfg!(windows) { "tool.EXE" } else { "tool" };
+        let candidate = second.join(name);
+        fs::write(first.join(name), "not executable").unwrap();
+        fs::write(&candidate, "executable").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(first.join(name), fs::Permissions::from_mode(0o600)).unwrap();
+            fs::set_permissions(&candidate, fs::Permissions::from_mode(0o700)).unwrap();
+            assert!(!is_executable(&first.join(name)));
+            assert_eq!(
+                find_in(&[first.clone(), second.clone()], "tool", None),
+                Some(candidate.clone())
+            );
+        }
+        #[cfg(windows)]
+        assert_eq!(
+            find_in(std::slice::from_ref(&second), "tool", Some(".EXE;.CMD")),
+            Some(candidate.clone())
+        );
+        assert!(is_executable(&candidate));
+        assert!(!is_executable(&root));
+        assert_eq!(find_in(&[PathBuf::from(&root)], "missing", None), None);
+        fs::remove_dir_all(root).unwrap();
     }
 }

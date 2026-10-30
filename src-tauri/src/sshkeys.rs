@@ -6,10 +6,10 @@
 //! copied private key private. Private key bytes are never parsed or returned.
 
 use std::ffi::OsString;
-use std::fs::{self, File};
-use std::io::Read;
+use std::fs::{self, File, OpenOptions};
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
+use std::process::{Output, Stdio};
 use std::time::Duration;
 
 use serde::Serialize;
@@ -133,12 +133,18 @@ fn generate_at(
     let comment = comment.trim();
     validate_new_name(name)?;
     validate_line(comment, "The comment")?;
-    validate_line(passphrase, "The passphrase")?;
+    validate_passphrase(passphrase)?;
     let path = child_path(dir, name)?;
-    if path.exists() || public_path(&path).exists() {
+    if fs::symlink_metadata(&path).is_ok() || fs::symlink_metadata(public_path(&path)).is_ok() {
         return Err(AppError::msg(format!("A key named {name} already exists.")));
     }
     let keygen = require_keygen()?;
+    let temporary = tempfile::Builder::new()
+        .prefix(".rebasely-key-")
+        .tempdir_in(dir)?;
+    #[cfg(windows)]
+    restrict_windows_key(temporary.path())?;
+    let temporary_key = temporary.path().join(name);
     let mut args = vec![
         OsString::from("-q"),
         OsString::from("-t"),
@@ -149,52 +155,68 @@ fn generate_at(
         args.push(OsString::from("4096"));
     }
     args.push(OsString::from("-f"));
-    args.push(path.as_os_str().to_owned());
-    args.push(OsString::from("-N"));
-    args.push(OsString::from(passphrase));
+    args.push(temporary_key.as_os_str().to_owned());
+    if passphrase.is_empty() {
+        args.push(OsString::from("-N"));
+        args.push(OsString::from(""));
+    }
     if !comment.is_empty() {
         args.push(OsString::from("-C"));
         args.push(OsString::from(comment));
     }
-    let output = run_keygen(&keygen, &args)?;
+    let output = run_keygen_with_passphrase(
+        &keygen,
+        &args,
+        (!passphrase.is_empty()).then_some(passphrase),
+    )?;
     if !output.status.success() {
-        let _ = fs::remove_file(&path);
-        let _ = fs::remove_file(public_path(&path));
         return Err(failed_keygen(&output, passphrase));
     }
-    lock_private_key(&path)?;
-    describe_path(&path)
+    import_at(dir, &temporary_key, passphrase)
 }
 
 fn import_at(dir: &Path, source: &Path, passphrase: &str) -> AppResult<SshKeyInfo> {
-    validate_line(passphrase, "The passphrase")?;
+    validate_passphrase(passphrase)?;
     let name = file_name_of(source)?;
     let dest = child_path(dir, &name)?;
     let already = same_file(source, &dest);
-    if !already && (dest.exists() || public_path(&dest).exists()) {
+    if !already
+        && (fs::symlink_metadata(&dest).is_ok() || fs::symlink_metadata(public_path(&dest)).is_ok())
+    {
         return Err(AppError::msg(format!("A key named {name} already exists.")));
     }
     if !already {
-        fs::copy(source, &dest)?;
+        let mut temporary = tempfile::NamedTempFile::new_in(dir)?;
+        lock_private_key(temporary.path())?;
+        std::io::copy(&mut File::open(source)?, temporary.as_file_mut())?;
+        temporary.as_file().sync_all()?;
+        temporary
+            .persist_noclobber(&dest)
+            .map_err(|error| error.error)?;
+    } else {
+        lock_private_key(&dest)?;
     }
-    match finish_import(&dest, source, passphrase) {
-        Ok(info) => {
-            if !already {
-                lock_private_key(&dest)?;
-            }
-            Ok(info)
-        }
+    let mut created_public = false;
+    match finish_import(&dest, source, passphrase, &mut created_public) {
+        Ok(info) => Ok(info),
         Err(error) => {
             if !already {
                 let _ = fs::remove_file(&dest);
-                let _ = fs::remove_file(public_path(&dest));
+                if created_public {
+                    let _ = fs::remove_file(public_path(&dest));
+                }
             }
             Err(error)
         }
     }
 }
 
-fn finish_import(dest: &Path, source: &Path, passphrase: &str) -> AppResult<SshKeyInfo> {
+fn finish_import(
+    dest: &Path,
+    source: &Path,
+    passphrase: &str,
+    created_public: &mut bool,
+) -> AppResult<SshKeyInfo> {
     let pub_dest = public_path(dest);
     if read_public_text(&pub_dest).is_some() {
         return describe_path(dest);
@@ -203,6 +225,7 @@ fn finish_import(dest: &Path, source: &Path, passphrase: &str) -> AppResult<SshK
     if sibling != pub_dest {
         if let Some(line) = read_public_text(&sibling) {
             write_public(&pub_dest, &line)?;
+            *created_public = true;
             return describe_path(dest);
         }
     }
@@ -221,6 +244,7 @@ fn finish_import(dest: &Path, source: &Path, passphrase: &str) -> AppResult<SshK
         }
     };
     write_public(&pub_dest, &line)?;
+    *created_public = true;
     describe_path(dest)
 }
 
@@ -330,19 +354,22 @@ fn describe_path(path: &Path) -> AppResult<SshKeyInfo> {
     })
 }
 
-/// `ssh-keygen -y` prints the public key. `-P` supplies the passphrase so it
-/// does not open a prompt. An empty passphrase distinguishes "protected" from
-/// "not a key".
+/// `ssh-keygen -y` prints the public key. Empty passphrases use `-P ""` to
+/// detect protected keys; nonempty values travel through the private askpass
+/// endpoint rather than process arguments or environment variables.
 fn reveal_public(keygen: &Path, private_key: &Path, passphrase: &str) -> Revealed {
-    let Ok(output) = run_keygen(
+    let mut args = vec![
+        OsString::from("-y"),
+        OsString::from("-f"),
+        private_key.as_os_str().to_owned(),
+    ];
+    if passphrase.is_empty() {
+        args.extend([OsString::from("-P"), OsString::from("")]);
+    }
+    let Ok(output) = run_keygen_with_passphrase(
         keygen,
-        &[
-            OsString::from("-y"),
-            OsString::from("-f"),
-            private_key.as_os_str().to_owned(),
-            OsString::from("-P"),
-            OsString::from(passphrase),
-        ],
+        &args,
+        (!passphrase.is_empty()).then_some(passphrase),
     ) else {
         return Revealed::Unknown;
     };
@@ -562,6 +589,15 @@ fn validate_line(value: &str, label: &str) -> AppResult<()> {
     Ok(())
 }
 
+fn validate_passphrase(value: &str) -> AppResult<()> {
+    validate_line(value, "The passphrase")?;
+    // OpenSSH's askpass reader reserves one byte in its 1024-byte buffer for NUL.
+    if value.len() > 1023 {
+        return Err(AppError::msg("The passphrase is too long."));
+    }
+    Ok(())
+}
+
 fn is_listed_private_name(name: &str) -> bool {
     !name.starts_with('.')
         && !is_public_name(name)
@@ -647,7 +683,8 @@ fn remove_public(dir: &Path, private_key: &Path) {
 fn write_public(path: &Path, line: &str) -> AppResult<()> {
     let mut text = line.trim().to_string();
     text.push('\n');
-    fs::write(path, text)?;
+    let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
+    file.write_all(text.as_bytes())?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -770,22 +807,31 @@ fn fallback_keygen_paths() -> Vec<PathBuf> {
 }
 
 fn run_keygen(program: &Path, args: &[OsString]) -> AppResult<Output> {
-    let mut command = crate::locate::command(program);
+    run_keygen_with_passphrase(program, args, None)
+}
+
+fn run_keygen_with_passphrase(
+    program: &Path,
+    args: &[OsString],
+    passphrase: Option<&str>,
+) -> AppResult<Output> {
+    let prompt = passphrase
+        .map(crate::askpass::SecretPrompt::new)
+        .transpose()?;
+    let mut command = crate::platform::background_command(program);
     command.args(args);
-    // `-N` and `-P` already carry the passphrase. Clearing askpass keeps an
-    // empty passphrase from opening the app's own prompt.
+    // Do not inherit the Git UI prompt route. A protected key uses its own
+    // operation-owned endpoint, without putting the secret in argv or env.
     command.env("SSH_ASKPASS", "");
     command.env("SSH_ASKPASS_REQUIRE", "never");
     command.env("GIT_ASKPASS", "");
     command.env("DISPLAY", "");
+    if let Some(prompt) = &prompt {
+        command.envs(prompt.environment());
+    }
     command.stdin(Stdio::null());
     command.stdout(Stdio::piped());
     command.stderr(Stdio::piped());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(0x0800_0000);
-    }
     let child = command
         .spawn()
         .map_err(|err| AppError::msg(format!("Could not run ssh-keygen: {err}")))?;
@@ -814,6 +860,11 @@ fn failed_keygen(output: &Output, passphrase: &str) -> AppError {
     let stderr = String::from_utf8_lossy(&output.stderr);
     let stdout = String::from_utf8_lossy(&output.stdout);
     let text = format!("{stderr}\n{stdout}");
+    let text = if passphrase.is_empty() {
+        text
+    } else {
+        text.replace(passphrase, "[redacted]")
+    };
     if text.contains("PRIVATE KEY") || text.len() > 500 {
         return AppError::msg("ssh-keygen failed.");
     }
@@ -838,24 +889,7 @@ fn passphrase_rejected(output: &Output) -> bool {
 }
 
 fn kill_pid(pid: u32) {
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        let _ = Command::new("taskkill")
-            .args(["/T", "/F", "/PID", &pid.to_string()])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .creation_flags(0x0800_0000)
-            .status();
-    }
-    #[cfg(not(windows))]
-    {
-        let _ = Command::new("kill")
-            .args(["-9", &pid.to_string()])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
-    }
+    crate::platform::kill_process_tree(pid);
 }
 
 /// OpenSSH refuses a private key when another account can read it. `ssh-keygen`
@@ -868,54 +902,114 @@ fn lock_private_key(path: &Path) -> AppResult<()> {
     }
     #[cfg(windows)]
     {
-        restrict_windows_key(path);
+        restrict_windows_key(path)?;
     }
     Ok(())
 }
 
 #[cfg(windows)]
-fn restrict_windows_key(path: &Path) {
+fn restrict_windows_key(path: &Path) -> AppResult<()> {
     let Some(user) = std::env::var("USERNAME")
         .ok()
         .filter(|user| !user.is_empty() && !user.contains([':', '(', ')']))
     else {
-        return;
+        return Err(AppError::msg(
+            "Could not identify the current account for SSH key permissions.",
+        ));
     };
     let file = path.as_os_str().to_owned();
-    let grant = OsString::from(format!("{user}:(R)"));
-    run_icacls(&[file.clone(), OsString::from("/grant:r"), grant.clone()]);
-    run_icacls(&[file.clone(), OsString::from("/inheritance:r")]);
-    run_icacls(&[file.clone(), OsString::from("/grant:r"), grant]);
-    for group in [
-        "Everyone",
-        "BUILTIN\\Users",
-        "Users",
-        "NT AUTHORITY\\Authenticated Users",
-        "Authenticated Users",
-    ] {
+    let user = std::env::var("USERDOMAIN")
+        .ok()
+        .filter(|domain| !domain.is_empty())
+        .map(|domain| format!("{domain}\\{user}"))
+        .unwrap_or(user);
+    let rights = if path.is_dir() { "(OI)(CI)(F)" } else { "(F)" };
+    let grant = OsString::from(format!("{user}:{rights}"));
+    run_icacls(&[file.clone(), OsString::from("/grant:r"), grant])?;
+    run_icacls(&[file.clone(), OsString::from("/inheritance:r")])?;
+    for group in ["*S-1-1-0", "*S-1-5-32-545", "*S-1-5-11"] {
         run_icacls(&[
             file.clone(),
             OsString::from("/remove"),
             OsString::from(group),
-        ]);
+        ])?;
     }
+    Ok(())
 }
 
 #[cfg(windows)]
-fn run_icacls(args: &[OsString]) {
-    use std::os::windows::process::CommandExt;
-    let _ = Command::new("icacls")
+fn run_icacls(args: &[OsString]) -> AppResult<()> {
+    let status = crate::platform::background_command("icacls")
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .creation_flags(0x0800_0000)
-        .status();
+        .status()?;
+    if !status.success() {
+        return Err(AppError::msg(
+            "Could not restrict access to the private SSH key.",
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn importing_a_key_never_overwrites_existing_private_or_public_files() {
+        let temporary = tempfile::tempdir().unwrap();
+        let source = temporary.path().join("source");
+        let destination = temporary.path().join("destination");
+        fs::create_dir(&source).unwrap();
+        fs::create_dir(&destination).unwrap();
+        let key = source.join("id_example");
+        fs::write(&key, "example key").unwrap();
+        let existing = destination.join("id_example");
+        fs::write(&existing, "keep private contents").unwrap();
+        assert!(import_at(&destination, &key, "").is_err());
+        assert_eq!(
+            fs::read_to_string(&existing).unwrap(),
+            "keep private contents"
+        );
+        fs::remove_file(&existing).unwrap();
+        fs::write(public_path(&existing), "keep public contents").unwrap();
+        assert!(import_at(&destination, &key, "").is_err());
+        assert_eq!(
+            fs::read_to_string(public_path(&existing)).unwrap(),
+            "keep public contents"
+        );
+        assert!(!existing.exists());
+    }
+
+    #[test]
+    fn publishing_a_public_key_never_truncates_an_existing_file() {
+        let temporary = tempfile::tempdir().unwrap();
+        let public = temporary.path().join("id_example.pub");
+        fs::write(&public, "keep existing contents").unwrap();
+        assert!(write_public(&public, "ssh-ed25519 AAAA alice@example.com").is_err());
+        assert_eq!(
+            fs::read_to_string(public).unwrap(),
+            "keep existing contents"
+        );
+    }
+
+    #[test]
+    fn keygen_errors_do_not_return_the_supplied_passphrase() {
+        #[cfg(unix)]
+        use std::os::unix::process::ExitStatusExt;
+        #[cfg(windows)]
+        use std::os::windows::process::ExitStatusExt;
+        let output = Output {
+            status: std::process::ExitStatus::from_raw(1),
+            stdout: Vec::new(),
+            stderr: b"Could not use example-secret for this key".to_vec(),
+        };
+        let message = failed_keygen(&output, "example-secret").to_string();
+        assert!(!message.contains("example-secret"));
+        assert!(message.contains("[redacted]"));
+    }
 
     #[test]
     fn parses_ssh_keygen_list_output() {
@@ -941,6 +1035,8 @@ mod tests {
         assert!(validate_new_name("config").is_err());
         assert!(validate_new_name("known_hosts.old").is_err());
         assert!(is_putty_text("PuTTY-User-Key-File-3: ssh-ed25519\n"));
+        assert!(validate_passphrase(&"x".repeat(1023)).is_ok());
+        assert!(validate_passphrase(&"x".repeat(1024)).is_err());
     }
 
     #[test]
@@ -1018,6 +1114,58 @@ mod tests {
                 .mode();
             assert_eq!(mode & 0o777, 0o600);
         }
+    }
+
+    #[test]
+    fn protected_keys_generate_and_import_through_the_app_askpass_helper() {
+        if find_ssh_keygen().is_none() || crate::askpass::test_helper_executable().is_none() {
+            eprintln!(
+                "Skipping protected-key integration: build the app and install ssh-keygen first."
+            );
+            return;
+        }
+        let temporary = tempfile::tempdir().unwrap();
+        let destination = temporary.path().join("destination");
+        let source = temporary.path().join("source");
+        fs::create_dir(&destination).unwrap();
+        fs::create_dir(&source).unwrap();
+        let passphrase = "example protected passphrase";
+        let generated = generate_at(
+            &destination,
+            "id_protected",
+            "ed25519",
+            "alice@example.com",
+            passphrase,
+        )
+        .unwrap();
+        assert!(generated.encrypted);
+        assert_eq!(generated.algorithm, "ed25519");
+        assert_eq!(generated.comment, "alice@example.com");
+        let private = destination.join("id_protected");
+        let imported_source = source.join("id_imported");
+        fs::copy(&private, &imported_source).unwrap();
+        let imported = import_at(&destination, &imported_source, passphrase).unwrap();
+        assert!(imported.encrypted);
+        assert_eq!(imported.fingerprint, generated.fingerprint);
+        assert_eq!(
+            imported
+                .public_key
+                .split_whitespace()
+                .take(2)
+                .collect::<Vec<_>>(),
+            generated
+                .public_key
+                .split_whitespace()
+                .take(2)
+                .collect::<Vec<_>>()
+        );
+        let rejected_source = source.join("id_rejected");
+        fs::copy(&private, &rejected_source).unwrap();
+        let error =
+            import_at(&destination, &rejected_source, "wrong example passphrase").unwrap_err();
+        assert!(error.to_string().contains("passphrase was not accepted"));
+        assert!(!destination.join("id_rejected").exists());
+        assert!(!destination.join("id_rejected.pub").exists());
     }
 
     struct RemoveDir<'a>(&'a Path);

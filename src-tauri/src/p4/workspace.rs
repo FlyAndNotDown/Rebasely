@@ -860,10 +860,7 @@ fn client_view_roots(spec: &str) -> Vec<String> {
         let Some(root) = mapping_root(depot) else {
             continue;
         };
-        if roots
-            .iter()
-            .any(|item: &String| item.eq_ignore_ascii_case(&root))
-        {
+        if roots.contains(&root) {
             continue;
         }
         roots.push(root);
@@ -1019,8 +1016,8 @@ fn unchanged_opened(env: &P4Env, paths: &[String]) -> BTreeSet<String> {
 }
 
 fn path_is_unchanged(same: &BTreeSet<String>, depot: &str, local: &str) -> bool {
-    let listed = |path: &str| !path.is_empty() && same.contains(&fold_path(path));
-    listed(depot) || listed(local)
+    (!depot.is_empty() && same.contains(depot))
+        || (!local.is_empty() && same.contains(&local_path_key(local)))
 }
 
 fn p4_session_expired(text: &str) -> bool {
@@ -1183,7 +1180,7 @@ fn annotate_paths(connection: &P4Connection, files: &mut [P4DirEntry]) {
             if client_file.is_empty() {
                 continue;
             }
-            let key = fold_path(&client_file);
+            let key = local_path_key(&client_file);
             let depot_path = field(&record, "depotFile");
             if depot_path.starts_with("//") {
                 depot_of.insert(key.clone(), depot_path);
@@ -1197,7 +1194,7 @@ fn annotate_paths(connection: &P4Connection, files: &mut [P4DirEntry]) {
     let edits = edits_in(&known, &depot_of, files);
     let same = unchanged_opened(&env, &edits);
     for file in files {
-        let key = fold_path(&file.path);
+        let key = local_path_key(&file.path);
         let Some((status, detail)) = known.get(&key) else {
             file.status = "local".to_string();
             file.detail = "Not in the depot".to_string();
@@ -1220,7 +1217,7 @@ fn edits_in(
     files
         .iter()
         .filter_map(|file| {
-            let key = fold_path(&file.path);
+            let key = local_path_key(&file.path);
             let (status, _) = known.get(&key)?;
             if status != "edit" {
                 return None;
@@ -1231,9 +1228,20 @@ fn edits_in(
 }
 
 fn fold_path(path: &str) -> String {
-    strip_verbatim_prefix(path)
-        .replace('/', "\\")
-        .to_lowercase()
+    if path.starts_with("//") {
+        path.to_string()
+    } else {
+        local_path_key(path)
+    }
+}
+
+fn local_path_key(path: &str) -> String {
+    let path = strip_verbatim_prefix(path);
+    if cfg!(windows) {
+        path.replace('\\', "/").to_lowercase()
+    } else {
+        path
+    }
 }
 
 fn annotate_pending(connection: &P4Connection, changes: &mut [P4Changelist]) {
@@ -2828,25 +2836,31 @@ pub struct P4Location {
 
 /// Map a workspace or depot path to the other side of the client view.
 pub fn locate(connection: &P4Connection, path: &str) -> AppResult<P4Location> {
-    let spec = path.trim().trim_end_matches(['/', '\\']);
+    let depot_spec = path.trim().starts_with("//");
+    let spec = trim_location_separators(path.trim(), depot_spec);
     if spec.is_empty() || spec == "//" {
         return Err(AppError::msg("Choose a file or folder."));
     }
     let env = env_for(connection);
     let stdout = run_ok(&env, &["-ztag", "where", spec], None)?;
-    let wanted = normalize_location(spec);
+    let wanted = normalize_location(spec, depot_spec);
     let mut fallback = None;
     for record in parse_ztag(&stdout) {
         if record.contains_key("unmap") {
             continue;
         }
-        let depot = mapped_location(&field(&record, "depotFile"));
-        let local = mapped_location(&field(&record, "path"));
+        let depot = mapped_location(&field(&record, "depotFile"), true);
+        let local = mapped_location(&field(&record, "path"), false);
         if depot.is_empty() || local.is_empty() {
             continue;
         }
         let location = P4Location { depot, local };
-        if same_location(&location.depot, &wanted) || same_location(&location.local, &wanted) {
+        let matching_path = if depot_spec {
+            &location.depot
+        } else {
+            &location.local
+        };
+        if normalize_location(matching_path, depot_spec) == wanted {
             return Ok(location);
         }
         if fallback.is_none() {
@@ -2856,20 +2870,36 @@ pub fn locate(connection: &P4Connection, path: &str) -> AppResult<P4Location> {
     fallback.ok_or_else(|| AppError::msg("That path is not in this workspace."))
 }
 
-fn mapped_location(value: &str) -> String {
-    let value = value.trim().trim_end_matches(['/', '\\']);
-    let value = value.strip_suffix("...").unwrap_or(value);
-    value.trim_end_matches(['/', '\\']).to_string()
+fn trim_location_separators(value: &str, depot: bool) -> &str {
+    if cfg!(windows) && !depot {
+        value.trim_end_matches(['/', '\\'])
+    } else {
+        value.trim_end_matches('/')
+    }
 }
 
-fn normalize_location(value: &str) -> String {
-    mapped_location(value)
-        .replace('\\', "/")
-        .to_ascii_lowercase()
+fn mapped_location(value: &str, depot: bool) -> String {
+    let value = trim_location_separators(value.trim(), depot);
+    let value = value
+        .strip_suffix("/...")
+        .or_else(|| {
+            if cfg!(windows) && !depot {
+                value.strip_suffix("\\...")
+            } else {
+                None
+            }
+        })
+        .unwrap_or(value);
+    trim_location_separators(value, depot).to_string()
 }
 
-fn same_location(left: &str, right: &str) -> bool {
-    normalize_location(left) == right || normalize_location(left) == normalize_location(right)
+fn normalize_location(value: &str, depot: bool) -> String {
+    let location = mapped_location(value, depot);
+    if depot {
+        location
+    } else {
+        local_path_key(&location)
+    }
 }
 
 fn where_paths(env: &P4Env, files: &[String]) -> BTreeMap<String, String> {
@@ -3435,6 +3465,7 @@ Revision 39"
     }
 
     #[test]
+    #[cfg(windows)]
     fn a_local_diff_path_matches_the_workspace_file() {
         let mut same = BTreeSet::new();
         same.insert(fold_path(r"C:\work\client\Config\IOS\mobile.ini"));
@@ -3448,6 +3479,49 @@ Revision 39"
             "//depot/main/client/project.json",
             r"C:\work\client\project.json",
         ));
+        assert!(path_is_unchanged(
+            &same,
+            "//depot/main/client/Config/IOS/mobile.ini",
+            "c:/WORK/client/config/ios/mobile.ini",
+        ));
+        assert_eq!(
+            normalize_location(r"C:\work\client\Config\...", false),
+            "c:/work/client/config"
+        );
+    }
+
+    #[test]
+    fn depot_path_identity_preserves_case_on_every_platform() {
+        let mut same = BTreeSet::new();
+        same.insert(fold_path("//depot/main/File.txt"));
+        assert!(path_is_unchanged(&same, "//depot/main/File.txt", ""));
+        assert!(!path_is_unchanged(&same, "//depot/main/file.txt", ""));
+        assert_ne!(
+            normalize_location("//depot/Main/...", true),
+            normalize_location("//depot/main/...", true)
+        );
+        assert_eq!(
+            mapped_location("//depot/main/name...", true),
+            "//depot/main/name..."
+        );
+        assert_eq!(mapped_location("//depot/main/...", true), "//depot/main");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn posix_local_path_identity_preserves_case_and_backslashes() {
+        let local = "/work/client/Config/name\\";
+        let mut same = BTreeSet::new();
+        same.insert(fold_path(local));
+        assert!(path_is_unchanged(&same, "", local));
+        assert!(!path_is_unchanged(&same, "", "/work/client/config/name\\"));
+        assert!(!path_is_unchanged(&same, "", "/work/client/Config/name/"));
+        assert_eq!(normalize_location(local, false), local);
+        assert_eq!(mapped_location(local, false), local);
+        assert_eq!(
+            normalize_location("/work/client/name\\...", false),
+            "/work/client/name\\..."
+        );
     }
 
     #[test]
@@ -3511,6 +3585,15 @@ Description:
         assert_eq!(
             client_view_roots(spec),
             vec!["//depot".to_string(), "//vendor/library".to_string(),]
+        );
+    }
+
+    #[test]
+    fn client_view_roots_keep_distinct_depot_case_and_deduplicate_exact_names() {
+        let spec = "View:\n\t//depot/Main/... //pc/Main/...\n\t//depot/main/... //pc/main/...\n\t//depot/Main/... //pc/copy/...\n";
+        assert_eq!(
+            client_view_roots(spec),
+            vec!["//depot/Main", "//depot/main"]
         );
     }
 

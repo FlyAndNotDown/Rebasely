@@ -5,6 +5,7 @@ mod fsutil;
 mod git;
 mod locate;
 mod p4;
+mod platform;
 mod prefs;
 mod recents;
 mod session;
@@ -934,7 +935,12 @@ async fn open_difftool(
 ) -> AppResult<()> {
     with_repo_async(repo_path, move |repo| {
         git::launch_difftool(repo, &source, move |message| {
-            let _ = app.emit("tool-error", ToolError { message });
+            let _ = app.emit(
+                "tool-error",
+                ToolError {
+                    message: error::redact_credentials(&message),
+                },
+            );
         })
     })
     .await
@@ -1362,11 +1368,13 @@ async fn generate_ssh_key(
     comment: String,
     passphrase: String,
 ) -> AppResult<sshkeys::SshKeyInfo> {
+    let passphrase = zeroize::Zeroizing::new(passphrase);
     blocking(move || sshkeys::generate(&name, &algorithm, &comment, &passphrase)).await
 }
 
 #[tauri::command]
 async fn import_ssh_key(path: String, passphrase: String) -> AppResult<sshkeys::SshKeyInfo> {
+    let passphrase = zeroize::Zeroizing::new(passphrase);
     blocking(move || sshkeys::import(&path, &passphrase)).await
 }
 

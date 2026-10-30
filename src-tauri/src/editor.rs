@@ -1,3 +1,4 @@
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
@@ -149,24 +150,21 @@ pub(crate) use crate::locate::which;
 
 pub(crate) fn editor_program(id: &str) -> Option<String> {
     let editor = EDITORS.iter().find(|editor| editor.id == id)?;
-    if let Some(name) = editor
-        .commands
-        .iter()
-        .copied()
-        .find(|name| which(name).is_some())
-    {
-        return Some(name.to_string());
-    }
-    locate(editor)
-        .map(|path| crate::locate::quote_shell(&path.to_string_lossy().replace('\\', "/")))
-        .or_else(|| editor.commands.first().map(|name| (*name).to_string()))
+    let path = locate(editor)?;
+    let path = path.to_string_lossy();
+    let path = if cfg!(windows) {
+        path.replace('\\', "/")
+    } else {
+        path.into_owned()
+    };
+    Some(crate::locate::quote_shell(&path))
 }
 
 fn first_existing(templates: &[&str]) -> Option<PathBuf> {
     templates
         .iter()
         .filter_map(|template| crate::locate::expand_path(template))
-        .find(|path| path.is_file())
+        .find(|path| crate::locate::is_executable(path))
 }
 
 fn locate(editor: &Editor) -> Option<PathBuf> {
@@ -175,7 +173,12 @@ fn locate(editor: &Editor) -> Option<PathBuf> {
             return Some(path);
         }
     }
-    if let Some(path) = editor.commands.iter().find_map(|command| which(command)) {
+    if let Some(path) = editor
+        .commands
+        .iter()
+        .filter_map(|command| which(command))
+        .find_map(|path| native_editor_program(editor.id, &path))
+    {
         return Some(path);
     }
     let templates: &[&str] = if cfg!(target_os = "macos") {
@@ -186,6 +189,24 @@ fn locate(editor: &Editor) -> Option<PathBuf> {
         editor.linux_paths
     };
     first_existing(templates)
+}
+
+fn native_editor_program(id: &str, path: &Path) -> Option<PathBuf> {
+    if !cfg!(windows)
+        || !path.extension().is_some_and(|extension| {
+            extension.eq_ignore_ascii_case("cmd") || extension.eq_ignore_ascii_case("bat")
+        })
+    {
+        return Some(path.to_path_buf());
+    }
+    let executable = match id {
+        "vscode" => "Code.exe",
+        "vscode-insiders" => "Code - Insiders.exe",
+        "cursor" => "Cursor.exe",
+        _ => return None,
+    };
+    let candidate = path.parent()?.parent()?.join(executable);
+    crate::locate::is_executable(&candidate).then_some(candidate)
 }
 
 pub fn list_editors() -> Vec<EditorOption> {
@@ -211,42 +232,7 @@ pub fn open_mailto(email: &str) -> AppResult<()> {
     if !is_mail_address(email) {
         return Err(AppError::msg("Email address is invalid"));
     }
-    let url = format!("mailto:{email}");
-    #[cfg(windows)]
-    {
-        let file = wide(&url);
-        let operation = wide("open");
-        let code = unsafe {
-            ShellExecuteW(
-                std::ptr::null_mut(),
-                operation.as_ptr(),
-                file.as_ptr(),
-                std::ptr::null(),
-                std::ptr::null(),
-                1,
-            )
-        };
-        if code <= 32 {
-            return Err(AppError::msg("Could not open a mail app"));
-        }
-        Ok(())
-    }
-    #[cfg(not(windows))]
-    {
-        let mut command = if cfg!(target_os = "macos") {
-            let mut command = crate::locate::command("open");
-            command.arg(&url);
-            command
-        } else {
-            let mut command = crate::locate::command("xdg-open");
-            command.arg(&url);
-            command
-        };
-        command
-            .spawn()
-            .map_err(|_| AppError::msg("Could not open a mail app"))?;
-        Ok(())
-    }
+    crate::platform::open_url(&format!("mailto:{email}"))
 }
 
 fn is_mail_address(email: &str) -> bool {
@@ -257,82 +243,30 @@ fn is_mail_address(email: &str) -> bool {
         && domain.contains('.')
         && !domain.starts_with('.')
         && !domain.ends_with('.')
+        && !domain.contains('@')
         && email.bytes().all(|byte| {
             byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'+' | b'-' | b'@')
         })
 }
 
 fn open_with_system(path: &str) -> AppResult<()> {
-    #[cfg(windows)]
-    {
-        // explorer.exe treats a file path as a folder to browse. A file, or a
-        // path written with `/`, makes it open its default location instead of
-        // the file. ShellExecute uses the application registered for the file.
-        let path = path.replace('/', "\\");
-        let file = wide(&path);
-        let operation = wide("open");
-        let code = unsafe {
-            ShellExecuteW(
-                std::ptr::null_mut(),
-                operation.as_ptr(),
-                file.as_ptr(),
-                std::ptr::null(),
-                std::ptr::null(),
-                1,
-            )
-        };
-        if code <= 32 {
-            return Err(AppError::msg(format!("Could not open {path}")));
-        }
-        Ok(())
-    }
-    #[cfg(not(windows))]
-    {
-        let mut command = if cfg!(target_os = "macos") {
-            let mut command = crate::locate::command("open");
-            command.arg(path);
-            command
-        } else {
-            let mut command = crate::locate::command("xdg-open");
-            command.arg(path);
-            command
-        };
-        command
-            .spawn()
-            .map_err(|err| AppError::msg(format!("Could not open {path}: {err}")))?;
-        Ok(())
-    }
-}
-
-#[cfg(windows)]
-fn wide(text: &str) -> Vec<u16> {
-    use std::os::windows::ffi::OsStrExt;
-    std::ffi::OsStr::new(text)
-        .encode_wide()
-        .chain(std::iter::once(0))
-        .collect()
-}
-
-#[cfg(windows)]
-#[link(name = "shell32")]
-unsafe extern "system" {
-    fn ShellExecuteW(
-        hwnd: *mut std::ffi::c_void,
-        operation: *const u16,
-        file: *const u16,
-        parameters: *const u16,
-        directory: *const u16,
-        show: i32,
-    ) -> isize;
+    crate::platform::open_path(Path::new(path))
 }
 
 /// Opens a file (at `line` when given) or a folder in the chosen editor.
 /// "system" (and the old "auto" preference) uses the system default app.
 pub fn open_in_editor(path: &str, line: Option<u32>, editor_id: &str) -> AppResult<()> {
-    let path = strip_verbatim_prefix(path);
-    let target = Path::new(&path);
+    let path = if cfg!(windows) {
+        strip_verbatim_prefix(path)
+    } else {
+        path.to_string()
+    };
+    if path.is_empty() {
+        return Err(AppError::msg("Choose a file or folder to open"));
+    }
+    let target = std::path::absolute(&path)?;
     if !target.exists() {
-        return Err(AppError::msg(format!("{path} does not exist")));
+        return Err(AppError::msg("The file or folder no longer exists"));
     }
     let chosen = match editor_id.trim() {
         "" | "auto" | "system" => None,
@@ -348,44 +282,49 @@ pub fn open_in_editor(path: &str, line: Option<u32>, editor_id: &str) -> AppResu
         }
     };
     let Some((editor, exe)) = chosen else {
-        return open_with_system(&path);
+        return open_with_system(&target.to_string_lossy());
     };
     let line = line.filter(|_| target.is_file());
-    let mut command = crate::locate::command(&exe);
-    match (editor.lines, line) {
-        (LineStyle::Goto, Some(line)) => {
-            command.arg("--goto").arg(format!("{path}:{line}"));
-        }
-        (LineStyle::Suffix, Some(line)) => {
-            command.arg(format!("{path}:{line}"));
-        }
-        (LineStyle::NotepadPlusPlus, Some(line)) => {
-            command.arg(format!("-n{line}")).arg(&path);
-        }
-        (LineStyle::JetBrains, Some(line)) => {
-            command.arg("--line").arg(line.to_string()).arg(&path);
-        }
-        (_, None) => {
-            command.arg(&path);
-        }
-    }
-    #[cfg(windows)]
-    {
-        // Editors found on PATH are often .cmd shims, which would flash a console.
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        command.creation_flags(CREATE_NO_WINDOW);
-    }
-    command
-        .spawn()
+    let mut command = crate::platform::background_command(&exe);
+    command.args(editor_arguments(editor.lines, &target, line));
+    crate::platform::spawn_detached(command)
         .map_err(|err| AppError::msg(format!("Could not start {}: {err}", editor.name)))?;
     Ok(())
 }
 
+fn editor_arguments(style: LineStyle, path: &Path, line: Option<u32>) -> Vec<OsString> {
+    let path = path.as_os_str();
+    match (style, line) {
+        (LineStyle::Goto, Some(line)) => {
+            let mut location = path.to_owned();
+            location.push(format!(":{line}"));
+            vec![OsString::from("--goto"), location]
+        }
+        (LineStyle::Suffix, Some(line)) => {
+            let mut location = path.to_owned();
+            location.push(format!(":{line}"));
+            vec![location]
+        }
+        (LineStyle::NotepadPlusPlus, Some(line)) => {
+            vec![OsString::from(format!("-n{line}")), path.to_owned()]
+        }
+        (LineStyle::JetBrains, Some(line)) => {
+            vec![
+                OsString::from("--line"),
+                OsString::from(line.to_string()),
+                path.to_owned(),
+            ]
+        }
+        (_, None) => vec![path.to_owned()],
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::is_mail_address;
+    use super::{editor_arguments, is_mail_address, open_in_editor, LineStyle};
     use crate::locate::expand_env;
+    use std::ffi::OsString;
+    use std::path::Path;
 
     #[test]
     fn accepts_only_a_plain_email_address() {
@@ -393,7 +332,71 @@ mod tests {
         assert!(!is_mail_address("not an email"));
         assert!(!is_mail_address("mailto:alice@example.com"));
         assert!(!is_mail_address("a@b"));
+        assert!(!is_mail_address("alice@@example.com"));
         assert!(!is_mail_address(""));
+    }
+
+    #[test]
+    fn editor_arguments_keep_paths_literal_for_every_line_style() {
+        let path = Path::new("/work/client/file 'with' $literal.txt");
+        let expected = |items: &[&str]| {
+            items
+                .iter()
+                .map(|item| OsString::from(*item))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            editor_arguments(LineStyle::Goto, path, Some(42)),
+            expected(&["--goto", "/work/client/file 'with' $literal.txt:42"])
+        );
+        assert_eq!(
+            editor_arguments(LineStyle::Suffix, path, Some(42)),
+            expected(&["/work/client/file 'with' $literal.txt:42"])
+        );
+        assert_eq!(
+            editor_arguments(LineStyle::NotepadPlusPlus, path, Some(42)),
+            expected(&["-n42", "/work/client/file 'with' $literal.txt"])
+        );
+        assert_eq!(
+            editor_arguments(LineStyle::JetBrains, path, Some(42)),
+            expected(&["--line", "42", "/work/client/file 'with' $literal.txt"])
+        );
+        for style in [
+            LineStyle::Goto,
+            LineStyle::Suffix,
+            LineStyle::NotepadPlusPlus,
+            LineStyle::JetBrains,
+        ] {
+            assert_eq!(
+                editor_arguments(style, path, None),
+                vec![path.as_os_str().to_owned()]
+            );
+        }
+    }
+
+    #[test]
+    fn an_empty_editor_target_does_not_open_the_current_directory() {
+        assert!(open_in_editor("", None, "system").is_err());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_editor_shims_resolve_to_the_native_executable() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root =
+            std::env::temp_dir().join(format!("rebasely-editor-{}-{unique}", std::process::id()));
+        let bin = root.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let shim = bin.join("code.cmd");
+        std::fs::write(&shim, "@echo off\n").unwrap();
+        assert!(super::native_editor_program("vscode", &shim).is_none());
+        let native = root.join("Code.exe");
+        std::fs::write(&native, "test executable").unwrap();
+        assert_eq!(super::native_editor_program("vscode", &shim), Some(native));
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

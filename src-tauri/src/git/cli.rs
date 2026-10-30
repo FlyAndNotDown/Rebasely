@@ -1,8 +1,12 @@
 use super::*;
 
 use std::cell::RefCell;
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::SystemTime;
+
+const MAX_DIAGNOSTIC_BYTES: usize = 64 * 1024;
+const MAX_PROGRESS_LINES: usize = 8;
 
 fn cancel_tokens() -> &'static Mutex<HashMap<String, Arc<AtomicBool>>> {
     static TOKENS: OnceLock<Mutex<HashMap<String, Arc<AtomicBool>>>> = OnceLock::new();
@@ -84,32 +88,8 @@ fn current_cancel() -> Option<(String, Arc<AtomicBool>)> {
 /// same is true of `ssh` and `git-remote-https`, so the child is started in
 /// its own process group and the whole group is killed.
 fn kill_tree(child: &mut std::process::Child) {
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        let killed = Command::new("taskkill")
-            .args(["/T", "/F", "/PID", &child.id().to_string()])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .creation_flags(CREATE_NO_WINDOW)
-            .status()
-            .is_ok_and(|status| status.success());
-        if killed {
-            return;
-        }
-    }
-    #[cfg(unix)]
-    {
-        unsafe extern "C" {
-            fn kill(pid: i32, sig: i32) -> i32;
-        }
-        let pid = child.id();
-        if pid > 0 {
-            unsafe {
-                kill(-(pid as i32), 9);
-            }
-        }
+    if crate::platform::kill_process_tree(child.id()) {
+        return;
     }
     let _ = child.kill();
 }
@@ -120,34 +100,7 @@ pub(super) fn stop_child(child: &mut std::process::Child) {
 }
 
 pub(super) fn git_command(program: impl AsRef<std::ffi::OsStr>) -> Command {
-    let mut command = crate::locate::command(program);
-    #[cfg(unix)]
-    isolate_process_group(&mut command);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        command.creation_flags(CREATE_NO_WINDOW);
-    }
-    command
-}
-
-#[cfg(unix)]
-fn isolate_process_group(command: &mut Command) {
-    use std::os::unix::process::CommandExt;
-    unsafe extern "C" {
-        fn setpgid(pid: i32, pgid: i32) -> i32;
-    }
-    unsafe {
-        command.pre_exec(|| {
-            let rc = unsafe { setpgid(0, 0) };
-            if rc == 0 {
-                Ok(())
-            } else {
-                Err(std::io::Error::last_os_error())
-            }
-        });
-    }
+    crate::platform::background_command(program)
 }
 
 /// A killed git cannot release its lock files, and every later command would
@@ -231,7 +184,7 @@ pub(super) fn run_git_env(
     }
     command
         .output()
-        .map_err(|err| AppError::msg(err.to_string()))
+        .map_err(|err| git_start_error(command.get_program(), err))
 }
 
 /// Runs git with `input` on stdin and returns the raw output, including a
@@ -251,7 +204,7 @@ pub(super) fn run_git_input_output(
         .stderr(Stdio::piped());
     let mut child = command
         .spawn()
-        .map_err(|err| AppError::msg(err.to_string()))?;
+        .map_err(|err| git_start_error(command.get_program(), err))?;
     let mut stdin = child.stdin.take();
     let input = input.to_vec();
     let writer = thread::spawn(move || {
@@ -314,9 +267,14 @@ pub(super) fn run_git_progress(
     }
     command.args(args);
     command.env("GIT_TERMINAL_PROMPT", "0");
-    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     let scope = current_cancel();
     if BACKGROUND.with(|flag| flag.get()) {
+        command.env("GIT_ASKPASS", "");
+        command.env("SSH_ASKPASS", "");
         command.env("SSH_ASKPASS_REQUIRE", "never");
         command.env("GCM_INTERACTIVE", "never");
     } else {
@@ -328,10 +286,10 @@ pub(super) fn run_git_progress(
     let started = SystemTime::now();
     let mut child = command
         .spawn()
-        .map_err(|err| AppError::msg(err.to_string()))?;
+        .map_err(|err| git_start_error(command.get_program(), err))?;
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
-    let (tx, rx) = mpsc::channel::<String>();
+    let (tx, rx) = mpsc::sync_channel::<String>(64);
 
     let stderr_thread = stderr.map(|pipe| {
         let tx = tx.clone();
@@ -348,15 +306,10 @@ pub(super) fn run_git_progress(
     });
     drop(tx);
 
-    let stdout_thread = stdout.map(|mut pipe| {
-        thread::spawn(move || {
-            let mut bytes = Vec::new();
-            let _ = pipe.read_to_end(&mut bytes);
-            bytes
-        })
-    });
+    let stdout_thread = stdout
+        .map(|mut pipe| thread::spawn(move || diagnostic_tail(&mut pipe).unwrap_or_default()));
 
-    let mut logs = Vec::new();
+    let mut logs = VecDeque::new();
     let mut killed = false;
     loop {
         if !killed
@@ -369,16 +322,16 @@ pub(super) fn run_git_progress(
         }
         match rx.recv_timeout(Duration::from_millis(30)) {
             Ok(line) => {
-                logs.push(line.clone());
-                on_progress(&line);
+                remember_progress(&mut logs, &line);
+                on_progress(&crate::error::redact_credentials(&line));
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         }
     }
     while let Ok(line) = rx.try_recv() {
-        logs.push(line.clone());
-        on_progress(&line);
+        remember_progress(&mut logs, &line);
+        on_progress(&crate::error::redact_credentials(&line));
     }
 
     let status = child.wait().map_err(|err| AppError::msg(err.to_string()))?;
@@ -398,15 +351,7 @@ pub(super) fn run_git_progress(
         return Ok(());
     }
     let stdout = String::from_utf8_lossy(&stdout_bytes);
-    let stderr = logs
-        .into_iter()
-        .rev()
-        .take(8)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect::<Vec<_>>()
-        .join("\n");
+    let stderr = logs.into_iter().collect::<Vec<_>>().join("\n");
     let message = [stderr.trim(), stdout.trim()]
         .into_iter()
         .filter(|part| !part.is_empty())
@@ -417,6 +362,29 @@ pub(super) fn run_git_progress(
     } else {
         message
     }))
+}
+
+fn remember_progress(logs: &mut VecDeque<String>, line: &str) {
+    if logs.len() == MAX_PROGRESS_LINES {
+        logs.pop_front();
+    }
+    logs.push_back(line.to_string());
+}
+
+fn diagnostic_tail(reader: &mut impl Read) -> std::io::Result<Vec<u8>> {
+    let mut tail = VecDeque::with_capacity(MAX_DIAGNOSTIC_BYTES);
+    let mut chunk = [0_u8; 8192];
+    loop {
+        let read = match reader.read(&mut chunk) {
+            Ok(0) => return Ok(tail.into_iter().collect()),
+            Ok(read) => read,
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(error) => return Err(error),
+        };
+        let excess = (tail.len() + read).saturating_sub(MAX_DIAGNOSTIC_BYTES);
+        tail.drain(..excess);
+        tail.extend(&chunk[..read]);
+    }
 }
 
 pub(super) fn read_progress_line(
@@ -440,7 +408,9 @@ pub(super) fn read_progress_line(
                 if *byte == b'\n' || *byte == b'\r' {
                     break;
                 }
-                buf.push(*byte);
+                if buf.len() < MAX_DIAGNOSTIC_BYTES {
+                    buf.push(*byte);
+                }
             }
             take
         };
@@ -495,7 +465,11 @@ fn git_bin() -> &'static Mutex<GitBin> {
 
 fn find_git() -> Option<PathBuf> {
     let mut bin = git_bin().lock().unwrap_or_else(|err| err.into_inner());
-    if bin.resolved.as_ref().is_some_and(|path| path.is_file()) {
+    if bin
+        .resolved
+        .as_ref()
+        .is_some_and(|path| crate::locate::is_executable(path))
+    {
         return bin.resolved.clone();
     }
     let resolved = resolve_git(&bin.selected);
@@ -514,7 +488,10 @@ pub fn set_git_executable(selected: &str) {
     let mut bin = git_bin().lock().unwrap_or_else(|err| err.into_inner());
     if bin.loaded
         && bin.selected == selected
-        && bin.resolved.as_ref().is_some_and(|path| path.is_file())
+        && bin
+            .resolved
+            .as_ref()
+            .is_some_and(|path| crate::locate::is_executable(path))
     {
         return;
     }
@@ -531,7 +508,7 @@ fn resolve_git(selected: &str) -> Option<PathBuf> {
         return which("git");
     }
     let path = PathBuf::from(selected);
-    if is_git_executable_name(&path) && path.is_file() {
+    if is_git_executable_name(&path) && crate::locate::is_executable(&path) {
         Some(path)
     } else {
         None
@@ -558,9 +535,13 @@ fn same_git_path(left: &str, right: &str) -> bool {
 }
 
 fn fold_git_path(path: &str) -> String {
-    let slash = path.trim().replace('\\', "/");
+    let slash = if cfg!(windows) {
+        path.trim().replace('\\', "/")
+    } else {
+        path.trim().to_string()
+    };
     let trimmed = slash.trim_end_matches('/');
-    if cfg!(any(windows, target_os = "macos")) {
+    if cfg!(windows) {
         trimmed.to_ascii_lowercase()
     } else {
         trimmed.to_string()
@@ -576,7 +557,7 @@ pub fn validate_git_choice(path: &str) -> AppResult<()> {
     if !is_git_executable_name(file) {
         return Err(AppError::msg("Choose a file named git."));
     }
-    if !file.is_file() {
+    if !crate::locate::is_executable(file) {
         return Err(AppError::msg(crate::error::GIT_MISSING));
     }
     Ok(())
@@ -663,25 +644,7 @@ fn git_version_output(path: &str) -> AppResult<std::process::Output> {
 }
 
 fn kill_pid(pid: u32) {
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        let _ = Command::new("taskkill")
-            .args(["/T", "/F", "/PID", &pid.to_string()])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .creation_flags(CREATE_NO_WINDOW)
-            .status();
-    }
-    #[cfg(not(windows))]
-    {
-        let _ = Command::new("kill")
-            .args(["-9", &pid.to_string()])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
-    }
+    crate::platform::kill_process_tree(pid);
 }
 
 pub(super) fn which(name: &str) -> Option<PathBuf> {
@@ -693,27 +656,43 @@ pub(super) fn spawn_git_stdout(root: &Path, args: &[&str]) -> AppResult<std::pro
     let mut command = git_command(git);
     command.arg("-C").arg(root).args(args);
     command.env("GIT_TERMINAL_PROMPT", "0");
-    command.stdout(Stdio::piped()).stderr(Stdio::null());
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
     command
         .spawn()
-        .map_err(|err| AppError::msg(err.to_string()))
+        .map_err(|err| git_start_error(command.get_program(), err))
+}
+
+fn git_start_error(program: &std::ffi::OsStr, error: std::io::Error) -> AppError {
+    if matches!(
+        error.kind(),
+        std::io::ErrorKind::NotFound | std::io::ErrorKind::PermissionDenied
+    ) && !crate::locate::is_executable(Path::new(program))
+    {
+        AppError::msg(crate::error::GIT_MISSING)
+    } else {
+        AppError::msg(format!("Could not start Git: {error}"))
+    }
 }
 
 pub(super) fn read_git_line(reader: &mut impl BufRead, buf: &mut Vec<u8>) -> AppResult<bool> {
-    buf.clear();
-    let read = reader
-        .read_until(b'\n', buf)
-        .map_err(|err| AppError::msg(err.to_string()))?;
-    if read == 0 {
-        return Ok(false);
+    loop {
+        buf.clear();
+        let read = reader
+            .read_until(b'\n', buf)
+            .map_err(|err| AppError::msg(err.to_string()))?;
+        if read == 0 {
+            return Ok(false);
+        }
+        while matches!(buf.last(), Some(b'\n' | b'\r')) {
+            buf.pop();
+        }
+        if !buf.is_empty() {
+            return Ok(true);
+        }
     }
-    while matches!(buf.last(), Some(b'\n' | b'\r')) {
-        buf.pop();
-    }
-    if buf.is_empty() {
-        return read_git_line(reader, buf);
-    }
-    Ok(true)
 }
 
 pub(super) fn git_output_error(output: std::process::Output) -> AppError {
@@ -745,6 +724,7 @@ mod git_executable_tests {
         assert!(is_git_executable_name(Path::new("GIT.EXE")));
         assert!(is_git_executable_name(Path::new("git.cmd")));
         assert!(is_git_executable_name(Path::new("/usr/bin/git")));
+        #[cfg(windows)]
         assert!(is_git_executable_name(Path::new(
             r"C:\Program Files\Git\cmd\git.exe"
         )));
@@ -772,27 +752,39 @@ mod git_executable_tests {
     #[test]
     fn keeps_distinct_git_executables() {
         let paths = normalize_extra_git_paths(vec![
-            r"C:\Git\cmd\git.exe".into(),
-            "C:/Git/cmd/git.exe".into(),
+            "/opt/first/git".into(),
+            "/opt/first/git".into(),
             "git-lfs.exe".into(),
             "/usr/bin/git".into(),
             "  ".into(),
         ]);
         assert_eq!(
             paths,
-            vec![
-                r"C:\Git\cmd\git.exe".to_string(),
-                "/usr/bin/git".to_string()
-            ]
+            vec!["/opt/first/git".to_string(), "/usr/bin/git".to_string()]
         );
     }
 
     #[test]
-    fn folds_path_case_on_case_insensitive_systems() {
+    fn preserves_unix_path_case() {
         assert_eq!(
-            same_git_path(r"C:\Git\cmd\git.exe", "c:/git/cmd/git.exe"),
-            cfg!(any(windows, target_os = "macos"))
+            same_git_path("/work/Git/git", "/work/git/git"),
+            cfg!(windows)
         );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn normalizes_windows_executable_separators() {
+        assert!(same_git_path(r"C:\Git\cmd\git.exe", "c:/git/cmd/git.exe"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn preserves_backslashes_in_unix_executable_paths() {
+        assert!(!same_git_path(
+            "/work/with\\slash/git",
+            "/work/with/slash/git"
+        ));
     }
 
     #[cfg(windows)]
@@ -824,9 +816,87 @@ mod git_executable_tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join(if cfg!(windows) { "git.exe" } else { "git" });
         std::fs::write(&path, b"not a git executable").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
         let text = path.to_string_lossy().into_owned();
         let message = super::check_git_executable(&text).unwrap_err().to_string();
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(message, "That file is not a Git executable.");
+    }
+
+    #[test]
+    fn reports_a_removed_git_executable_with_the_recovery_error() {
+        let message = super::git_start_error(
+            Path::new("rebasely-missing-executable/git").as_os_str(),
+            std::io::Error::from(std::io::ErrorKind::NotFound),
+        );
+        assert_eq!(message.to_string(), crate::error::GIT_MISSING);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_unix_git_files_without_execute_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("rebasely-git-mode-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("git");
+        std::fs::write(&path, b"#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(
+            validate_git_choice(&path.to_string_lossy())
+                .unwrap_err()
+                .to_string(),
+            crate::error::GIT_MISSING
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod stream_tests {
+    use super::*;
+    use std::io::Cursor;
+
+    #[test]
+    fn skips_many_empty_records_without_recursing() {
+        let mut bytes = vec![b'\n'; 200_000];
+        bytes.extend_from_slice(b"record\r\n");
+        let mut input = Cursor::new(bytes);
+        let mut line = Vec::new();
+        assert!(read_git_line(&mut input, &mut line).unwrap());
+        assert_eq!(line, b"record");
+        assert!(!read_git_line(&mut input, &mut line).unwrap());
+    }
+
+    #[test]
+    fn retains_only_recent_progress_and_bounded_diagnostics() {
+        let mut logs = VecDeque::new();
+        for index in 0..100 {
+            remember_progress(&mut logs, &index.to_string());
+        }
+        assert_eq!(logs.len(), MAX_PROGRESS_LINES);
+        assert_eq!(logs.front().map(String::as_str), Some("92"));
+        let mut output = vec![b'x'; MAX_DIAGNOSTIC_BYTES * 3];
+        output.extend_from_slice(b"last error");
+        let tail = diagnostic_tail(&mut Cursor::new(output)).unwrap();
+        assert_eq!(tail.len(), MAX_DIAGNOSTIC_BYTES);
+        assert!(tail.ends_with(b"last error"));
+    }
+
+    #[test]
+    fn consumes_oversized_progress_records_without_growing_the_buffer() {
+        let mut bytes = vec![b'x'; MAX_DIAGNOSTIC_BYTES * 2];
+        bytes.extend_from_slice(b"\nnext\n");
+        let mut input = Cursor::new(bytes);
+        let mut line = Vec::new();
+        assert_eq!(
+            read_progress_line(&mut input, &mut line).unwrap(),
+            MAX_DIAGNOSTIC_BYTES
+        );
+        assert_eq!(read_progress_line(&mut input, &mut line).unwrap(), 4);
+        assert_eq!(line, b"next");
     }
 }

@@ -6,6 +6,9 @@ use serde::Serialize;
 use crate::error::{AppError, AppResult};
 use crate::git::strip_verbatim_prefix;
 
+const TERMINAL_DIRECTORY_ENV: &str = "REBASELY_TERMINAL_DIRECTORY";
+const POWERSHELL_START_DIRECTORY: &str = "Set-Location -LiteralPath $env:REBASELY_TERMINAL_DIRECTORY; Remove-Item -LiteralPath 'Env:REBASELY_TERMINAL_DIRECTORY'";
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TerminalOption {
@@ -87,10 +90,15 @@ pub fn list_terminals() -> Vec<TerminalOption> {
 }
 
 pub fn open_in_terminal(path: &str, terminal_id: &str) -> AppResult<()> {
-    let path = strip_verbatim_prefix(path);
-    if path.is_empty() || !Path::new(&path).exists() {
+    let path = if cfg!(windows) {
+        strip_verbatim_prefix(path)
+    } else {
+        path.to_string()
+    };
+    if path.is_empty() || !Path::new(&path).is_dir() {
         return Err(AppError::msg("Repository folder was not found"));
     }
+    let path = std::path::absolute(path)?;
 
     let requested = terminal_id.trim();
     let id = if requested.is_empty() || requested == "auto" {
@@ -99,7 +107,15 @@ pub fn open_in_terminal(path: &str, terminal_id: &str) -> AppResult<()> {
         requested.to_string()
     };
 
-    spawn_terminal(&id, &path)
+    if !list_terminals()
+        .iter()
+        .any(|terminal| terminal.id == id && terminal.available)
+    {
+        return Err(AppError::msg(
+            "The selected terminal is unavailable. Choose an installed terminal in Settings.",
+        ));
+    }
+    spawn_terminal(&id, &path.to_string_lossy())
 }
 
 fn option(id: &str, name: &str, available: bool) -> TerminalOption {
@@ -164,29 +180,17 @@ fn git_bash_path() -> Option<PathBuf> {
     })
 }
 
-fn spawn_terminal(id: &str, path: &str) -> AppResult<()> {
-    let mut command = match id {
+fn terminal_command(id: &str, path: &str, macos: bool, cli_available: bool) -> AppResult<Command> {
+    let command = match id {
         "windows-terminal" => {
             let mut command = crate::locate::command("wt");
             command.args(["-d", path]);
             command
         }
-        "pwsh" => {
-            let mut command = crate::locate::command("pwsh");
-            command.args([
-                "-NoExit",
-                "-Command",
-                &format!("Set-Location -LiteralPath '{}'", escape_ps(path)),
-            ]);
-            command
-        }
-        "powershell" => {
-            let mut command = crate::locate::command("powershell");
-            command.args([
-                "-NoExit",
-                "-Command",
-                &format!("Set-Location -LiteralPath '{}'", escape_ps(path)),
-            ]);
+        "pwsh" | "powershell" => {
+            let mut command = crate::locate::command(id);
+            command.args(["-NoExit", "-Command", POWERSHELL_START_DIRECTORY]);
+            command.env(TERMINAL_DIRECTORY_ENV, path);
             command
         }
         "cmd" => {
@@ -249,10 +253,16 @@ fn spawn_terminal(id: &str, path: &str) -> AppResult<()> {
             command.args(["--working-directory", path]);
             command
         }
-        "kitty" => mac_or_cli("kitty", "kitty", &["--directory", path]),
+        "kitty" => mac_or_cli(
+            "kitty",
+            "kitty",
+            &["--directory", path],
+            macos,
+            cli_available,
+        ),
         "ghostty" => {
             let flag = format!("--working-directory={path}");
-            if cfg!(target_os = "macos") && crate::locate::which("ghostty").is_none() {
+            if macos && !cli_available {
                 let mut command = crate::locate::command("open");
                 command.args(["-na", "Ghostty", "--args", &flag]);
                 command
@@ -262,7 +272,13 @@ fn spawn_terminal(id: &str, path: &str) -> AppResult<()> {
                 command
             }
         }
-        "wezterm" => mac_or_cli("wezterm", "WezTerm", &["start", "--cwd", path]),
+        "wezterm" => mac_or_cli(
+            "wezterm",
+            "WezTerm",
+            &["start", "--cwd", path],
+            macos,
+            cli_available,
+        ),
         "alacritty" => {
             let mut command = crate::locate::command("alacritty");
             command.args(["--working-directory", path]);
@@ -283,6 +299,12 @@ fn spawn_terminal(id: &str, path: &str) -> AppResult<()> {
         }
     };
 
+    Ok(command)
+}
+
+fn spawn_terminal(id: &str, path: &str) -> AppResult<()> {
+    let mut command = terminal_command(id, path, cfg!(target_os = "macos"), exists_in_path(id))?;
+
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -290,18 +312,13 @@ fn spawn_terminal(id: &str, path: &str) -> AppResult<()> {
         command.creation_flags(CREATE_NEW_CONSOLE);
     }
 
-    command
-        .spawn()
+    crate::platform::spawn_detached(command)
         .map_err(|err| AppError::msg(format!("Could not open terminal: {err}")))?;
     Ok(())
 }
 
-fn escape_ps(path: &str) -> String {
-    path.replace('\'', "''")
-}
-
-fn mac_or_cli(cli: &str, app: &str, args: &[&str]) -> Command {
-    if cfg!(target_os = "macos") && crate::locate::which(cli).is_none() {
+fn mac_or_cli(cli: &str, app: &str, args: &[&str], macos: bool, cli_available: bool) -> Command {
+    if macos && !cli_available {
         let mut command = crate::locate::command("open");
         command.arg("-na").arg(app).arg("--args");
         command.args(args);
@@ -310,5 +327,125 @@ fn mac_or_cli(cli: &str, app: &str, args: &[&str]) -> Command {
         let mut command = crate::locate::command(cli);
         command.args(args);
         command
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        open_in_terminal, terminal_command, POWERSHELL_START_DIRECTORY, TERMINAL_DIRECTORY_ENV,
+    };
+    use std::ffi::OsString;
+
+    fn args(command: &std::process::Command) -> Vec<OsString> {
+        command.get_args().map(|arg| arg.to_owned()).collect()
+    }
+
+    fn expected(values: &[&str]) -> Vec<OsString> {
+        values.iter().map(|value| OsString::from(*value)).collect()
+    }
+
+    #[test]
+    fn unix_terminal_directories_remain_one_literal_argument() {
+        let path = "/work/client/space 'quote' $literal;name";
+        for id in [
+            "gnome-terminal",
+            "mate-terminal",
+            "xfce4-terminal",
+            "terminator",
+            "foot",
+            "ghostty",
+        ] {
+            let command = terminal_command(id, path, false, true).unwrap();
+            assert_eq!(
+                args(&command),
+                vec![OsString::from(format!("--working-directory={path}"))]
+            );
+        }
+        for id in ["kgx", "ptyxis", "tilix", "alacritty"] {
+            let command = terminal_command(id, path, false, true).unwrap();
+            assert_eq!(args(&command), expected(&["--working-directory", path]));
+        }
+        assert_eq!(
+            args(&terminal_command("konsole", path, false, true).unwrap()),
+            expected(&["--workdir", path])
+        );
+        assert_eq!(
+            args(&terminal_command("kitty", path, false, true).unwrap()),
+            expected(&["--directory", path])
+        );
+        assert_eq!(
+            args(&terminal_command("wezterm", path, false, true).unwrap()),
+            expected(&["start", "--cwd", path])
+        );
+    }
+
+    #[test]
+    fn mac_application_fallback_keeps_terminal_arguments_after_the_separator() {
+        let path = "/work/client/space 'quote' $literal";
+        for (id, app, options) in [
+            ("kitty", "kitty", vec!["--directory", path]),
+            (
+                "ghostty",
+                "Ghostty",
+                vec!["--working-directory=/work/client/space 'quote' $literal"],
+            ),
+            ("wezterm", "WezTerm", vec!["start", "--cwd", path]),
+        ] {
+            let command = terminal_command(id, path, true, false).unwrap();
+            assert_eq!(command.get_program(), "open");
+            let mut wanted = expected(&["-na", app, "--args"]);
+            wanted.extend(expected(&options));
+            assert_eq!(args(&command), wanted);
+        }
+        let command = terminal_command("kitty", path, true, true).unwrap();
+        assert_eq!(command.get_program(), "kitty");
+        assert_eq!(args(&command), expected(&["--directory", path]));
+    }
+
+    #[test]
+    fn windows_shells_keep_directory_data_out_of_command_text() {
+        let path = r"C:\work\client's folder\$literal";
+        for id in ["pwsh", "powershell"] {
+            for directory in [
+                path,
+                "C:\\work\\client\u{2018}; Write-Output example; #",
+                "C:\\work\\client\u{2019}; Write-Output example; #",
+                "C:\\work\\$(example); 'quoted' & literal",
+            ] {
+                let command = terminal_command(id, directory, false, true).unwrap();
+                assert_eq!(
+                    args(&command),
+                    expected(&["-NoExit", "-Command", POWERSHELL_START_DIRECTORY])
+                );
+                assert_eq!(
+                    command
+                        .get_envs()
+                        .find(|(key, _)| *key == TERMINAL_DIRECTORY_ENV)
+                        .and_then(|(_, value)| value),
+                    Some(std::ffi::OsStr::new(directory))
+                );
+                assert!(!POWERSHELL_START_DIRECTORY.contains(directory));
+            }
+        }
+        let command = terminal_command("cmd", path, false, true).unwrap();
+        assert_eq!(args(&command), expected(&["/K"]));
+        assert_eq!(command.get_current_dir(), Some(std::path::Path::new(path)));
+        assert!(terminal_command("unknown", path, false, true).is_err());
+    }
+
+    #[test]
+    fn opening_a_terminal_rejects_files_before_starting_an_application() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let file = std::env::temp_dir().join(format!(
+            "rebasely-terminal-{}-{unique}.txt",
+            std::process::id()
+        ));
+        std::fs::write(&file, "content").unwrap();
+        assert!(open_in_terminal(&file.to_string_lossy(), "auto").is_err());
+        std::fs::remove_file(file).unwrap();
     }
 }

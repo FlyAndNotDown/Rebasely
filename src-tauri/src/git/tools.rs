@@ -57,18 +57,46 @@ fn shown_tool(repo: Option<&Repository>, kind: &str, name: String) -> String {
 }
 
 fn path_from_cmd(cmd: &str) -> Option<String> {
-    let rest = cmd.trim().strip_prefix('"')?;
-    let end = rest.find('"')?;
-    let path = &rest[..end];
-    if path.is_empty() {
-        None
-    } else {
-        Some(path.to_string())
+    let mut chars = cmd.trim_start().chars().peekable();
+    let mut word = String::new();
+    let mut quote = None;
+    while let Some(ch) = chars.next() {
+        match (quote, ch) {
+            (Some('\''), '\'') | (Some('"'), '"') => quote = None,
+            (Some('\''), _) => word.push(ch),
+            (Some('"'), '$' | '`') => return None,
+            (Some('"'), '\\') => {
+                if chars
+                    .peek()
+                    .is_some_and(|next| matches!(next, '$' | '`' | '"' | '\\'))
+                {
+                    word.push(chars.next()?);
+                } else {
+                    word.push(ch);
+                }
+            }
+            (Some('"'), _) => word.push(ch),
+            (None, '\'' | '"') => quote = Some(ch),
+            (None, '\\') => word.push(chars.next()?),
+            (None, ch) if ch.is_whitespace() => break,
+            (None, '$' | '`' | ';' | '|' | '&' | '<' | '>' | '(' | ')') => return None,
+            (None, _) => word.push(ch),
+            _ => return None,
+        }
     }
+    (quote.is_none() && !word.is_empty()).then_some(word)
 }
 
 fn looks_like_path(value: &str) -> bool {
     value.contains('\\') || value.contains('/') || Path::new(value).is_file()
+}
+
+fn tool_value(value: &str) -> &str {
+    let value = value.trim();
+    value
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+        .unwrap_or(value)
 }
 
 /// Saves the tools to the global Git config. Choosing an editor that git does
@@ -82,9 +110,7 @@ pub fn write_tool_config(config: &ToolConfig) -> AppResult<ToolConfig> {
     }
     assign_tool(&path, "diff", &config.diff_tool)?;
     assign_tool(&path, "merge", &config.merge_tool)?;
-    for id in [
-        "vscode", "cursor", "araxis", "bc", "kdiff3", "meld", "p4merge", "smerge",
-    ] {
+    for id in ["vscode", "cursor"] {
         let Some((diff_cmd, merge_cmd)) = launch_commands(id) else {
             continue;
         };
@@ -97,85 +123,46 @@ pub fn write_tool_config(config: &ToolConfig) -> AppResult<ToolConfig> {
             && config_get_file(&path, &format!("mergetool.{id}.cmd")).is_none()
         {
             config_set_file(&path, &format!("mergetool.{id}.cmd"), &merge_cmd)?;
-            if matches!(id, "vscode" | "cursor" | "araxis") {
-                config_set_file(&path, &format!("mergetool.{id}.trustExitCode"), "true")?;
-            }
+            config_set_file(&path, &format!("mergetool.{id}.trustExitCode"), "true")?;
         }
     }
     Ok(read_tool_config(None))
 }
 
 fn launch_commands(id: &str) -> Option<(String, String)> {
-    let program = explicit_program(id)?;
-    let (diff_args, merge_args) = match id {
-        "vscode" | "cursor" => (
-            "--wait --diff \"$LOCAL\" \"$REMOTE\"",
-            "--wait --merge \"$REMOTE\" \"$LOCAL\" \"$BASE\" \"$MERGED\"",
-        ),
-        "araxis" => (
-            "-wait \"$LOCAL\" \"$REMOTE\"",
-            "-wait -merge -3 -a1 \"$BASE\" \"$LOCAL\" \"$REMOTE\" \"$MERGED\"",
-        ),
-        "bc" => (
-            "\"$LOCAL\" \"$REMOTE\"",
-            "\"$LOCAL\" \"$REMOTE\" \"$BASE\" \"$MERGED\"",
-        ),
-        "kdiff3" => (
-            "--auto \"$LOCAL\" \"$REMOTE\"",
-            "--auto \"$BASE\" \"$LOCAL\" \"$REMOTE\" -o \"$MERGED\"",
-        ),
-        "meld" => (
-            "\"$LOCAL\" \"$REMOTE\"",
-            "\"$LOCAL\" \"$BASE\" \"$REMOTE\" --output \"$MERGED\"",
-        ),
-        "p4merge" => (
-            "\"$LOCAL\" \"$REMOTE\"",
-            "\"$BASE\" \"$LOCAL\" \"$REMOTE\" \"$MERGED\"",
-        ),
-        "smerge" => (
-            "diff --wait \"$LOCAL\" \"$REMOTE\"",
-            "mergetool \"$BASE\" \"$LOCAL\" \"$REMOTE\" -o \"$MERGED\"",
-        ),
-        _ => return None,
-    };
+    if !matches!(id, "vscode" | "cursor") {
+        return None;
+    }
+    let program = crate::editor::editor_program(id)?;
     Some((
-        format!("{program} {diff_args}"),
-        format!("{program} {merge_args}"),
+        format!("{program} --wait --diff \"$LOCAL\" \"$REMOTE\""),
+        format!("{program} --wait --merge \"$REMOTE\" \"$LOCAL\" \"$BASE\" \"$MERGED\""),
     ))
 }
 
-/// `code` when that command is on PATH. Otherwise the application bundle, quoted
-/// for the shell Git uses to launch a tool. Git already knows the other tools,
-/// so those only need a command when the short name cannot be found.
-fn explicit_program(id: &str) -> Option<String> {
-    match id {
-        "vscode" | "cursor" => crate::editor::editor_program(id),
-        "araxis" | "bc" | "kdiff3" | "meld" | "p4merge" | "smerge" => {
-            let tool = GUI_TOOLS.iter().find(|tool| tool.id == id)?;
-            if tool.commands.iter().any(|name| which(name).is_some()) {
-                return None;
-            }
-            gui_tool_path(tool).map(|path| quote_git_program(&path))
-        }
-        _ => None,
-    }
-}
-
 fn quote_git_program(path: &Path) -> String {
-    crate::locate::quote_shell(&path.to_string_lossy().replace('\\', "/"))
+    let path = path.to_string_lossy();
+    let path = if cfg!(windows) {
+        path.replace('\\', "/")
+    } else {
+        path.into_owned()
+    };
+    crate::locate::quote_shell(&path)
 }
 
 /// Writes one tool. A filesystem path becomes a private tool name plus the command
 /// git needs to launch that executable; a bare name is stored as git expects it.
 fn assign_tool(path: &Path, kind: &str, value: &str) -> AppResult<()> {
-    let value = value.trim().trim_matches('"');
+    let value = tool_value(value);
     let key = format!("{kind}.tool");
+    config_unset_file(path, &format!("{kind}.guitool"))?;
     if value.is_empty() {
         config_unset_file(path, &key)?;
         return Ok(());
     }
     if !looks_like_path(value) {
         config_set_file(path, &key, value)?;
+        configure_builtin_tool(path, kind, value)?;
         return Ok(());
     }
     let name = if kind == "diff" {
@@ -192,12 +179,64 @@ fn assign_tool(path: &Path, kind: &str, value: &str) -> AppResult<()> {
     config_set_file(
         path,
         &format!("{kind}tool.{name}.cmd"),
-        &format!("\"{value}\" {args}"),
+        &format!("{} {args}", quote_git_program(Path::new(value))),
     )?;
     if kind == "merge" {
         config_set_file(path, &format!("mergetool.{name}.trustExitCode"), "true")?;
     }
     Ok(())
+}
+
+/// Let Git adapt known tools to their installed version and platform. Only
+/// bind the executable location; arbitrary user-provided commands remain intact.
+fn configure_builtin_tool(path: &Path, kind: &str, id: &str) -> AppResult<()> {
+    if matches!(id, "vscode" | "cursor") {
+        return Ok(());
+    }
+    let Some(tool) = GUI_TOOLS.iter().find(|tool| tool.id == id) else {
+        return Ok(());
+    };
+    let path_key = format!("{kind}tool.{id}.path");
+    let cmd_key = format!("{kind}tool.{id}.cmd");
+    let legacy_program = config_get_file(path, &cmd_key).and_then(|command| {
+        let program = path_from_cmd(&command)?;
+        let args = legacy_tool_args(id, kind)?;
+        (Path::new(&program).is_absolute()
+            && (command == format!("{} {args}", quote_git_program(Path::new(&program)))
+                || command == format!("\"{program}\" {args}")))
+        .then_some(program)
+    });
+    if config_get_file(path, &path_key).is_none() {
+        if let Some(program) = legacy_program.as_deref() {
+            config_set_file(path, &path_key, program)?;
+        } else if let Some(program) =
+            gui_tool_path(tool).or_else(|| tool.commands.iter().find_map(|name| which(name)))
+        {
+            config_set_file(path, &path_key, &program.to_string_lossy())?;
+        }
+    }
+    if legacy_program.is_some() {
+        config_unset_file(path, &cmd_key)?;
+    }
+    Ok(())
+}
+
+fn legacy_tool_args(id: &str, kind: &str) -> Option<&'static str> {
+    match (id, kind) {
+        ("araxis", "diff") => Some("-wait \"$LOCAL\" \"$REMOTE\""),
+        ("araxis", "merge") => {
+            Some("-wait -merge -3 -a1 \"$BASE\" \"$LOCAL\" \"$REMOTE\" \"$MERGED\"")
+        }
+        ("bc" | "meld" | "p4merge", "diff") => Some("\"$LOCAL\" \"$REMOTE\""),
+        ("bc", "merge") => Some("\"$LOCAL\" \"$REMOTE\" \"$BASE\" \"$MERGED\""),
+        ("kdiff3", "diff") => Some("--auto \"$LOCAL\" \"$REMOTE\""),
+        ("kdiff3", "merge") => Some("--auto \"$BASE\" \"$LOCAL\" \"$REMOTE\" -o \"$MERGED\""),
+        ("meld", "merge") => Some("\"$LOCAL\" \"$BASE\" \"$REMOTE\" --output \"$MERGED\""),
+        ("p4merge", "merge") => Some("\"$BASE\" \"$LOCAL\" \"$REMOTE\" \"$MERGED\""),
+        ("smerge", "diff") => Some("diff --wait \"$LOCAL\" \"$REMOTE\""),
+        ("smerge", "merge") => Some("mergetool \"$BASE\" \"$LOCAL\" \"$REMOTE\" -o \"$MERGED\""),
+        _ => None,
+    }
 }
 
 struct GuiTool {
@@ -348,7 +387,7 @@ fn gui_tool_path(tool: &GuiTool) -> Option<PathBuf> {
     templates
         .iter()
         .filter_map(|template| crate::locate::expand_path(template))
-        .find(|path| path.is_file())
+        .find(|path| crate::locate::is_executable(path))
 }
 
 fn gui_tool_installed(tool: &GuiTool) -> bool {
@@ -372,14 +411,14 @@ pub fn list_gui_tools() -> Vec<GuiToolOption> {
 
 /// True when `value` is empty, a known installed tool, a command on PATH, or an existing file.
 pub fn gui_tool_found(value: &str) -> bool {
-    let value = value.trim().trim_matches('"');
+    let value = tool_value(value);
     if value.is_empty() {
         return true;
     }
     if let Some(tool) = GUI_TOOLS.iter().find(|tool| tool.id == value) {
         return gui_tool_installed(tool);
     }
-    if Path::new(value).is_file() {
+    if crate::locate::is_executable(Path::new(value)) {
         return true;
     }
     if !looks_like_path(value) {
@@ -501,7 +540,23 @@ pub fn run_mergetool(repo: &mut Repository, path: &str) -> AppResult<WorkspaceSn
 
 #[cfg(test)]
 mod tests {
-    use super::{assign_tool, config_get_file, path_from_cmd, CUSTOM_DIFF};
+    use super::{
+        assign_tool, config_get_file, config_set_file, path_from_cmd, quote_git_program,
+        CUSTOM_DIFF,
+    };
+
+    fn test_config(label: &str) -> std::path::PathBuf {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "rebasely-tool-{label}-{}-{unique}.gitconfig",
+            std::process::id()
+        ));
+        std::fs::write(&path, "").unwrap();
+        path
+    }
 
     #[test]
     fn reads_the_executable_out_of_a_tool_command() {
@@ -513,10 +568,7 @@ mod tests {
 
     #[test]
     fn stores_a_custom_executable_as_its_own_tool() {
-        let path =
-            std::env::temp_dir().join(format!("rebasely-tool-{}.gitconfig", std::process::id()));
-        let _ = std::fs::remove_file(&path);
-        std::fs::write(&path, "").unwrap();
+        let path = test_config("custom");
         let exe = std::env::current_exe().unwrap();
         let exe = exe.to_string_lossy().to_string();
         {
@@ -526,14 +578,108 @@ mod tests {
                 config_get_file(&path, "diff.tool").as_deref(),
                 Some(CUSTOM_DIFF)
             );
-            assert!(config_get_file(&path, "difftool.rebasely-diff.cmd")
-                .unwrap()
-                .contains(&exe));
+            let command = config_get_file(&path, "difftool.rebasely-diff.cmd").unwrap();
+            let expected = if cfg!(windows) {
+                exe.replace('\\', "/")
+            } else {
+                exe.clone()
+            };
+            assert_eq!(path_from_cmd(&command), Some(expected));
             assert_eq!(
                 config_get_file(&path, "merge.tool").as_deref(),
                 Some("kdiff3")
             );
         }
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn custom_tool_paths_are_quoted_as_literal_shell_words() {
+        for path in [
+            "/work/tools/Tool App/tool",
+            "/work/tools/quote's/tool",
+            "/work/tools/double\"quote/tool",
+            "/work/tools/$(ignored)/`literal`",
+            "/work/tools/name\\with-backslash",
+        ] {
+            let command = format!(
+                "{} \"$LOCAL\" \"$REMOTE\"",
+                quote_git_program(std::path::Path::new(path))
+            );
+            let expected = if cfg!(windows) {
+                path.replace('\\', "/")
+            } else {
+                path.to_string()
+            };
+            assert_eq!(path_from_cmd(&command), Some(expected));
+        }
+        assert!(path_from_cmd("\"$HOME/tool\" \"$LOCAL\"").is_none());
+        assert!(path_from_cmd("'unterminated").is_none());
+    }
+
+    #[test]
+    fn saving_a_tool_clears_the_gui_override_that_would_hide_the_selection() {
+        let path = test_config("override");
+        config_set_file(&path, "diff.guitool", "meld").unwrap();
+        assign_tool(&path, "diff", "kdiff3").unwrap();
+        assert_eq!(
+            config_get_file(&path, "diff.tool").as_deref(),
+            Some("kdiff3")
+        );
+        assert!(config_get_file(&path, "diff.guitool").is_none());
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn known_tools_use_git_adapters_and_only_migrate_generated_commands() {
+        let program = std::env::temp_dir().join("example custom tools/Sublime Merge/smerge");
+        let double_quoted = format!("\"{}\"", program.to_string_lossy().replace('\\', "/"));
+        for quoted in [quote_git_program(&program), double_quoted] {
+            let path = test_config("adapter");
+            let generated = format!("{quoted} diff --wait \"$LOCAL\" \"$REMOTE\"");
+            config_set_file(&path, "difftool.smerge.cmd", &generated).unwrap();
+            assign_tool(&path, "diff", "smerge").unwrap();
+            assert!(config_get_file(&path, "difftool.smerge.cmd").is_none());
+            assert_eq!(
+                config_get_file(&path, "difftool.smerge.path"),
+                path_from_cmd(&generated)
+            );
+
+            let custom = format!("{quoted} --custom \"$LOCAL\" \"$REMOTE\"");
+            config_set_file(&path, "difftool.smerge.cmd", &custom).unwrap();
+            assign_tool(&path, "diff", "smerge").unwrap();
+            assert_eq!(config_get_file(&path, "difftool.smerge.cmd"), Some(custom));
+            std::fs::remove_file(path).unwrap();
+        }
+    }
+
+    #[test]
+    fn generated_commands_without_an_absolute_executable_remain_intact() {
+        let path = test_config("relative-adapter");
+        let configured_program = std::env::temp_dir().join("example-tools/smerge");
+        config_set_file(
+            &path,
+            "difftool.smerge.path",
+            &configured_program.to_string_lossy(),
+        )
+        .unwrap();
+        for command in [
+            format!(
+                "{} diff --wait \"$LOCAL\" \"$REMOTE\"",
+                quote_git_program(std::path::Path::new("relative/tools/smerge"))
+            ),
+            "\"$HOME/tools/smerge\" diff --wait \"$LOCAL\" \"$REMOTE\"".to_string(),
+            "\"/work/$(example)/smerge\" diff --wait \"$LOCAL\" \"$REMOTE\"".to_string(),
+            "\"/work/`example`/smerge\" diff --wait \"$LOCAL\" \"$REMOTE\"".to_string(),
+        ] {
+            config_set_file(&path, "difftool.smerge.cmd", &command).unwrap();
+            assign_tool(&path, "diff", "smerge").unwrap();
+            assert_eq!(config_get_file(&path, "difftool.smerge.cmd"), Some(command));
+            assert_eq!(
+                config_get_file(&path, "difftool.smerge.path"),
+                Some(configured_program.to_string_lossy().into_owned())
+            );
+        }
+        std::fs::remove_file(path).unwrap();
     }
 }

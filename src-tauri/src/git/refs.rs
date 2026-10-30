@@ -170,7 +170,7 @@ fn switch(repo: &Repository, args: &[&str]) -> AppResult<()> {
 pub fn checkout_branch(repo: &Repository, name: &str) -> AppResult<()> {
     let name = name.trim();
     if ref_exists(repo, &format!("refs/heads/{name}")) {
-        return switch(repo, &[name]);
+        return switch(repo, &["--", name]);
     }
 
     let tag_ref = format!("refs/tags/{name}");
@@ -193,7 +193,7 @@ pub fn checkout_branch(repo: &Repository, name: &str) -> AppResult<()> {
         return Err(AppError::msg("Cannot check out that remote ref"));
     }
     if ref_exists(repo, &format!("refs/heads/{local_name}")) {
-        return switch(repo, &[&local_name]);
+        return switch(repo, &["--", &local_name]);
     }
     let remote_ref = format!("refs/remotes/{name}");
     switch(repo, &["--create", &local_name, "--track", &remote_ref])
@@ -226,12 +226,12 @@ pub fn create_tag(
             }
             run_git_input(
                 root,
-                &["tag", "--annotate", "--file=-", name, &target],
+                &["tag", "--annotate", "--file=-", "--", name, &target],
                 message.as_bytes(),
             )?;
         }
         None => {
-            run_git_stdout(root, &["tag", name, &target])?;
+            run_git_stdout(root, &["tag", "--", name, &target])?;
         }
     }
     Ok(())
@@ -242,7 +242,7 @@ pub fn delete_tag(repo: &Repository, name: &str) -> AppResult<()> {
     if name.is_empty() {
         return Err(AppError::msg("Tag name cannot be empty"));
     }
-    run_git_stdout(workdir(repo)?, &["tag", "-d", name])?;
+    run_git_stdout(workdir(repo)?, &["tag", "-d", "--", name])?;
     Ok(())
 }
 
@@ -260,7 +260,7 @@ pub fn push_tag(
     let spec = format!("refs/tags/{name}");
     run_git_ok_progress(
         workdir(repo)?,
-        &["push", "--progress", remote, &spec],
+        &["push", "--progress", "--", remote, &spec],
         on_progress,
     )?;
     Ok(())
@@ -290,9 +290,9 @@ pub fn create_branch(
     }
     let root = workdir(repo)?;
     if let Some(start) = &start {
-        run_git_stdout(root, &["branch", name, start])?;
+        run_git_stdout(root, &["branch", "--", name, start])?;
     } else {
-        run_git_stdout(root, &["branch", name])?;
+        run_git_stdout(root, &["branch", "--", name])?;
     }
     if switch {
         checkout_branch(repo, name)?;
@@ -333,17 +333,17 @@ pub fn delete_branch(
             return Err(AppError::msg("Cannot delete the current branch"));
         }
         let flag = if force { "-D" } else { "-d" };
-        run_git_stdout(workdir(repo)?, &["branch", flag, name])?;
+        run_git_stdout(workdir(repo)?, &["branch", flag, "--", name])?;
         return snapshot(repo);
     }
     if ref_exists(repo, &format!("refs/remotes/{name}")) {
         let (remote, branch) = split_remote_branch(repo, name)?;
         run_git_ok_progress(
             workdir(repo)?,
-            &["push", "--progress", &remote, "--delete", &branch],
+            &["push", "--progress", "--delete", "--", &remote, &branch],
             on_progress,
         )?;
-        let _ = run_git_stdout(workdir(repo)?, &["branch", "-dr", name]);
+        let _ = run_git_stdout(workdir(repo)?, &["branch", "-dr", "--", name]);
         return snapshot(repo);
     }
     Err(AppError::msg(format!("Branch not found: {name}")))

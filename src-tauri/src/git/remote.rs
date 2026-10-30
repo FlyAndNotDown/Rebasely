@@ -14,6 +14,7 @@ pub fn fetch_remote(
     if all {
         args.push("--all");
     } else if let Some(name) = remote.map(str::trim).filter(|name| !name.is_empty()) {
+        args.push("--");
         args.push(name);
     }
     run_git_ok_progress(workdir(repo)?, &args, on_progress)?;
@@ -34,7 +35,7 @@ pub fn delete_remote_tag(
     let spec = format!("refs/tags/{name}");
     run_git_ok_progress(
         workdir(repo)?,
-        &["push", "--progress", remote, "--delete", &spec],
+        &["push", "--progress", "--delete", "--", remote, &spec],
         on_progress,
     )?;
     snapshot(repo)
@@ -67,6 +68,7 @@ pub fn pull_remote(
             .filter(|name| !name.is_empty())
             .ok_or_else(|| AppError::msg("Cannot pull while HEAD is detached"))?;
         let source = tracked_ref_on(repo, &branch, remote).unwrap_or(branch);
+        args.push("--".to_string());
         args.push(remote.to_string());
         args.push(source);
     }
@@ -100,6 +102,7 @@ pub fn push_remote(
             Some(target) if !set_upstream => format!("{branch}:{target}"),
             _ => branch,
         };
+        args.push("--".to_string());
         args.push(remote.to_string());
         args.push(refspec);
     }
@@ -224,6 +227,7 @@ pub fn probe_remote_url(repo: &Repository, url: &str) -> AppResult<RemoteProbe> 
         "http.lowSpeedTime=20",
         "ls-remote",
         "--heads",
+        "--",
         url,
     ]);
     command.env("GIT_TERMINAL_PROMPT", "0");
@@ -269,7 +273,7 @@ pub fn add_remote(repo: &Repository, name: &str, url: &str) -> AppResult<()> {
     if remote_names(repo)?.iter().any(|existing| existing == name) {
         return Err(AppError::msg(format!("Remote `{name}` already exists")));
     }
-    run_git_stdout(workdir(repo)?, &["remote", "add", name, url])?;
+    run_git_stdout(workdir(repo)?, &["remote", "add", "--", name, url])?;
     Ok(())
 }
 
@@ -291,11 +295,11 @@ pub fn set_remote_url(repo: &Repository, name: &str, url: &str) -> AppResult<()>
     if url.is_empty() {
         return Err(AppError::msg("Remote URL is required"));
     }
-    run_git_stdout(workdir(repo)?, &["remote", "set-url", name, url])?;
+    run_git_stdout(workdir(repo)?, &["remote", "set-url", "--", name, url])?;
     Ok(())
 }
 
 pub fn delete_remote(repo: &Repository, name: &str) -> AppResult<()> {
-    run_git_stdout(workdir(repo)?, &["remote", "remove", name])?;
+    run_git_stdout(workdir(repo)?, &["remote", "remove", "--", name])?;
     Ok(())
 }

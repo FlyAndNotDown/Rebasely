@@ -40,7 +40,10 @@ pub fn set_p4_executable(selected: &str) {
     let mut bin = p4_bin().lock().unwrap_or_else(|err| err.into_inner());
     if bin.loaded
         && bin.selected == selected
-        && bin.resolved.as_ref().is_some_and(|path| path.is_file())
+        && bin
+            .resolved
+            .as_ref()
+            .is_some_and(|path| crate::locate::is_executable(path))
     {
         return;
     }
@@ -57,7 +60,7 @@ fn resolve_p4(selected: &str) -> Option<PathBuf> {
         return crate::locate::which("p4");
     }
     let path = PathBuf::from(selected);
-    if is_p4_executable_name(&path) && path.is_file() {
+    if is_p4_executable_name(&path) && crate::locate::is_executable(&path) {
         Some(path)
     } else {
         None
@@ -66,7 +69,11 @@ fn resolve_p4(selected: &str) -> Option<PathBuf> {
 
 fn find_p4() -> Option<PathBuf> {
     let mut bin = p4_bin().lock().unwrap_or_else(|err| err.into_inner());
-    if bin.resolved.as_ref().is_some_and(|path| path.is_file()) {
+    if bin
+        .resolved
+        .as_ref()
+        .is_some_and(|path| crate::locate::is_executable(path))
+    {
         return bin.resolved.clone();
     }
     let resolved = resolve_p4(&bin.selected);
@@ -98,9 +105,13 @@ fn same_p4_path(left: &str, right: &str) -> bool {
 }
 
 fn fold_p4_path(path: &str) -> String {
-    let slash = path.trim().replace('\\', "/");
+    let slash = if cfg!(windows) {
+        path.trim().replace('\\', "/")
+    } else {
+        path.trim().to_string()
+    };
     let trimmed = slash.trim_end_matches('/');
-    if cfg!(any(windows, target_os = "macos")) {
+    if cfg!(windows) {
         trimmed.to_ascii_lowercase()
     } else {
         trimmed.to_string()
@@ -116,7 +127,7 @@ pub fn validate_p4_choice(path: &str) -> AppResult<()> {
     if !is_p4_executable_name(file) {
         return Err(AppError::msg("Choose a file named p4."));
     }
-    if !file.is_file() {
+    if !crate::locate::is_executable(file) {
         return Err(AppError::msg(P4_MISSING));
     }
     Ok(())
@@ -200,25 +211,7 @@ fn p4_version_output(path: &str) -> AppResult<std::process::Output> {
 }
 
 pub(crate) fn kill_pid(pid: u32) {
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        let _ = Command::new("taskkill")
-            .args(["/T", "/F", "/PID", &pid.to_string()])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .creation_flags(CREATE_NO_WINDOW)
-            .status();
-    }
-    #[cfg(not(windows))]
-    {
-        let _ = Command::new("kill")
-            .args(["-9", &pid.to_string()])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
-    }
+    crate::platform::kill_process_tree(pid);
 }
 
 /// One `p4` invocation that a newer call can cancel.
@@ -259,20 +252,6 @@ impl P4Job {
         };
         if self.current() != generation {
             return Ok(None);
-        }
-        let message = output_message(&output);
-        if !output.status.success() && needs_trust(&message) {
-            trust(env)?;
-            if self.current() != generation {
-                return Ok(None);
-            }
-            let Some(output) = self.spawn_wait(env, args, generation)? else {
-                return Ok(None);
-            };
-            if self.current() != generation {
-                return Ok(None);
-            }
-            return Ok(Some(finish(output)?));
         }
         match finish(output) {
             Ok(text) if self.current() == generation => Ok(Some(text)),
@@ -317,7 +296,7 @@ impl P4Job {
             .stderr(Stdio::piped());
         let mut child = command
             .spawn()
-            .map_err(|err| AppError::msg(err.to_string()))?;
+            .map_err(|err| p4_start_error(command.get_program(), err))?;
         let pid = child.id();
         let mut current = self.pid.lock().unwrap_or_else(|err| err.into_inner());
         if self.current() != generation {
@@ -393,14 +372,7 @@ pub fn cancel_depot_search(env: &P4Env) {
 }
 
 fn p4_command(program: impl AsRef<std::ffi::OsStr>) -> Command {
-    let mut command = crate::locate::command(program);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        command.creation_flags(CREATE_NO_WINDOW);
-    }
-    command
+    crate::platform::background_command(program)
 }
 
 #[derive(Clone, Eq, Hash, PartialEq)]
@@ -413,13 +385,7 @@ pub struct P4Env {
 }
 
 pub fn run_p4(env: &P4Env, args: &[&str], input: Option<&str>) -> AppResult<std::process::Output> {
-    let output = run_once(env, args, input)?;
-    let message = output_message(&output);
-    if !output.status.success() && needs_trust(&message) {
-        trust(env)?;
-        return run_once(env, args, input);
-    }
-    Ok(output)
+    run_once(env, args, input)
 }
 
 pub fn run_p4_ok(env: &P4Env, args: &[&str], input: Option<&str>) -> AppResult<String> {
@@ -429,19 +395,16 @@ pub fn run_p4_ok(env: &P4Env, args: &[&str], input: Option<&str>) -> AppResult<S
 /// `p4 diff` can exit non-zero when the files differ. A diff body is still a result.
 pub fn run_p4_diff(env: &P4Env, args: &[&str]) -> AppResult<String> {
     let output = run_p4(env, args, None)?;
-    let message = output_message(&output);
-    if needs_login(&message) {
-        return Err(AppError::msg(P4_LOGIN));
-    }
     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-    if output.status.success() || looks_like_diff(&stdout) {
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    finish_diff(output.status.success(), stdout, stderr)
+}
+
+fn finish_diff(ok: bool, stdout: String, stderr: String) -> AppResult<String> {
+    if ok || looks_like_diff(&stdout) {
         return Ok(stdout);
     }
-    Err(AppError::msg(if message.is_empty() {
-        "p4 command failed".to_string()
-    } else {
-        message
-    }))
+    finish_parts(false, stdout, stderr)
 }
 
 pub fn run_p4_stream(
@@ -450,12 +413,6 @@ pub fn run_p4_stream(
     mut on_line: impl FnMut(String),
 ) -> AppResult<String> {
     let (ok, stdout, stderr) = stream_once(env, args, &mut on_line)?;
-    let message = combine(&stderr, &stdout);
-    if !ok && needs_trust(&message) {
-        trust(env)?;
-        let (ok, stdout, stderr) = stream_once(env, args, &mut on_line)?;
-        return finish_parts(ok, stdout, stderr);
-    }
     finish_parts(ok, stdout, stderr)
 }
 
@@ -467,7 +424,10 @@ fn finish(output: std::process::Output) -> AppResult<String> {
 
 fn finish_parts(ok: bool, stdout: String, stderr: String) -> AppResult<String> {
     let message = combine(&stderr, &stdout);
-    if needs_login(&message) {
+    if !ok {
+        reject_untrusted_server(&message)?;
+    }
+    if !ok && needs_login(&message) {
         return Err(AppError::msg(P4_LOGIN));
     }
     if !ok {
@@ -491,7 +451,7 @@ fn run_once(env: &P4Env, args: &[&str], input: Option<&str>) -> AppResult<std::p
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child = command
         .spawn()
-        .map_err(|err| AppError::msg(err.to_string()))?;
+        .map_err(|err| p4_start_error(command.get_program(), err))?;
     if let Some(text) = input {
         if let Some(mut stdin) = child.stdin.take() {
             stdin
@@ -517,7 +477,7 @@ fn stream_once(
         .stderr(Stdio::piped());
     let mut child = command
         .spawn()
-        .map_err(|err| AppError::msg(err.to_string()))?;
+        .map_err(|err| p4_start_error(command.get_program(), err))?;
     let stderr = child.stderr.take();
     let stderr_thread = thread::spawn(move || {
         let mut buf = Vec::new();
@@ -547,7 +507,7 @@ fn stream_once(
             }
             stdout_text.push_str(&line);
             stdout_text.push('\n');
-            on_line(line);
+            on_line(crate::error::redact_credentials(&line));
         }
     }
     let status = child.wait().map_err(|err| AppError::msg(err.to_string()))?;
@@ -581,14 +541,15 @@ fn prepared(program: PathBuf, env: &P4Env, args: &[&str]) -> Command {
     command
 }
 
-fn trust(env: &P4Env) -> AppResult<()> {
-    let mut bare = env.clone();
-    bare.client.clear();
-    let output = run_once(&bare, &["trust", "-y"], None)?;
-    if output.status.success() {
-        Ok(())
+fn p4_start_error(program: &std::ffi::OsStr, error: std::io::Error) -> AppError {
+    if matches!(
+        error.kind(),
+        std::io::ErrorKind::NotFound | std::io::ErrorKind::PermissionDenied
+    ) && !crate::locate::is_executable(Path::new(program))
+    {
+        AppError::msg(P4_MISSING)
     } else {
-        Err(AppError::msg(output_message(&output)))
+        AppError::msg(format!("Could not start Perforce: {error}"))
     }
 }
 
@@ -631,6 +592,15 @@ fn combine(stderr: &str, stdout: &str) -> String {
 fn needs_trust(text: &str) -> bool {
     let lower = text.to_ascii_lowercase();
     lower.contains("p4 trust") || lower.contains("authenticity of")
+}
+
+fn reject_untrusted_server(message: &str) -> AppResult<()> {
+    if needs_trust(message) {
+        return Err(AppError::msg(
+            "Perforce server identity is not trusted. Verify the server fingerprint with your administrator, then establish trust with p4 before reconnecting.",
+        ));
+    }
+    Ok(())
 }
 
 fn needs_login(text: &str) -> bool {
@@ -715,10 +685,78 @@ mod tests {
     #[test]
     fn extra_paths_drop_duplicates_and_other_tools() {
         let extras = normalize_extra_p4_paths(vec![
-            r"C:\Perforce\p4.exe".into(),
-            r"C:/Perforce/p4.exe".into(),
-            r"C:\Perforce\p4v.exe".into(),
+            "/opt/perforce/p4".into(),
+            "/opt/perforce/p4".into(),
+            "/opt/perforce/p4v".into(),
         ]);
-        assert_eq!(extras, vec![r"C:\Perforce\p4.exe".to_string()]);
+        assert_eq!(extras, vec!["/opt/perforce/p4".to_string()]);
+    }
+
+    #[test]
+    fn does_not_accept_unverified_tls_fingerprints() {
+        let message = super::finish_parts(
+            false,
+            String::new(),
+            "Run p4 trust to verify authenticity of the server.".into(),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(message.contains("Verify the server fingerprint"));
+        assert!(!message.contains("trust -y"));
+        assert!(super::finish_parts(true, "normal result".into(), String::new()).is_ok());
+    }
+
+    #[test]
+    fn file_content_cannot_trigger_credential_or_trust_prompts() {
+        let content = "@@ -1 +1 @@\n-session has expired\n+please login and run p4 trust\n";
+        assert_eq!(
+            super::finish_diff(false, content.into(), String::new()).unwrap(),
+            content
+        );
+        assert_eq!(
+            super::finish_parts(true, "please login".into(), String::new()).unwrap(),
+            "please login"
+        );
+        assert_eq!(
+            super::finish_diff(false, String::new(), "Your session has expired.".into())
+                .unwrap_err()
+                .to_string(),
+            crate::error::P4_LOGIN
+        );
+    }
+
+    #[test]
+    fn keeps_unix_executable_paths_distinct_by_case() {
+        assert_eq!(
+            super::same_p4_path("/work/P4/p4", "/work/p4/p4"),
+            cfg!(windows)
+        );
+    }
+
+    #[test]
+    fn reports_a_removed_p4_executable_with_the_recovery_error() {
+        let error = super::p4_start_error(
+            Path::new("rebasely-missing-executable/p4").as_os_str(),
+            std::io::Error::from(std::io::ErrorKind::NotFound),
+        );
+        assert_eq!(error.to_string(), crate::error::P4_MISSING);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_unix_p4_files_without_execute_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("rebasely-p4-mode-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("p4");
+        std::fs::write(&path, b"#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(
+            validate_p4_choice(&path.to_string_lossy())
+                .unwrap_err()
+                .to_string(),
+            crate::error::P4_MISSING
+        );
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

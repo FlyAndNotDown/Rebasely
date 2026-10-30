@@ -206,7 +206,7 @@ pub fn add_worktree(
     if let Some(name) = new_branch {
         args.extend(["-b", name]);
     }
-    args.push(path);
+    args.extend(["--", path]);
     match (
         new_branch,
         branch.map(str::trim).filter(|name| !name.is_empty()),
@@ -231,7 +231,7 @@ pub fn remove_worktree(repo: &Repository, path: &str, force: bool) -> AppResult<
     if force {
         args.push("--force");
     }
-    args.push(path.trim());
+    args.extend(["--", path.trim()]);
     run_git_stdout(workdir(repo)?, &args)?;
     Ok(())
 }

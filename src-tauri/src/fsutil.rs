@@ -1,32 +1,17 @@
-use std::fs::{self, File};
 use std::io::{self, Write};
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::path::Path;
 
 /// Writes through a sibling temp file and a rename, so a crash mid-write leaves
 /// the previous file in place instead of a truncated one.
 pub fn write_atomic(path: &Path, contents: &[u8]) -> io::Result<()> {
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let mut name = path.as_os_str().to_owned();
-    name.push(format!(
-        ".{}-{}.tmp",
-        std::process::id(),
-        COUNTER.fetch_add(1, Ordering::Relaxed)
-    ));
-    let tmp = PathBuf::from(name);
-    let written = (|| {
-        let mut file = File::create(&tmp)?;
-        file.write_all(contents)?;
-        file.sync_all()
-    })();
-    if let Err(err) = written {
-        let _ = fs::remove_file(&tmp);
-        return Err(err);
-    }
-    if let Err(err) = fs::rename(&tmp, path) {
-        let _ = fs::remove_file(&tmp);
-        return Err(err);
-    }
+    let parent = path
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
+    temporary.write_all(contents)?;
+    temporary.as_file().sync_all()?;
+    temporary.persist(path).map_err(|error| error.error)?;
     Ok(())
 }
 

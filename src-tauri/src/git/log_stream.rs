@@ -54,11 +54,14 @@ fn close_idle_log_streams() {
 }
 
 fn root_key(path: &str) -> String {
-    let slash = strip_verbatim_prefix(path)
-        .replace('\\', "/")
-        .trim_end_matches('/')
-        .to_string();
-    if cfg!(any(windows, target_os = "macos")) {
+    let path = strip_verbatim_prefix(path);
+    let slash = if cfg!(windows) {
+        path.replace('\\', "/")
+    } else {
+        path
+    };
+    let slash = slash.trim_end_matches('/').to_string();
+    if cfg!(windows) {
         slash.to_lowercase()
     } else {
         slash
@@ -136,4 +139,23 @@ pub(super) fn log_page(
         }
     }
     Ok(page)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::root_key;
+
+    #[test]
+    fn preserves_case_sensitive_repository_names() {
+        assert_eq!(
+            root_key("/work/Repo") == root_key("/work/repo"),
+            cfg!(windows)
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn preserves_backslashes_in_unix_repository_names() {
+        assert_ne!(root_key("/work/with\\slash"), root_key("/work/with/slash"));
+    }
 }

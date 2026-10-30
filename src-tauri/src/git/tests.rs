@@ -347,7 +347,14 @@ fn discard_restores_tracked_and_removes_new_files() {
 
 #[test]
 fn safe_repo_path_rejects_escapes() {
-    assert_eq!(safe_repo_path("src\\main.rs").unwrap(), "src/main.rs");
+    assert_eq!(
+        safe_repo_path("src\\main.rs").unwrap(),
+        if cfg!(windows) {
+            "src/main.rs"
+        } else {
+            "src\\main.rs"
+        }
+    );
     assert_eq!(safe_repo_path("/src/").unwrap(), "src");
     assert!(safe_repo_path("../secret").is_err());
     assert!(safe_repo_path("a/./b").is_err());
@@ -1262,6 +1269,68 @@ fn image_pairs_read_each_side_and_flag_lfs_pointers() {
     let pair = image_pair(&repo, &source).unwrap();
     assert!(pair.before.is_none() && pair.after.is_some());
     let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn oversized_images_are_described_without_loading_their_contents() {
+    let (root, repo) = temp_repo();
+    let path = root.join("large.png");
+    let size = 20 * 1024 * 1024 + 1;
+    fs::File::create(&path).unwrap().set_len(size).unwrap();
+    let source = FileSource::Workdir {
+        path: "large.png".into(),
+        staged: false,
+    };
+    let worktree = image_pair(&repo, &source).unwrap().after.unwrap();
+    assert!(worktree.too_large && worktree.data_url.is_none());
+    assert_eq!(worktree.size, size);
+
+    stage_paths(&repo, &["large.png".into()]).unwrap();
+    let source = FileSource::Workdir {
+        path: "large.png".into(),
+        staged: true,
+    };
+    let index = image_pair(&repo, &source).unwrap().after.unwrap();
+    assert!(index.too_large && index.data_url.is_none());
+    assert_eq!(index.size, size);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn ref_names_cannot_be_interpreted_as_mutating_options() {
+    let (root, repo) = temp_repo();
+    commit_file(&repo, &root, "file.txt", "base\n", "base");
+    let oid = head_id(&repo);
+    run_git_stdout(&root, &["tag", &oid]).unwrap();
+    run_git_stdout(&root, &["branch", &oid]).unwrap();
+
+    assert!(create_tag(&repo, "--delete", None, Some("HEAD")).is_err());
+    assert!(ref_exists(&repo, &format!("refs/tags/{oid}")));
+    assert!(create_branch(&repo, "--delete", false, Some("HEAD")).is_err());
+    assert!(ref_exists(&repo, &format!("refs/heads/{oid}")));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn file_views_reject_symlinks_that_leave_the_repository() {
+    let (root, repo) = temp_repo();
+    let outside = root.with_extension("outside");
+    fs::create_dir(&outside).unwrap();
+    fs::write(outside.join("private.txt"), b"outside").unwrap();
+    std::os::unix::fs::symlink(&outside, root.join("linked-directory")).unwrap();
+    std::os::unix::fs::symlink(outside.join("private.txt"), root.join("linked-file")).unwrap();
+
+    assert!(list_directory(&repo, "linked-directory").is_err());
+    assert!(read_file(&repo, "linked-file").is_err());
+    assert!(read_file(&repo, "linked-directory/private.txt").is_err());
+    assert!(ensure_inside_workdir(&repo, "linked-directory/missing.txt").is_err());
+    std::os::unix::fs::symlink(outside.join("missing.txt"), root.join("broken-link")).unwrap();
+    assert!(ensure_inside_workdir(&repo, "broken-link").is_err());
+    assert!(ensure_inside_workdir(&repo, "../missing.txt").is_err());
+    assert!(ensure_inside_workdir(&repo, "new-folder/missing.txt").is_ok());
+    fs::remove_dir_all(root).unwrap();
+    fs::remove_dir_all(outside).unwrap();
 }
 
 #[test]

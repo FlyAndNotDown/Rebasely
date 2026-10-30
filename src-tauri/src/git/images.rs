@@ -96,30 +96,79 @@ pub(super) fn image_side(path: &str, bytes: &[u8]) -> ImageSide {
     }
 }
 
-fn blob_at(repo: &Repository, spec: &str) -> Option<Vec<u8>> {
-    cat_blob(repo, spec)
+fn oversized_image(size: u64) -> ImageSide {
+    ImageSide {
+        data_url: None,
+        size,
+        lfs: false,
+        too_large: true,
+    }
+}
+
+fn blob_at(repo: &Repository, path: &str, spec: &str) -> Option<ImageSide> {
+    let size = run_git_stdout(repo.workdir(), &["cat-file", "-s", spec]).ok()?;
+    let size: u64 = String::from_utf8_lossy(&size).trim().parse().ok()?;
+    if size > MAX_IMAGE_BYTES as u64 {
+        return Some(oversized_image(size));
+    }
+    let mut child = spawn_git_stdout(repo.workdir(), &["cat-file", "blob", spec]).ok()?;
+    let Some(stdout) = child.stdout.take() else {
+        stop_child(&mut child);
+        return None;
+    };
+    let mut bytes = Vec::new();
+    if stdout
+        .take(MAX_IMAGE_BYTES as u64 + 1)
+        .read_to_end(&mut bytes)
+        .is_err()
+    {
+        stop_child(&mut child);
+        return None;
+    }
+    if bytes.len() > MAX_IMAGE_BYTES {
+        stop_child(&mut child);
+        return Some(oversized_image(size.max(bytes.len() as u64)));
+    }
+    child
+        .wait()
+        .ok()
+        .filter(|status| status.success())
+        .map(|_| image_side(path, &bytes))
+}
+
+fn worktree_side(path: &str, full: &Path) -> AppResult<Option<ImageSide>> {
+    let metadata = match fs::metadata(full) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    if !metadata.is_file() {
+        return Ok(None);
+    }
+    if metadata.len() > MAX_IMAGE_BYTES as u64 {
+        return Ok(Some(oversized_image(metadata.len())));
+    }
+    let mut bytes = Vec::new();
+    fs::File::open(full)?
+        .take(MAX_IMAGE_BYTES as u64 + 1)
+        .read_to_end(&mut bytes)?;
+    Ok(Some(image_side(path, &bytes)))
 }
 
 pub fn image_pair(repo: &Repository, source: &FileSource) -> AppResult<ImagePair> {
-    let side = |path: &str, bytes: Option<Vec<u8>>| bytes.map(|bytes| image_side(path, &bytes));
     let (before, after) = match source {
         FileSource::Workdir { path, staged } => {
             let rel = safe_repo_path(path)?;
             if *staged {
                 (
-                    side(&rel, blob_at(repo, &format!("HEAD:{rel}"))),
-                    side(&rel, blob_at(repo, &format!(":0:{rel}"))),
+                    blob_at(repo, &rel, &format!("HEAD:{rel}")),
+                    blob_at(repo, &rel, &format!(":0:{rel}")),
                 )
             } else {
                 let full = ensure_inside_workdir(repo, &rel)?;
-                let current = if full.is_file() {
-                    Some(fs::read(&full)?)
-                } else {
-                    None
-                };
                 (
-                    side(&rel, blob_at(repo, &format!(":0:{rel}"))),
-                    side(&rel, current),
+                    blob_at(repo, &rel, &format!(":0:{rel}")),
+                    worktree_side(&rel, &full)?,
                 )
             }
         }
@@ -133,11 +182,8 @@ pub fn image_pair(repo: &Repository, source: &FileSource) -> AppResult<ImagePair
             let commit = peel_commit(repo, oid)?;
             let parent = commit.parents.first();
             (
-                side(
-                    &old,
-                    parent.and_then(|parent| blob_at(repo, &format!("{parent}:{old}"))),
-                ),
-                side(&rel, blob_at(repo, &format!("{}:{rel}", commit.id))),
+                parent.and_then(|parent| blob_at(repo, &old, &format!("{parent}:{old}"))),
+                blob_at(repo, &rel, &format!("{}:{rel}", commit.id)),
             )
         }
         FileSource::Compare {
@@ -151,28 +197,25 @@ pub fn image_pair(repo: &Repository, source: &FileSource) -> AppResult<ImagePair
             let base = peel_commit(repo, base)?.id().to_string();
             let head = peel_commit(repo, head)?.id().to_string();
             (
-                side(&old, blob_at(repo, &format!("{base}:{old}"))),
-                side(&rel, blob_at(repo, &format!("{head}:{rel}"))),
+                blob_at(repo, &old, &format!("{base}:{old}")),
+                blob_at(repo, &rel, &format!("{head}:{rel}")),
             )
         }
         FileSource::Stash { oid, path } => {
             let rel = safe_repo_path(path)?;
             let stash = peel_commit(repo, oid)?;
-            let current = blob_at(repo, &format!("{}:{rel}", stash.id)).or_else(|| {
+            let current = blob_at(repo, &rel, &format!("{}:{rel}", stash.id)).or_else(|| {
                 stash
                     .parents
                     .get(2)
-                    .and_then(|parent| blob_at(repo, &format!("{parent}:{rel}")))
+                    .and_then(|parent| blob_at(repo, &rel, &format!("{parent}:{rel}")))
             });
             (
-                side(
-                    &rel,
-                    stash
-                        .parents
-                        .first()
-                        .and_then(|parent| blob_at(repo, &format!("{parent}:{rel}"))),
-                ),
-                side(&rel, current),
+                stash
+                    .parents
+                    .first()
+                    .and_then(|parent| blob_at(repo, &rel, &format!("{parent}:{rel}"))),
+                current,
             )
         }
     };

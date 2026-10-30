@@ -31,9 +31,8 @@ pub struct BlameHunk {
 }
 
 pub fn list_directory(repo: &Repository, path: &str) -> AppResult<Vec<DirEntry>> {
-    let root = workdir(repo)?;
     let rel = safe_repo_path(path)?;
-    let dir = root.join(&rel);
+    let dir = ensure_inside_workdir(repo, &rel)?;
     let mut pending = Vec::new();
     for item in std::fs::read_dir(&dir).map_err(|_| AppError::msg("Folder not found"))? {
         let item = item?;
@@ -158,12 +157,12 @@ pub fn read_file(repo: &Repository, path: &str) -> AppResult<FileText> {
         .map_err(|_| AppError::msg("File not found"))?
         .len()
         > MAX_TEXT_BYTES;
-    let bytes = if too_large {
-        Vec::new()
+    let (bytes, grew_too_large) = if too_large {
+        (Vec::new(), false)
     } else {
-        fs::read(&full).map_err(|_| AppError::msg("File not found"))?
+        read_text_prefix(&full).map_err(|_| AppError::msg("File not found"))?
     };
-    if too_large || bytes.iter().take(8192).any(|byte| *byte == 0) {
+    if too_large || grew_too_large || bytes.iter().take(8192).any(|byte| *byte == 0) {
         return Ok(FileText {
             binary: true,
             text: String::new(),
@@ -202,12 +201,11 @@ fn in_head(repo: &Repository, rel: &str) -> bool {
 }
 
 pub(super) fn work_file_path(repo: &Repository, path: &str) -> AppResult<PathBuf> {
-    let root = workdir(repo)?;
     let rel = safe_repo_path(path)?;
     if rel.is_empty() {
         return Err(AppError::msg("A file is required"));
     }
-    Ok(root.join(rel))
+    ensure_inside_workdir(repo, &rel)
 }
 
 /// Reads at most `MAX_TEXT_BYTES`; the flag reports whether the file was longer.
