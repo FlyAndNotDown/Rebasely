@@ -6,6 +6,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -444,7 +445,68 @@ pub fn describe(connection: &P4Connection, change_id: &str) -> AppResult<P4Descr
 
 pub fn opened_diff(connection: &P4Connection, path: &str) -> AppResult<FileDiff> {
     let env = env_for(connection);
-    let text = cli::run_p4_diff(&env, &["diff", "-du", path])?;
+    let spec = workspace_file_spec(&connection.root, path);
+    let meta = run_ok(
+        &env,
+        &[
+            "-ztag",
+            "fstat",
+            "-T",
+            "action,clientFile,depotFile,type",
+            &spec,
+        ],
+        None,
+    )?;
+    let record = parse_ztag(&meta).into_iter().next().unwrap_or_default();
+    let action = field(&record, "action");
+    if action == "add" || action == "move/add" {
+        let local = PathBuf::from(field(&record, "clientFile"));
+        let root = fs::canonicalize(&connection.root)?;
+        let parent = local
+            .parent()
+            .ok_or_else(|| AppError::msg("Choose a file."))?;
+        if !path_is_within(&root, &fs::canonicalize(parent)?) {
+            return Err(AppError::msg("Path is outside the workspace."));
+        }
+        if field(&record, "type").split('+').next() == Some("symlink") {
+            let target = fs::read_link(local)?;
+            return Ok(content_file_diff(
+                path,
+                target.to_string_lossy().as_bytes(),
+                false,
+                false,
+                false,
+            ));
+        }
+        let local = fs::canonicalize(local)?;
+        if !path_is_within(&root, &local) {
+            return Err(AppError::msg("Path is outside the workspace."));
+        }
+        let mut bytes = Vec::new();
+        fs::File::open(local)?
+            .take((MAX_PREVIEW_BYTES + 1) as u64)
+            .read_to_end(&mut bytes)?;
+        let truncated = bytes.len() > MAX_PREVIEW_BYTES;
+        bytes.truncate(MAX_PREVIEW_BYTES);
+        return Ok(content_file_diff(
+            path,
+            &bytes,
+            truncated,
+            file_type_is_binary(&field(&record, "type")),
+            false,
+        ));
+    }
+    if action == "delete" || action == "move/delete" {
+        let have = format!("{}#have", field(&record, "depotFile"));
+        return printed_file_diff(
+            &env,
+            path,
+            &have,
+            file_type_is_binary(&field(&record, "type")),
+            true,
+        );
+    }
+    let text = cli::run_p4_diff(&env, &["diff", "-du", &spec])?;
     Ok(parse_single_diff(&text, path))
 }
 
@@ -460,6 +522,20 @@ pub fn shelf_diff(
     let env = env_for(connection);
     let have = format!("{depot_path}#have");
     let shelf = format!("{depot_path}@={id}");
+    let meta = run_ok(&env, &["-ztag", "files", &shelf], None)?;
+    let record = parse_ztag(&meta).into_iter().next().unwrap_or_default();
+    let action = field(&record, "action");
+    let deleted = action == "delete" || action == "move/delete";
+    if deleted || action == "add" || action == "move/add" {
+        let spec = if deleted { &have } else { &shelf };
+        return printed_file_diff(
+            &env,
+            depot_path,
+            spec,
+            file_type_is_binary(&field(&record, "type")),
+            deleted,
+        );
+    }
     let text = cli::run_p4_diff(&env, &["diff2", "-du", &have, &shelf])?;
     Ok(parse_single_diff(&text, depot_path))
 }
@@ -470,10 +546,11 @@ pub fn revision_diff(connection: &P4Connection, path: &str, rev: &str) -> AppRes
         .parse()
         .map_err(|_| AppError::msg("Revision is not a number."))?;
     let env = env_for(connection);
-    let depot_path = if path.starts_with("//") {
-        path.to_string()
+    let spec = workspace_file_spec(&connection.root, path);
+    let depot_path = if spec.starts_with("//") {
+        spec
     } else {
-        let stdout = run_ok(&env, &["-ztag", "where", path], None)?;
+        let stdout = run_ok(&env, &["-ztag", "where", &spec], None)?;
         let record = parse_ztag(&stdout).into_iter().next().unwrap_or_default();
         let depot = field(&record, "depotFile");
         if depot.starts_with("//") {
@@ -483,12 +560,8 @@ pub fn revision_diff(connection: &P4Connection, path: &str, rev: &str) -> AppRes
         }
     };
     if rev_no <= 1 {
-        let text = run_ok(
-            &env,
-            &["print", "-q", &format!("{depot_path}#{rev_no}")],
-            None,
-        )?;
-        return Ok(added_file_diff(&depot_path, &text));
+        let spec = format!("{depot_path}#{rev_no}");
+        return printed_file_diff(&env, &depot_path, &spec, false, false);
     }
     let spec = format!("{depot_path}#{rev_no}");
     let previous = format!("{depot_path}#{}", rev_no - 1);
@@ -498,7 +571,8 @@ pub fn revision_diff(connection: &P4Connection, path: &str, rev: &str) -> AppRes
 
 pub fn filelog(connection: &P4Connection, path: &str) -> AppResult<Vec<P4Revision>> {
     let env = env_for(connection);
-    let stdout = run_ok(&env, &["-ztag", "filelog", "-m", "40", "-t", path], None)?;
+    let spec = workspace_file_spec(&connection.root, path);
+    let stdout = run_ok(&env, &["-ztag", "filelog", "-m", "40", "-t", &spec], None)?;
     let record = parse_ztag(&stdout).into_iter().next().unwrap_or_default();
     let mut revisions = Vec::new();
     for group in indexed_groups(&record) {
@@ -854,7 +928,12 @@ fn client_view_roots(spec: &str) -> Vec<String> {
             continue;
         }
         let mapping = trimmed.trim_start_matches('+');
-        let Some(depot) = mapping.split_whitespace().next() else {
+        let depot = if let Some(quoted) = mapping.strip_prefix('"') {
+            quoted.split('"').next()
+        } else {
+            mapping.split_whitespace().next()
+        };
+        let Some(depot) = depot else {
             continue;
         };
         let Some(root) = mapping_root(depot) else {
@@ -902,11 +981,12 @@ fn depot_listing(env: &P4Env, args: &[&str]) -> AppResult<Vec<ZtagRecord>> {
 }
 
 fn depot_base(path: &str) -> String {
-    path.trim_end_matches('/')
-        .rsplit('/')
-        .next()
-        .unwrap_or(path)
-        .to_string()
+    unescape_p4_path(
+        path.trim_end_matches('/')
+            .rsplit('/')
+            .next()
+            .unwrap_or(path),
+    )
 }
 
 fn sort_dir_entries(entries: &mut [P4DirEntry]) {
@@ -939,7 +1019,13 @@ pub fn listing_status(
     }
     let root = PathBuf::from(&connection.root);
     let dir = workspace_directory(&root, directory)?;
-    let pattern = dir.join("*").to_string_lossy().into_owned();
+    let pattern = PathBuf::from(workspace_file_spec(
+        &connection.root,
+        &dir.to_string_lossy(),
+    ))
+    .join("*")
+    .to_string_lossy()
+    .into_owned();
     Ok(statuses_from(&env_for(connection), &[pattern], false))
 }
 
@@ -1173,7 +1259,10 @@ fn annotate_paths(connection: &P4Connection, files: &mut [P4DirEntry]) {
     let env = env_for(connection);
     let mut known = HashMap::<String, (String, String)>::new();
     let mut depot_of = HashMap::<String, String>::new();
-    let paths: Vec<String> = files.iter().map(|file| file.path.clone()).collect();
+    let paths: Vec<String> = files
+        .iter()
+        .map(|file| workspace_file_spec(&connection.root, &file.path))
+        .collect();
     for chunk in paths.chunks(40) {
         for record in fstat_records(&env, chunk) {
             let client_file = field(&record, "clientFile");
@@ -1572,7 +1661,11 @@ pub fn reopen(connection: &P4Connection, change_id: &str, files: &[String]) -> A
     };
     let env = env_for(connection);
     let mut args = vec!["reopen".to_string(), "-c".into(), target.into()];
-    args.extend(files.iter().cloned());
+    args.extend(
+        files
+            .iter()
+            .map(|path| workspace_file_spec(&connection.root, path)),
+    );
     run_owned(&env, &args, None)?;
     Ok(())
 }
@@ -1595,7 +1688,11 @@ fn revert_with(env: &P4Env, files: &[String], wipe: bool) -> AppResult<()> {
     if wipe {
         args.push("-w".into());
     }
-    args.extend(files.iter().cloned());
+    args.extend(
+        files
+            .iter()
+            .map(|path| workspace_file_spec(&env.cwd.to_string_lossy(), path)),
+    );
     run_owned(env, &args, None)?;
     Ok(())
 }
@@ -1610,7 +1707,11 @@ pub fn shelve(connection: &P4Connection, change_id: &str, files: &[String]) -> A
     let id = require_numbered(change_id)?;
     let env = env_for(connection);
     let mut args = vec!["shelve".to_string(), "-f".into(), "-c".into(), id];
-    args.extend(files.iter().cloned());
+    args.extend(
+        files
+            .iter()
+            .map(|path| workspace_file_spec(&connection.root, path)),
+    );
     run_owned(&env, &args, None)?;
     Ok(())
 }
@@ -1628,7 +1729,11 @@ pub fn unshelve(
         args.push("-c".into());
         args.push(require_numbered(target)?);
     }
-    args.extend(files.iter().cloned());
+    args.extend(
+        files
+            .iter()
+            .map(|path| workspace_file_spec(&connection.root, path)),
+    );
     run_owned(&env, &args, None)?;
     Ok(())
 }
@@ -1658,11 +1763,12 @@ pub fn resolve_view(connection: &P4Connection, path: &str) -> AppResult<P4Resolv
         return Err(AppError::msg("Choose a file to resolve."));
     }
     let env = env_for(connection);
-    let stdout = run_ok(&env, &["-ztag", "fstat", "-Or", path], None)?;
+    let spec = workspace_file_spec(&connection.root, path);
+    let stdout = run_ok(&env, &["-ztag", "fstat", "-Or", &spec], None)?;
     let record = parse_ztag(&stdout).into_iter().next().unwrap_or_default();
     let mut facts = facts_from_fstat(&record, path);
     if facts.from_file.is_empty() {
-        let preview = run_ok(&env, &["resolve", "-n", "-o", path], None).unwrap_or_default();
+        let preview = run_ok(&env, &["resolve", "-n", "-o", &spec], None).unwrap_or_default();
         if let Some(parsed) = parse_resolve_preview(&preview) {
             facts = parsed;
         }
@@ -1692,8 +1798,9 @@ pub fn resolve_accept(connection: &P4Connection, path: &str, mode: &str) -> AppR
         return Err(AppError::msg("Choose a file to resolve."));
     }
     let env = env_for(connection);
-    run_ok(&env, &["resolve", flag, path], None)?;
-    if mode == "merge" && resolve_still_open(&env, path)? {
+    let spec = workspace_file_spec(&connection.root, path);
+    run_ok(&env, &["resolve", flag, &spec], None)?;
+    if mode == "merge" && resolve_still_open(&env, &spec)? {
         return Err(AppError::msg(
             "The merge has conflicts. Accept yours or theirs.",
         ));
@@ -1944,7 +2051,11 @@ pub fn sync(
     paths: &[String],
     progress: impl FnMut(&str),
 ) -> AppResult<String> {
-    sync_paths(&env_for(connection), paths, SyncFlags::default(), progress)
+    let paths: Vec<_> = paths
+        .iter()
+        .map(|path| workspace_file_spec(&connection.root, path))
+        .collect();
+    sync_paths(&env_for(connection), &paths, SyncFlags::default(), progress)
 }
 
 pub fn get_revision(
@@ -1992,7 +2103,7 @@ fn revision_targets(env: &P4Env, request: &P4GetRevision) -> AppResult<(Vec<Stri
         let paths = request
             .paths
             .iter()
-            .map(|path| file_at(path, &suffix))
+            .map(|path| workspace_file_at(&env.cwd.to_string_lossy(), path, &suffix))
             .collect();
         return Ok((paths, String::new()));
     }
@@ -2001,7 +2112,11 @@ fn revision_targets(env: &P4Env, request: &P4GetRevision) -> AppResult<(Vec<Stri
     let mut skipped = 0usize;
     for path in &request.paths {
         match file_rev_at_label(env, path, label)? {
-            Some(rev) => paths.push(file_at(path, &format!("#{rev}"))),
+            Some(rev) => paths.push(workspace_file_at(
+                &env.cwd.to_string_lossy(),
+                path,
+                &format!("#{rev}"),
+            )),
             None => skipped += 1,
         }
     }
@@ -2016,7 +2131,7 @@ fn revision_targets(env: &P4Env, request: &P4GetRevision) -> AppResult<(Vec<Stri
 }
 
 fn file_rev_at_label(env: &P4Env, path: &str, label: &str) -> AppResult<Option<String>> {
-    let spec = file_at(path, &format!("@{label}"));
+    let spec = workspace_file_at(&env.cwd.to_string_lossy(), path, &format!("@{label}"));
     match run_ok(env, &["-ztag", "files", &spec], None) {
         Ok(stdout) => Ok(parse_ztag(&stdout).into_iter().find_map(|record| {
             let rev = field(&record, "rev");
@@ -2165,10 +2280,57 @@ fn valid_label(name: &str) -> bool {
 }
 
 fn file_at(path: &str, suffix: &str) -> String {
-    if suffix.is_empty() {
+    format!("{}{suffix}", file_spec(path))
+}
+
+fn workspace_file_spec(root: &str, path: &str) -> String {
+    file_spec(&workspace_cli_path(root, path))
+}
+
+fn workspace_file_at(root: &str, path: &str, suffix: &str) -> String {
+    file_at(&workspace_cli_path(root, path), suffix)
+}
+
+fn workspace_cli_path(root: &str, path: &str) -> String {
+    if cfg!(windows) {
+        if let Some(local) = local_unc_path(root, path) {
+            return local;
+        }
+    }
+    path.to_string()
+}
+
+/// A forward-slash UNC path inside this workspace is local, even though it begins with //.
+fn local_unc_path(root: &str, path: &str) -> Option<String> {
+    let normalize = |value: &str| {
+        let value = value.replace('\\', "/");
+        if let Some(rest) = value.strip_prefix("//?/UNC/") {
+            format!("//{rest}")
+        } else {
+            value
+        }
+    };
+    let root = normalize(root);
+    let path = normalize(path);
+    if !root.starts_with("//") || !path.starts_with("//") {
+        return None;
+    }
+    let root = root.trim_end_matches('/');
+    let prefix = path.get(..root.len())?;
+    if !prefix.eq_ignore_ascii_case(root)
+        || (path.len() != root.len() && path.as_bytes().get(root.len()) != Some(&b'/'))
+    {
+        return None;
+    }
+    Some(path.replace('/', "\\"))
+}
+
+/// Depot/client paths returned by p4 already contain filespec escapes; local paths do not.
+fn file_spec(path: &str) -> String {
+    if path.starts_with("//") {
         path.to_string()
     } else {
-        format!("{}{suffix}", escape_p4_path(path))
+        escape_p4_path(path)
     }
 }
 
@@ -2177,6 +2339,14 @@ fn escape_p4_path(path: &str) -> String {
         .replace('#', "%23")
         .replace('@', "%40")
         .replace('*', "%2A")
+}
+
+fn unescape_p4_path(path: &str) -> String {
+    path.replace("%40", "@")
+        .replace("%23", "#")
+        .replace("%2A", "*")
+        .replace("%2a", "*")
+        .replace("%25", "%")
 }
 
 fn sync_paths(
@@ -2301,7 +2471,21 @@ pub fn file_action(connection: &P4Connection, action: &str, paths: &[String]) ->
     }
     let env = env_for(connection);
     let mut args = vec![command.to_string()];
-    args.extend(paths.iter().cloned());
+    if command == "add" {
+        // Unlike other commands, add -f needs literal filenames, including wildcards.
+        args.push("-f".into());
+        args.extend(
+            paths
+                .iter()
+                .map(|path| workspace_cli_path(&connection.root, path)),
+        );
+    } else {
+        args.extend(
+            paths
+                .iter()
+                .map(|path| workspace_file_spec(&connection.root, path)),
+        );
+    }
     run_owned(&env, &args, None)?;
     Ok(())
 }
@@ -2836,13 +3020,15 @@ pub struct P4Location {
 
 /// Map a workspace or depot path to the other side of the client view.
 pub fn locate(connection: &P4Connection, path: &str) -> AppResult<P4Location> {
-    let depot_spec = path.trim().starts_with("//");
+    let path = workspace_cli_path(&connection.root, path.trim());
+    let depot_spec = path.starts_with("//");
     let spec = trim_location_separators(path.trim(), depot_spec);
     if spec.is_empty() || spec == "//" {
         return Err(AppError::msg("Choose a file or folder."));
     }
     let env = env_for(connection);
-    let stdout = run_ok(&env, &["-ztag", "where", spec], None)?;
+    let encoded = file_spec(spec);
+    let stdout = run_ok(&env, &["-ztag", "where", &encoded], None)?;
     let wanted = normalize_location(spec, depot_spec);
     let mut fallback = None;
     for record in parse_ztag(&stdout) {
@@ -2927,7 +3113,7 @@ fn local_from_client(root: &Path, client: &str, client_file: &str) -> String {
     if relative.is_empty() {
         return root.to_string_lossy().into_owned();
     }
-    root.join(relative.replace('/', std::path::MAIN_SEPARATOR_STR))
+    root.join(unescape_p4_path(relative).replace('/', std::path::MAIN_SEPARATOR_STR))
         .to_string_lossy()
         .into_owned()
 }
@@ -3192,10 +3378,47 @@ fn change_spec(env: &P4Env, change_id: &str) -> AppResult<String> {
     }
 }
 
-fn added_file_diff(path: &str, text: &str) -> FileDiff {
+const MAX_PREVIEW_BYTES: usize = 2_000_000;
+
+fn printed_file_diff(
+    env: &P4Env,
+    path: &str,
+    spec: &str,
+    binary: bool,
+    deleted: bool,
+) -> AppResult<FileDiff> {
+    if binary {
+        return Ok(content_file_diff(path, &[], false, true, deleted));
+    }
+    let (bytes, truncated) = cli::read_file_prefix(env, spec, MAX_PREVIEW_BYTES)?;
+    Ok(content_file_diff(path, &bytes, truncated, false, deleted))
+}
+
+fn content_file_diff(
+    path: &str,
+    bytes: &[u8],
+    truncated: bool,
+    binary: bool,
+    deleted: bool,
+) -> FileDiff {
+    if binary || bytes.contains(&0) {
+        return FileDiff {
+            path: path.to_string(),
+            old_path: None,
+            binary: true,
+            truncated,
+            lines: Vec::new(),
+        };
+    }
+    let text = String::from_utf8_lossy(bytes);
+    let count = text.lines().count();
     let mut lines = vec![crate::git::DiffLine {
         kind: "hunk".to_string(),
-        content: format!("@@ -0,0 +1,{} @@", text.lines().count()),
+        content: if deleted {
+            format!("@@ -1,{count} +0,0 @@")
+        } else {
+            format!("@@ -0,0 +1,{count} @@")
+        },
         old_lineno: None,
         new_lineno: None,
     }];
@@ -3210,17 +3433,17 @@ fn added_file_diff(path: &str, text: &str) -> FileDiff {
             };
         }
         lines.push(crate::git::DiffLine {
-            kind: "add".to_string(),
+            kind: if deleted { "delete" } else { "add" }.to_string(),
             content: line.to_string(),
-            old_lineno: None,
-            new_lineno: Some((index as u32) + 1),
+            old_lineno: deleted.then_some((index as u32) + 1),
+            new_lineno: (!deleted).then_some((index as u32) + 1),
         });
     }
     FileDiff {
         path: path.to_string(),
         old_path: None,
         binary: false,
-        truncated: false,
+        truncated,
         lines,
     }
 }
@@ -3598,6 +3821,12 @@ Description:
     }
 
     #[test]
+    fn client_view_roots_keep_quoted_directories_with_spaces() {
+        let spec = "View:\n\t\"//depot/shared files/...\" //pc/...\n";
+        assert_eq!(client_view_roots(spec), vec!["//depot/shared files"]);
+    }
+
+    #[test]
     fn depot_path_is_the_first_status_line() {
         let (status, detail) = status_of(&record(&[
             ("depotFile", "//depot/main/notes.bat"),
@@ -3640,6 +3869,99 @@ Description:
         assert!(revision_suffix("datetime", "2026-10-16", false).is_err());
         assert!(revision_suffix("label", "bad label", false).is_err());
         assert_eq!(file_at(r"C:\work\a#b.txt", "#3"), r"C:\work\a%23b.txt#3");
+    }
+
+    #[test]
+    fn local_filespecs_escape_literal_names_and_keep_depot_encoding() {
+        assert_eq!(
+            file_spec("/work/client/a@b#c%d*e.txt"),
+            "/work/client/a%40b%23c%25d%2Ae.txt"
+        );
+        assert_eq!(
+            file_at("/work/client/a#b.txt", ""),
+            "/work/client/a%23b.txt"
+        );
+        assert_eq!(file_at("//depot/a%23b.txt", "#3"), "//depot/a%23b.txt#3");
+        assert_eq!(
+            file_spec("/work/client/folder@name/..."),
+            "/work/client/folder%40name/..."
+        );
+        assert_eq!(
+            file_spec("/work/client/literal%23.txt"),
+            "/work/client/literal%2523.txt"
+        );
+    }
+
+    #[test]
+    fn client_paths_decode_once_when_mapped_to_local_files() {
+        let root = Path::new("/work/client");
+        let expected = root.join("docs").join("a@b#c%d*e.txt");
+        assert_eq!(
+            local_from_client(root, "pc", "//pc/docs/a%40b%23c%25d%2Ae.txt"),
+            expected.to_string_lossy()
+        );
+        assert_eq!(
+            local_from_client(root, "pc", "//pc/literal%2523.txt"),
+            root.join("literal%23.txt").to_string_lossy()
+        );
+        assert_eq!(depot_base("//depot/docs/a%23b.txt"), "a#b.txt");
+        assert_eq!(depot_base("//depot/literal%2523.txt"), "literal%23.txt");
+    }
+
+    #[test]
+    fn file_content_diffs_keep_additions_deletions_and_missing_final_newlines() {
+        let added = content_file_diff("notes.txt", b"first\r\nlast", false, false, false);
+        assert_eq!(added.lines.len(), 3);
+        assert_eq!(added.lines[1].content, "first");
+        assert_eq!(added.lines[2].content, "last");
+        assert_eq!(added.lines[2].kind, "add");
+        assert_eq!(added.lines[2].new_lineno, Some(2));
+        assert_eq!(added.lines[2].old_lineno, None);
+        let deleted = content_file_diff("notes.txt", b"first\nlast", false, false, true);
+        assert_eq!(deleted.lines[0].content, "@@ -1,2 +0,0 @@");
+        assert_eq!(deleted.lines[2].kind, "delete");
+        assert_eq!(deleted.lines[2].old_lineno, Some(2));
+        assert_eq!(deleted.lines[2].new_lineno, None);
+        assert!(content_file_diff("image.bin", b"data\0", false, false, false).binary);
+        assert!(content_file_diff("image.bin", b"data", false, true, false).binary);
+        assert!(content_file_diff("notes.txt", b"data", true, false, false).truncated);
+        let many = "line\n".repeat(5_000);
+        let limited = content_file_diff("notes.txt", many.as_bytes(), false, false, false);
+        assert_eq!(limited.lines.len(), 4_000);
+        assert!(limited.truncated);
+        let unicode =
+            content_file_diff("notes.txt", "cafe\u{301}\n".as_bytes(), false, false, false);
+        assert_eq!(unicode.lines[1].content, "cafe\u{301}");
+    }
+
+    #[test]
+    fn windows_unc_files_keep_their_prefix_and_literal_filespec_characters() {
+        assert_eq!(
+            file_spec(r"\\server\share\a#b%file.txt"),
+            r"\\server\share\a%23b%25file.txt"
+        );
+        assert_eq!(
+            file_spec(r"\\?\UNC\server\share\a@b.txt"),
+            r"\\?\UNC\server\share\a%40b.txt"
+        );
+        let root = r"\\server\share\client";
+        let local = local_unc_path(root, "//SERVER/share/client/a#b%file.txt").unwrap();
+        assert_eq!(local, r"\\SERVER\share\client\a#b%file.txt");
+        assert_eq!(file_spec(&local), r"\\SERVER\share\client\a%23b%25file.txt");
+        assert_eq!(
+            file_at(&local, "#3"),
+            r"\\SERVER\share\client\a%23b%25file.txt#3"
+        );
+        assert!(local_unc_path(root, "//server/share/client-other/file.txt").is_none());
+        assert!(local_unc_path(root, "//depot/main/file%23name.txt").is_none());
+        assert_eq!(
+            local_unc_path(
+                r"\\?\UNC\server\share\client",
+                "//server/share/client/a.txt"
+            )
+            .unwrap(),
+            r"\\server\share\client\a.txt"
+        );
     }
 
     #[test]
