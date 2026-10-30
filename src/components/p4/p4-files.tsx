@@ -20,7 +20,7 @@ import {
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { HoverTip } from "@/components/ui/tooltip";
 import { FileTreeSkeleton, HistorySkeleton } from "@/components/skeletons";
-import { normalizeRepoPath } from "@/lib/format";
+import { normalizeRepoPath, pathsIgnoreCase } from "@/lib/format";
 import { errorMessage, gitApi, isCancelled } from "@/lib/git";
 import { joinRoot, type SearchNode } from "@/lib/file-search";
 import { changeSummary, p4Api, relativeToRoot } from "@/lib/p4";
@@ -830,14 +830,15 @@ function mergeListingStatus(entries: FileTreeEntry[], statuses: P4EntryStatus[],
   if (statuses.length === 0) return entries;
   const byPath = new Map<string, P4EntryStatus>();
   const byName = new Map<string, P4EntryStatus>();
+  const nameKey = (name: string) => pathsIgnoreCase() ? name.toLowerCase() : name;
   for (const status of statuses) {
     byPath.set(normalizeRepoPath(status.path), status);
-    const name = status.path.split(/[/\\]/).pop()?.toLowerCase() ?? "";
+    const name = nameKey(status.path.split(pathsIgnoreCase() ? /[/\\]/ : /\//).pop() ?? "");
     if (name) byName.set(name, status);
   }
   return entries.map((entry) => {
     if (entry.dir) return entry;
-    const found = byPath.get(normalizeRepoPath(entry.path)) ?? byName.get(entry.name.toLowerCase());
+    const found = byPath.get(normalizeRepoPath(entry.path)) ?? byName.get(nameKey(entry.name));
     if (!found && depot) return entry;
     const status = found?.status ?? "local";
     const detail = found?.detail || (found ? "" : "Not in the depot");

@@ -18,7 +18,7 @@ import { depotBase, P4_LOGIN, P4_MISSING, p4Api, syncSummary } from "@/lib/p4";
 import { sameRepoPath } from "@/lib/format";
 import { useGitPick } from "@/state/git-context";
 import { repoTabId, type RepoTab } from "@/state/session";
-import { defaultChange, fileKey, refreshPendingSession, sameP4Connection, shownFile, updateP4Session, type P4Session as Session, type P4View } from "@/state/p4-session";
+import { defaultChange, fileKey, refreshPendingSession, sameP4Connection, shownFile, updateP4Session, usableP4Session, type P4Session as Session, type P4View } from "@/state/p4-session";
 import { pendingDiffRequest, withP4Login } from "@/state/p4-requests";
 import type { FileDiff } from "@/types/git";
 import type {
@@ -148,16 +148,22 @@ export function P4Provider({ children }: { children: ReactNode }) {
   const loginRef = useRef<{ resolve: (value: string | null) => void } | null>(null);
   const activeTabRef = useRef(activeTab);
   const activePerforceId = activeTab.kind === "repo" && activeTab.vcs === "perforce" ? activeTab.id : "";
-  const visibleSession = session?.tabId === activePerforceId ? session : null;
+  const visibleSession = usableP4Session(session, activePerforceId, loading, error);
   const submittedLoading = submittedBusy.has(`${activePerforceId}:list`) || submittedBusy.has(`${activePerforceId}:detail`);
   const [attempt, setAttempt] = useState(0);
   const [loginTarget, setLoginTarget] = useState({ client: "", port: "" });
-  const reconnect = useCallback(() => setAttempt((value) => value + 1), []);
+  const reconnect = useCallback(() => {
+    sessionRef.current = null;
+    setLoading(true);
+    setError(null);
+    setAttempt((value) => value + 1);
+  }, []);
 
   useLayoutEffect(() => {
     activeTabRef.current = activeTab;
-    sessionRef.current = session?.tabId === activePerforceId ? session : cache.current.get(activePerforceId) ?? null;
-  }, [activePerforceId, activeTab, session]);
+    const candidate = session?.tabId === activePerforceId ? session : cache.current.get(activePerforceId) ?? null;
+    sessionRef.current = usableP4Session(candidate, activePerforceId, loading, error);
+  }, [activePerforceId, activeTab, error, loading, session]);
 
   const askPassword = useCallback((connection: P4Connection) => {
     setLoginTarget({ client: connection.client, port: connection.port });
@@ -215,7 +221,7 @@ export function P4Provider({ children }: { children: ReactNode }) {
 
   const updateSession = useCallback((tabId: string, update: (current: Session) => Session) => {
     const next = updateP4Session(cache.current, tabId, update);
-    if (next && activeTabRef.current.id === tabId) {
+    if (next && activeTabRef.current.id === tabId && sessionRef.current?.tabId === tabId) {
       sessionRef.current = next;
       setSession(next);
     }
@@ -262,9 +268,10 @@ export function P4Provider({ children }: { children: ReactNode }) {
     nextToken(submittedTokens.current, `${tab.id}:detail`);
     setSubmittedBusy((busy) => withoutKey(withoutKey(busy, `${tab.id}:list`), `${tab.id}:detail`));
     const token = ++generation.current;
+    setLoading(true);
     const cached = cache.current.get(tab.id);
     if (cached) {
-      sessionRef.current = cached;
+      sessionRef.current = null;
       setSession(cached);
       setError(null);
     } else {

@@ -1,13 +1,7 @@
-import { useState, type ReactNode } from "react";
+import { lazy, Suspense, useState, type ReactNode } from "react";
 import { ChangesPane } from "@/components/changes-pane";
 import { RebaseBanner } from "@/components/rebase-dialog";
-import { CommitFiles } from "@/components/commit-files";
 import { DiffViewer } from "@/components/diff-viewer";
-import { HistoryBranches } from "@/components/history-branches";
-import { FilesBrowser } from "@/components/files-browser";
-import { HistoryPane } from "@/components/history-pane";
-import { StashFiles } from "@/components/stash-files";
-import { StashComposer, StashPane } from "@/components/stash-pane";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -18,60 +12,9 @@ import { cn } from "@/lib/utils";
 import { useGitPick, useGitSelect } from "@/state/git-context";
 import { usePanelGroupLayout } from "@/state/use-panel-group-layout";
 
-function HistoryWorkspace() {
-  const shell = usePanelGroupLayout("historyShell");
-  const history = usePanelGroupLayout("history");
-  const details = usePanelGroupLayout("historyDetails");
-
-  return (
-    <ResizablePanelGroup
-      id="history-shell"
-      groupRef={shell.groupRef}
-      orientation="horizontal"
-      className="min-h-0 min-w-0 flex-1"
-      defaultLayout={shell.defaultLayout}
-      onLayoutChanged={shell.onLayoutChanged}
-    >
-      <ResizablePanel id="history-branches" defaultSize="15%" minSize="12%" maxSize="32%">
-        <HistoryBranches />
-      </ResizablePanel>
-      <ResizableHandle />
-      <ResizablePanel id="history-main" defaultSize="85%" minSize="50%">
-        <ResizablePanelGroup
-          id="history"
-          groupRef={history.groupRef}
-          orientation="vertical"
-          className="min-h-0 min-w-0"
-          defaultLayout={history.defaultLayout}
-          onLayoutChanged={history.onLayoutChanged}
-        >
-          <ResizablePanel id="history-commits" defaultSize="67%" minSize="28%">
-            <HistoryPane />
-          </ResizablePanel>
-          <ResizableHandle withHandle />
-          <ResizablePanel id="history-details" defaultSize="33%" minSize="18%">
-            <ResizablePanelGroup
-              id="history-details"
-              groupRef={details.groupRef}
-              orientation="horizontal"
-              className="min-h-0 min-w-0"
-              defaultLayout={details.defaultLayout}
-              onLayoutChanged={details.onLayoutChanged}
-            >
-              <ResizablePanel id="history-files" defaultSize="34%" minSize="20%" maxSize="55%">
-                <CommitFiles />
-              </ResizablePanel>
-              <ResizableHandle />
-              <ResizablePanel id="history-diff" defaultSize="66%" minSize="30%">
-                <DiffViewer source="history" />
-              </ResizablePanel>
-            </ResizablePanelGroup>
-          </ResizablePanel>
-        </ResizablePanelGroup>
-      </ResizablePanel>
-    </ResizablePanelGroup>
-  );
-}
+const HistoryWorkspace = lazy(() => import("@/components/history-workspace").then((module) => ({ default: module.HistoryWorkspace })));
+const StashWorkspace = lazy(() => import("@/components/stash-workspace").then((module) => ({ default: module.StashWorkspace })));
+const FilesBrowser = lazy(() => import("@/components/files-browser").then((module) => ({ default: module.FilesBrowser })));
 
 function ChangesWorkspace() {
   const changes = usePanelGroupLayout("changes");
@@ -96,50 +39,6 @@ function ChangesWorkspace() {
   );
 }
 
-function StashWorkspace() {
-  const stash = usePanelGroupLayout("stash");
-  const details = usePanelGroupLayout("stashDetails");
-
-  return (
-    <ResizablePanelGroup
-      id="stash"
-      groupRef={stash.groupRef}
-      orientation="horizontal"
-      className="min-h-0 min-w-0 flex-1"
-      defaultLayout={stash.defaultLayout}
-      onLayoutChanged={stash.onLayoutChanged}
-    >
-      <ResizablePanel id="stash-side" defaultSize="30%" minSize="22%" maxSize="52%">
-        <div className="flex h-full min-h-0 min-w-0 flex-col">
-          <div className="min-h-0 flex-1">
-            <StashPane />
-          </div>
-          <StashComposer />
-        </div>
-      </ResizablePanel>
-      <ResizableHandle />
-      <ResizablePanel id="stash-main" defaultSize="70%" minSize="36%">
-        <ResizablePanelGroup
-          id="stash-details"
-          groupRef={details.groupRef}
-          orientation="vertical"
-          className="min-h-0 min-w-0"
-          defaultLayout={details.defaultLayout}
-          onLayoutChanged={details.onLayoutChanged}
-        >
-          <ResizablePanel id="stash-files" defaultSize="28%" minSize="16%" maxSize="48%">
-            <StashFiles />
-          </ResizablePanel>
-          <ResizableHandle withHandle />
-          <ResizablePanel id="stash-diff" defaultSize="72%" minSize="30%">
-            <DiffViewer source="stash" />
-          </ResizablePanel>
-        </ResizablePanelGroup>
-      </ResizablePanel>
-    </ResizablePanelGroup>
-  );
-}
-
 function StackedPane({
   active,
   children,
@@ -159,7 +58,7 @@ function StackedPane({
       inert={!active}
       aria-hidden={!active}
     >
-      {children}
+      <Suspense fallback={<WorkspaceSkeleton />}>{children}</Suspense>
     </div>
   );
 }

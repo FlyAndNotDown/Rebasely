@@ -29,8 +29,13 @@ export const SHORTCUTS = {
 
 export type ShortcutId = keyof typeof SHORTCUTS;
 
-export function matchesCombo(event: Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "shiftKey" | "altKey">, combo: KeyCombo) {
-  const mod = event.ctrlKey || event.metaKey;
+export function isPlatformModifier(event: Pick<KeyboardEvent, "ctrlKey" | "metaKey">, mac = isMac) {
+  return mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
+}
+
+export function matchesCombo(event: Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "shiftKey" | "altKey">, combo: KeyCombo, mac = isMac) {
+  if (mac ? event.ctrlKey : event.metaKey) return false;
+  const mod = isPlatformModifier(event, mac);
   return (
     event.key.toLowerCase() === combo.key.toLowerCase() &&
     Boolean(combo.mod) === mod &&
@@ -49,6 +54,6 @@ export function formatCombo(combo: KeyCombo, mac = isMac): string {
 
 /** Whether keystrokes are going into a text field, where single-letter shortcuts must not fire. */
 export function isEditableTarget(target: EventTarget | null) {
-  if (!(target instanceof HTMLElement)) return false;
+  if (typeof HTMLElement === "undefined" || !(target instanceof HTMLElement)) return false;
   return target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName);
 }

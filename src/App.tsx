@@ -1,17 +1,21 @@
+import { lazy, Suspense, useSyncExternalStore } from "react";
 import { CircleAlertIcon } from "lucide-react";
 import { AppHeader } from "@/components/app-header";
 import { AppSidebar } from "@/components/app-sidebar";
 import { AskpassDialog } from "@/components/askpass-dialog";
 import { CommandCenter } from "@/components/command-palette";
 import { ReflogDialog } from "@/components/lazy-dialogs";
-import { P4Workspace } from "@/components/p4/p4-workspace";
 import { RepoKindDialog } from "@/components/repo-kind-dialog";
 import { WelcomeScreen } from "@/components/welcome-screen";
-import { Workspace } from "@/components/workspace";
+import { WorkspaceSkeleton } from "@/components/skeletons";
 import { Button } from "@/components/ui/button";
 import { WindowResizeBorders } from "@/components/window-controls";
 import { GIT_MISSING } from "@/lib/git";
+import { isP4Missing, P4_MISSING, subscribeP4Availability } from "@/lib/p4";
 import { WELCOME_TAB_ID, useGitPick } from "@/state/git-context";
+
+const Workspace = lazy(() => import("@/components/workspace").then((module) => ({ default: module.Workspace })));
+const P4Workspace = lazy(() => import("@/components/p4/p4-workspace").then((module) => ({ default: module.P4Workspace })));
 
 export default function App() {
   const { activeTab, activeTabId, loading, openPanel, setOpenPanel } = useGitPick([
@@ -27,17 +31,19 @@ export default function App() {
     <div className="relative flex h-full min-h-0 flex-col bg-background">
       <WindowResizeBorders />
       <AppHeader />
-      <MissingGitBanner />
+      <MissingToolsBanner />
       <div className="flex min-h-0 flex-1">
         <AppSidebar />
         <div className="min-h-0 min-w-0 flex-1">
-          {loading ? null : activeTabId === WELCOME_TAB_ID ? (
+          <Suspense fallback={<WorkspaceSkeleton />}>
+          {loading ? <WorkspaceSkeleton /> : activeTabId === WELCOME_TAB_ID ? (
             <WelcomeScreen />
           ) : perforce ? (
             <P4Workspace key={activeTabId} />
           ) : (
             <Workspace key={activeTabId} />
           )}
+          </Suspense>
         </div>
       </div>
       <AskpassDialog />
@@ -51,16 +57,20 @@ export default function App() {
   );
 }
 
-function MissingGitBanner() {
+function MissingToolsBanner() {
   const { gitMissing, setOpenPanel } = useGitPick(["gitMissing", "setOpenPanel"]);
-  if (!gitMissing) return null;
+  const p4Missing = useSyncExternalStore(subscribeP4Availability, isP4Missing, isP4Missing);
+  if (!gitMissing && !p4Missing) return null;
   return (
     <div
       role="alert"
       className="flex shrink-0 items-center gap-3 border-b border-destructive/30 bg-destructive/10 px-4 py-2 text-sm text-destructive"
     >
       <CircleAlertIcon className="size-4 shrink-0" />
-      <p className="min-w-0 flex-1">{GIT_MISSING}</p>
+      <div className="min-w-0 flex-1">
+        {gitMissing ? <p>{GIT_MISSING}</p> : null}
+        {p4Missing ? <p>{P4_MISSING}</p> : null}
+      </div>
       <Button type="button" size="sm" onClick={() => setOpenPanel("settings")}>
         Settings
       </Button>

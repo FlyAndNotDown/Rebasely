@@ -238,7 +238,7 @@ export function AppHeader() {
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon-sm" onClick={() => void openTerminal()}>
+              <Button variant="ghost" size="icon-sm" aria-label="Open terminal" onClick={() => void openTerminal()}>
                 <SquareTerminalIcon />
               </Button>
             </TooltipTrigger>
@@ -246,7 +246,7 @@ export function AppHeader() {
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon-sm" onClick={() => void revealRepo()}>
+              <Button variant="ghost" size="icon-sm" aria-label="Open repository folder" onClick={() => void revealRepo()}>
                 <FolderOpenIcon />
               </Button>
             </TooltipTrigger>

@@ -38,6 +38,7 @@ import { SshKeysSettings } from "@/components/ssh-keys-settings";
 import { GitLogo, PerforceMark } from "@/components/vcs-icon";
 import { errorMessage, gitApi } from "@/lib/git";
 import { p4Api } from "@/lib/p4";
+import { loadSettingsData } from "@/lib/settings-data";
 import { displayPath } from "@/lib/format";
 import { AUTO_FETCH_CHOICES, isGitFileName, isP4FileName, normalizePrefs, sameGitPath, sameP4Path } from "@/lib/prefs";
 import { cn } from "@/lib/utils";
@@ -75,6 +76,10 @@ function SettingsForm() {
   const { theme, setTheme } = useTheme();
   const { prefs, updatePrefs } = useGitPick(["prefs", "updatePrefs"]);
   const [section, setSection] = useState<SettingsSection>("general");
+  const [reload, setReload] = useState(0);
+  const [loaded, setLoaded] = useState(false);
+  const [incomplete, setIncomplete] = useState(false);
+  const [toolConfigReady, setToolConfigReady] = useState(false);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [terminalId, setTerminalId] = useState("auto");
@@ -103,6 +108,7 @@ function SettingsForm() {
   );
   const prefsNow = useRef(prefs);
   const prefsWrite = useRef(0);
+  const prefsRevision = useRef(0);
   const identityReadyRef = useRef(false);
   const savedIdentity = useRef({ name: "", email: "" });
   const nameRef = useRef(name);
@@ -114,47 +120,53 @@ function SettingsForm() {
   toolsRef.current = tools;
 
   useEffect(() => {
-    void Promise.all([
-      gitApi.getGitIdentity(),
-      gitApi.getPrefs(),
-      gitApi.listTerminals(),
-      gitApi.listEditors(),
-      gitApi.getToolConfig(),
-      gitApi.listGuiTools(),
-      gitApi.gitExecutables(),
-      p4Api.executables().catch(() => null),
-    ])
-      .then(([identity, loadedPrefs, options, editorOptions, toolConfig, installedTools, executables, p4Executables]) => {
-        const prefs = normalizePrefs(loadedPrefs);
+    let live = true;
+    const revision = prefsRevision.current;
+    const identityAtStart = { name: nameRef.current, email: emailRef.current };
+    const toolsAtStart = toolsRef.current;
+    void loadSettingsData()
+      .then((data) => {
+        if (!live) return;
+        const { identity, tools: toolConfig, gitExecutables: executables, p4Executables } = data;
+        const options = data.terminals ?? [];
+        const editorOptions = data.editors ?? [];
+        const prefs = normalizePrefs(data.prefs ?? prefsNow.current);
         const visibleEditors = editorOptions.filter((editor) => editor.available);
         const visibleTerminals = options.filter((terminal) => terminal.available);
-        setName(identity.name);
-        setEmail(identity.email);
-        savedIdentity.current = { name: identity.name, email: identity.email };
-        identityReadyRef.current = true;
-        setIdentityReady(true);
-        setTerminalId(
+        const applyPrefs = data.prefs !== null && revision === prefsRevision.current;
+        if (identity && nameRef.current === identityAtStart.name && emailRef.current === identityAtStart.email) {
+          setName(identity.name);
+          setEmail(identity.email);
+          savedIdentity.current = { name: identity.name, email: identity.email };
+        }
+        identityReadyRef.current = identity !== null;
+        setIdentityReady(identity !== null);
+        if (applyPrefs) setTerminalId(
           visibleTerminals.some((terminal) => terminal.id === prefs.terminalId) ? prefs.terminalId : "auto",
         );
         setTerminals(options);
-        setEditorId(
+        if (applyPrefs) setEditorId(
           prefs.editorId === "system" || visibleEditors.some((editor) => editor.id === prefs.editorId)
             ? prefs.editorId
             : "system",
         );
         setEditors(editorOptions);
-        setTools(toolConfig);
-        setGuiTools(installedTools);
+        if (toolConfig && toolsRef.current === toolsAtStart) {
+          toolsRef.current = toolConfig;
+          setTools(toolConfig);
+        }
+        setToolConfigReady(toolConfig !== null);
+        setGuiTools(data.guiTools ?? []);
         setGuiToolsReady(true);
-        setAutoFetch(String(prefs.autoFetchMinutes));
-        setP4Refresh(String(prefs.p4RefreshMinutes));
-        setPrune(prefs.fetchPrune);
-        const onPath = executables.pathGit;
+        if (applyPrefs) setAutoFetch(String(prefs.autoFetchMinutes));
+        if (applyPrefs) setP4Refresh(String(prefs.p4RefreshMinutes));
+        if (applyPrefs) setPrune(prefs.fetchPrune);
+        const onPath = executables?.pathGit ?? null;
         const selected = prefs.gitPath && onPath && sameGitPath(prefs.gitPath, onPath) ? "" : prefs.gitPath;
         const extras = prefs.extraGitPaths.filter((path) => !onPath || !sameGitPath(path, onPath));
         setPathGit(onPath);
-        setGitPath(selected);
-        setExtraGitPaths(
+        if (applyPrefs) setGitPath(selected);
+        if (applyPrefs) setExtraGitPaths(
           selected && !extras.some((path) => sameGitPath(path, selected)) ? [selected, ...extras] : extras,
         );
         setExecutablesReady(true);
@@ -162,16 +174,19 @@ function SettingsForm() {
         const selectedP4 = prefs.p4Path && p4OnPath && sameP4Path(prefs.p4Path, p4OnPath) ? "" : prefs.p4Path;
         const p4Extras = prefs.extraP4Paths.filter((path) => !p4OnPath || !sameP4Path(path, p4OnPath));
         setPathP4(p4OnPath);
-        setP4Path(selectedP4);
-        setExtraP4Paths(
+        if (applyPrefs) setP4Path(selectedP4);
+        if (applyPrefs) setExtraP4Paths(
           selectedP4 && !p4Extras.some((path) => sameP4Path(path, selectedP4))
             ? [selectedP4, ...p4Extras]
             : p4Extras,
         );
         setP4Ready(true);
+        setIncomplete(data.incomplete);
+        setLoaded(true);
       })
       .catch((error) => toast.error(errorMessage(error)));
-  }, []);
+    return () => { live = false; };
+  }, [reload]);
 
   useEffect(() => {
     if (prefsWrite.current === 0) prefsNow.current = prefs;
@@ -189,6 +204,7 @@ function SettingsForm() {
   }, []);
 
   async function persistPrefs(patch: Partial<AppPrefs>) {
+    prefsRevision.current += 1;
     const generation = ++prefsWrite.current;
     const next = { ...prefsNow.current, ...patch };
     prefsNow.current = next;
@@ -198,6 +214,7 @@ function SettingsForm() {
         prefsWrite.current = 0;
         prefsNow.current = saved;
       }
+      if ("gitPath" in patch || "p4Path" in patch) setReload((value) => value + 1);
     } catch (error) {
       if (prefsWrite.current === generation) prefsWrite.current = 0;
       toast.error(errorMessage(error));
@@ -346,6 +363,12 @@ function SettingsForm() {
         </aside>
         <ScrollArea className="min-w-0 flex-1" scrollbars="vertical">
         <div className="p-6">
+          {incomplete ? (
+            <div role="alert" className="mb-4 flex items-center gap-3 rounded-lg border border-destructive/30 px-3 py-2 text-sm">
+              <p className="min-w-0 flex-1">Some settings could not be loaded. Other settings remain available.</p>
+              <Button variant="outline" size="sm" onClick={() => setReload((value) => value + 1)}>Retry</Button>
+            </div>
+          ) : null}
           {section === "git" ? (
             <>
               <DialogHeader>
@@ -391,6 +414,8 @@ function SettingsForm() {
                         />
                       </div>
                     </>
+                  ) : loaded ? (
+                    <p className="text-sm text-muted-foreground">Identity settings are unavailable. Check the Git executable above, then retry.</p>
                   ) : (
                     <div role="status" aria-label="Loading Git identity" className="grid gap-4">
                       <div className="grid gap-2">
@@ -437,6 +462,9 @@ function SettingsForm() {
                   </label>
                 </FieldGroup>
                 <FieldGroup title="Diff and merge">
+                  {loaded && !toolConfigReady ? (
+                    <p className="text-sm text-muted-foreground">Choose a Git executable above to configure diff and merge tools.</p>
+                  ) : <>
                   <ToolPicker
                     id="diff-tool"
                     label="Diff tool"
@@ -453,6 +481,7 @@ function SettingsForm() {
                     ready={guiToolsReady}
                     onChange={(mergeTool) => changeTool("mergeTool", mergeTool)}
                   />
+                  </>}
                 </FieldGroup>
               </div>
             </>

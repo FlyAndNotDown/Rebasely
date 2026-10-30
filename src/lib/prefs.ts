@@ -113,13 +113,15 @@ export function isGitFileName(path: string): boolean {
   return stem.toLowerCase() === "git";
 }
 
-export function sameGitPath(left: string, right: string): boolean {
-  return foldGitPath(left) === foldGitPath(right);
+export function sameGitPath(left: string, right: string, windows = pathsIgnoreCase()): boolean {
+  return foldGitPath(left, windows) === foldGitPath(right, windows);
 }
 
-function foldGitPath(path: string): string {
-  const slash = path.trim().replace(/\\/g, "/").replace(/\/+$/, "");
-  return pathsIgnoreCase() ? slash.toLowerCase() : slash;
+function foldGitPath(path: string, windows: boolean): string {
+  const clean = path.trim();
+  return windows
+    ? clean.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase()
+    : clean.replace(/\/+$/, "");
 }
 
 export function isP4FileName(path: string): boolean {
@@ -130,8 +132,8 @@ export function isP4FileName(path: string): boolean {
   return stem.toLowerCase() === "p4";
 }
 
-export function sameP4Path(left: string, right: string): boolean {
-  return foldGitPath(left) === foldGitPath(right);
+export function sameP4Path(left: string, right: string, windows = pathsIgnoreCase()): boolean {
+  return foldGitPath(left, windows) === foldGitPath(right, windows);
 }
 
 function normalizeP4Path(path: unknown): string {

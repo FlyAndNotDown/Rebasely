@@ -29,6 +29,10 @@ export function sameP4Connection(left: P4Connection, right: P4Connection) {
     left.client === right.client && left.charset === right.charset && left.stream === right.stream;
 }
 
+export function usableP4Session(session: P4Session | null, tabId: string, loading: boolean, error: string | null) {
+  return !loading && !error && session?.tabId === tabId ? session : null;
+}
+
 export function updateP4Session(
   sessions: Map<string, P4Session>,
   tabId: string,

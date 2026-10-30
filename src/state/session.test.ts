@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkspaceSnapshot } from "@/types/git";
 import {
   WELCOME_TAB_ID,
@@ -18,6 +18,9 @@ function withRemotes(names: string[], upstream: string | null = null) {
     remotes: names.map((name) => ({ name, url: null, pushUrl: null })),
   } as unknown as WorkspaceSnapshot;
 }
+
+beforeEach(() => vi.stubGlobal("navigator", { userAgent: "Windows" }));
+afterEach(() => vi.unstubAllGlobals());
 
 describe("remotes", () => {
   it("fetches from the upstream's remote, preferring the longest matching name", () => {

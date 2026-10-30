@@ -11,6 +11,7 @@ import {
   sameLayout,
   sameP4Path,
 } from "./prefs";
+import { pathsIgnoreCase } from "./format";
 
 const changes = DEFAULT_PANEL_LAYOUTS.changes;
 
@@ -110,11 +111,13 @@ describe("normalizePrefs", () => {
       }),
     ).toMatchObject({
       gitPath: "/usr/bin/git",
-      extraGitPaths: ["C:/Git/cmd/git.exe", "/usr/bin/git"],
+      extraGitPaths: pathsIgnoreCase() ? ["C:/Git/cmd/git.exe", "/usr/bin/git"] : ["C:/Git/cmd/git.exe", "C:\\Git\\cmd\\git.exe", "/usr/bin/git"],
     });
     expect(normalizePrefs({ gitPath: "gitk.exe" }).gitPath).toBe("");
     expect(normalizePrefs(null).extraGitPaths).toEqual([]);
-    expect(sameGitPath("C:/Git/cmd/git.exe", "C:\\Git\\cmd\\git.exe")).toBe(true);
+    expect(sameGitPath("C:/Git/cmd/git.exe", "C:\\Git\\cmd\\git.exe", true)).toBe(true);
+    expect(sameGitPath("/work/Git/git", "/work/git/git", false)).toBe(false);
+    expect(sameGitPath("/work/a\\git", "/work/a/git", false)).toBe(false);
   });
 
   it("keeps added p4 executables and a known charset", () => {
@@ -134,7 +137,8 @@ describe("normalizePrefs", () => {
       p4Charset: "utf8",
     });
     expect(normalizePrefs({ p4Charset: "latin1" }).p4Charset).toBe("");
-    expect(sameP4Path("C:/Perforce/p4.exe", "C:\\Perforce\\p4.exe")).toBe(true);
+    expect(sameP4Path("C:/Perforce/p4.exe", "C:\\Perforce\\p4.exe", true)).toBe(true);
+    expect(sameP4Path("/work/P4/p4", "/work/p4/p4", false)).toBe(false);
   });
 
   it("keeps a chosen editor and rejects a negative fetch interval", () => {

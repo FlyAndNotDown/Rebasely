@@ -17,6 +17,7 @@ import {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllGlobals();
 });
 
 describe("formatRelativeTime", () => {
@@ -66,14 +67,26 @@ describe("paths", () => {
     expect(displayPath("\\\\?\\C:\\work\\Repo")).toBe("C:\\work\\Repo");
     expect(displayPath("\\\\?\\UNC\\server\\share\\repo")).toBe("\\\\server\\share\\repo");
     expect(displayPath("cafe\u0301")).toBe("caf\u00e9");
-    const folded = pathsIgnoreCase();
-    expect(normalizeRepoPath("C:/work/Repo/")).toBe(folded ? "c:\\work\\repo" : "C:\\work\\Repo");
-    expect(normalizeRepoPath("\\\\?\\C:\\work\\Repo\\")).toBe(folded ? "c:\\work\\repo" : "C:\\work\\Repo");
+    vi.stubGlobal("navigator", { userAgent: "Windows" });
+    expect(normalizeRepoPath("C:/work/Repo/")).toBe("c:\\work\\repo");
+    expect(normalizeRepoPath("\\\\?\\C:\\work\\Repo\\")).toBe("c:\\work\\repo");
     expect(foldRepoPath("C:/work/Repo/", true)).toBe("c:\\work\\repo");
-    expect(foldRepoPath("C:/work/Repo/", false)).toBe("C:\\work\\Repo");
-    expect(sameRepoPath("C:/work/Repo", "c:\\work\\repo\\")).toBe(folded);
+    expect(foldRepoPath("C:/work/Repo/", false)).toBe("C:/work/Repo");
+    expect(sameRepoPath("C:/work/Repo", "c:\\work\\repo\\")).toBe(true);
     expect(sameRepoPath("C:/work/Repo", "C:\\work\\Repo\\")).toBe(true);
     expect(sameRepoPath("C:/work/Repo", "C:/work/Other")).toBe(false);
+  });
+
+  it("preserves POSIX case, backslashes, Unicode spelling, and root directories", () => {
+    for (const userAgent of ["Linux", "Macintosh; Mac OS X"]) {
+      vi.stubGlobal("navigator", { userAgent });
+      expect(pathsIgnoreCase()).toBe(false);
+      expect(sameRepoPath("/work/Repo", "/work/repo")).toBe(false);
+      expect(normalizeRepoPath("/work/a\\b")).toBe("/work/a\\b");
+      expect(sameRepoPath("/work/a\\b", "/work/a/b")).toBe(false);
+      expect(sameRepoPath("/work/cafe\u0301", "/work/caf\u00e9")).toBe(false);
+      expect(normalizeRepoPath("/")).toBe("/");
+    }
   });
 
   it("splits either slash and drops a trailing separator", () => {

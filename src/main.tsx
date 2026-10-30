@@ -6,6 +6,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { GitProvider } from "@/state/git-context";
 import { P4Provider } from "@/state/p4-context";
+import { isPlatformModifier } from "@/lib/shortcuts";
 import "./index.css";
 
 // WebView find, print, reload, zoom, and history. Shifted forms belong to the
@@ -21,7 +22,7 @@ document.addEventListener(
 function isWebViewShortcut(event: KeyboardEvent) {
   if (event.key === "F3" || event.key === "F5" || event.key === "F7") return true;
   if (event.altKey && (event.key === "ArrowLeft" || event.key === "ArrowRight")) return true;
-  if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return false;
+  if (!isPlatformModifier(event) || event.altKey || event.shiftKey) return false;
   switch (event.key.toLowerCase()) {
     case "f":
     case "p":

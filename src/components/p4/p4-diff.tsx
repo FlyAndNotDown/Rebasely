@@ -5,7 +5,9 @@ import { DiffSkeleton } from "@/components/skeletons";
 import { Button } from "@/components/ui/button";
 import { HoverTip } from "@/components/ui/tooltip";
 import { splitRows } from "@/lib/diff-select";
+import { textColumns } from "@/lib/diff-text";
 import { cn } from "@/lib/utils";
+import { useWindowedRows } from "@/lib/use-windowed-rows";
 import { useGitPick } from "@/state/git-context";
 import type { DiffLine, FileDiff } from "@/types/git";
 
@@ -38,6 +40,7 @@ export function P4Diff({
   chrome?: boolean;
 }) {
   const { prefs, setDiffOptions } = useGitPick(["prefs", "setDiffOptions"]);
+  const contentLines = useMemo(() => diff?.lines.filter((line) => line.kind !== "hunk") ?? [], [diff]);
   const sideBySide = split ?? prefs.diffSplit;
   const frame = chrome ? "absolute inset-0" : "min-h-0 flex-1";
   if (loading && !diff) {
@@ -91,14 +94,14 @@ export function P4Diff({
         <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
           Binary file
         </div>
-      ) : diff.lines.every((line) => line.kind === "hunk") ? (
+      ) : contentLines.length === 0 ? (
         <div className="flex flex-1 items-center justify-center p-6 text-center text-sm text-muted-foreground">
           {captions ? empty : "No differences against the have revision"}
         </div>
       ) : sideBySide ? (
-        <SplitDiff lines={diff.lines.filter((line) => line.kind !== "hunk")} />
+        <SplitDiff lines={contentLines} />
       ) : (
-        <InlineDiff lines={diff.lines.filter((line) => line.kind !== "hunk")} />
+        <InlineDiff lines={contentLines} />
       )}
       {diff.truncated ? (
         <div className="shrink-0 border-t px-3 py-1.5 text-[11px] text-muted-foreground">
@@ -110,30 +113,39 @@ export function P4Diff({
 }
 
 function InlineDiff({ lines }: { lines: DiffLine[] }) {
+  const { viewportRef, start, end, before, after } = useWindowedRows(lines.length, 20);
+  const widest = useMemo(() => lines.reduce((width, line) => Math.max(width, textColumns(line.content)), 0), [lines]);
   return (
-    <div className="min-h-0 flex-1 overflow-auto font-mono text-[12px] leading-5">
-      {lines.map((line, index) => (
-        <DiffRow key={index} line={line} />
+    <div ref={viewportRef} className="min-h-0 flex-1 overflow-auto font-mono text-[12px] leading-5 [tab-size:4]">
+      <div style={{ minWidth: `calc(4.5rem + ${widest}ch)` }}>
+      <div aria-hidden style={{ height: before }} />
+      {lines.slice(start, end).map((line, index) => (
+        <DiffRow key={start + index} line={line} />
       ))}
+      <div aria-hidden style={{ height: after }} />
+      </div>
     </div>
   );
 }
 
 function SplitDiff({ lines }: { lines: DiffLine[] }) {
   const pairs = useMemo(() => splitRows(lines), [lines]);
+  const { viewportRef, start, end, before, after } = useWindowedRows(pairs.length, 20);
   return (
-    <div className="min-h-0 flex-1 overflow-auto font-mono text-[12px] leading-5">
-      {pairs.map((row, index) => {
+    <div ref={viewportRef} className="min-h-0 flex-1 overflow-auto font-mono text-[12px] leading-5">
+      <div aria-hidden style={{ height: before }} />
+      {pairs.slice(start, end).map((row, index) => {
         if (row.kind === "hunk") return null;
         const left = row.left === null ? undefined : lines[row.left];
         const right = row.right === null ? undefined : lines[row.right];
         return (
-          <div key={index} className="grid grid-cols-2">
+          <div key={start + index} className="grid h-5 grid-cols-2">
             <SplitCell line={left} side="left" />
             <SplitCell line={right} side="right" />
           </div>
         );
       })}
+      <div aria-hidden style={{ height: after }} />
     </div>
   );
 }
@@ -146,7 +158,7 @@ function SplitCell({ line, side }: { line: DiffLine | undefined; side: "left" | 
       <span className="w-10 shrink-0 select-none px-2 text-right text-muted-foreground/80 tabular-nums">
         {lineno ?? ""}
       </span>
-      <span className="min-w-0 flex-1 truncate px-2">{blank ? " " : line.content || " "}</span>
+      <span className="min-w-0 flex-1 truncate px-2" title={blank ? undefined : line.content}>{blank ? " " : line.content || " "}</span>
     </div>
   );
 }
@@ -154,7 +166,7 @@ function SplitCell({ line, side }: { line: DiffLine | undefined; side: "left" | 
 function DiffRow({ line }: { line: DiffLine }) {
   const mark = line.kind === "add" ? "+" : line.kind === "delete" ? "−" : line.kind === "hunk" ? "" : " ";
   return (
-    <div className={cn("flex min-w-0", lineClass(line.kind))}>
+    <div className={cn("flex h-5 min-w-0", lineClass(line.kind))}>
       <span className="w-10 shrink-0 select-none px-2 text-right text-muted-foreground/80">
         {line.kind === "delete" ? line.oldLineno : line.newLineno}
       </span>

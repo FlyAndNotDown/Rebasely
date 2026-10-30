@@ -21,6 +21,8 @@ import type {
   RepoDetection,
 } from "@/types/p4";
 import type { FileDiff } from "@/types/git";
+import { errorMessage } from "@/lib/git";
+import { pathsIgnoreCase } from "@/lib/format";
 
 /** Matches `P4_MISSING` in the Rust backend. */
 export const P4_MISSING = "p4 executable was not found. Choose one in Settings.";
@@ -28,8 +30,32 @@ export const P4_MISSING = "p4 executable was not found. Choose one in Settings."
 /** Matches `P4_LOGIN` in the Rust backend. */
 export const P4_LOGIN = "Perforce login is required.";
 
+let missingP4 = false;
+const availabilityListeners = new Set<() => void>();
+
+function reportP4Availability(available: boolean) {
+  if (missingP4 === !available) return;
+  missingP4 = !available;
+  for (const listener of availabilityListeners) listener();
+}
+
+export function isP4Missing() {
+  return missingP4;
+}
+
+export function subscribeP4Availability(listener: () => void) {
+  availabilityListeners.add(listener);
+  return () => { availabilityListeners.delete(listener); };
+}
+
 function call<T>(command: string, args?: Record<string, unknown>): Promise<T> {
-  return invoke<T>(command, args);
+  return invoke<T>(command, args).then((result) => {
+    if (command === "p4_open") reportP4Availability(true);
+    return result;
+  }).catch((error: unknown) => {
+    if (errorMessage(error) === P4_MISSING) reportP4Availability(false);
+    throw error;
+  });
 }
 
 export const p4Api = {
@@ -129,7 +155,11 @@ export const p4Api = {
     call<string>("p4_prepare_client", { auth, client }),
   createWorkspace: (request: P4CreateRequest, activityId?: string) =>
     call<P4Connection>("p4_create_workspace", { request, activityId: activityId ?? null }),
-  executables: () => call<P4Executables>("p4_executables"),
+  executables: async () => {
+    const executables = await call<P4Executables>("p4_executables");
+    if (executables.active !== null) reportP4Availability(true);
+    return executables;
+  },
   checkExecutable: (path: string) => call<void>("check_p4_executable", { path }),
 };
 
@@ -182,15 +212,18 @@ export function depotBase(path: string): string {
   return slash >= 0 ? path.slice(slash + 1) : path;
 }
 
-export function relativeToRoot(root: string, path: string): string {
-  const parts = (value: string) => value.replace(/\\/g, "/").replace(/\/+$/, "").split("/");
+export function relativeToRoot(root: string, path: string, ignoreCase = pathsIgnoreCase()): string {
+  if (!root) return "";
+  const parts = (value: string) => (ignoreCase ? value.replace(/\\/g, "/") : value).replace(/\/+$/, "").split("/");
   const rootParts = parts(root);
   const pathParts = parts(path);
+  if (rootParts.includes("..") || pathParts.includes("..")) return "";
+  const fold = (part: string) => ignoreCase ? part.toLowerCase() : part;
   let index = 0;
   while (
     index < rootParts.length &&
     index < pathParts.length &&
-    rootParts[index].toLowerCase() === pathParts[index].toLowerCase()
+    fold(rootParts[index]) === fold(pathParts[index])
   ) {
     index += 1;
   }

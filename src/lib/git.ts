@@ -78,7 +78,7 @@ const GIT_MISSING_EVENT = "rebasely-git-missing";
 
 function call<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   return tauriInvoke<T>(command, args).catch((error: unknown) => {
-    if (errorMessage(error) === GIT_MISSING) {
+    if (typeof window !== "undefined" && errorMessage(error) === GIT_MISSING) {
       window.dispatchEvent(new Event(GIT_MISSING_EVENT));
     }
     throw error;

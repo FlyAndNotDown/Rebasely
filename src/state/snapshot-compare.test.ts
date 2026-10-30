@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { FileDiff, WorkspaceSnapshot } from "@/types/git";
 import {
   historyGraphChanged,
@@ -48,6 +48,9 @@ function diff(lines: string[]): FileDiff {
     })),
   };
 }
+
+beforeEach(() => vi.stubGlobal("navigator", { userAgent: "Windows" }));
+afterEach(() => vi.unstubAllGlobals());
 
 describe("sameSnapshot", () => {
   it("treats a structurally equal snapshot as the same", () => {
@@ -100,6 +103,14 @@ describe("historyGraphChanged", () => {
 });
 
 describe("refresh hints", () => {
+  it("detects POSIX metadata changes without treating backslashes as separators", () => {
+    vi.stubGlobal("navigator", { userAgent: "Macintosh; Mac OS X" });
+    const only = (paths: string[]) => ({ paths, overflow: false });
+    expect(shouldReloadWorkdirDiff(only(["/work/client/.git/HEAD"]), "/work/client", "src/a.txt")).toBe(true);
+    expect(shouldReloadWorkdirDiff(only(["/work/client/src/a\\b.txt"]), "/work/client", "src/a\\b.txt")).toBe(true);
+    expect(shouldReloadWorkdirDiff(only(["/work/client/src/a/b.txt"]), "/work/client", "src/a\\b.txt")).toBe(false);
+  });
+
   it("merges paths without duplicates and overflows past the cap", () => {
     const hint = { paths: ["a"], overflow: false };
     mergeRefreshHint(hint, { paths: ["a", "b"], overflow: false });

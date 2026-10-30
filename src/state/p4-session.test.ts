@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { emptyBinaryDiff } from "@/lib/git";
 import type { P4Changelist, P4File } from "@/types/p4";
-import { fileKey, refreshPendingSession, sameP4Connection, updateP4Session, type P4Session } from "./p4-session";
+import { fileKey, refreshPendingSession, sameP4Connection, updateP4Session, usableP4Session, type P4Session } from "./p4-session";
 
 function file(name: string): P4File {
   return {
@@ -25,6 +25,9 @@ function session(tabId = "p4:client-a"): P4Session {
     submittedDiffs: [], submittedUser: "", submittedClient: "", view: "pending",
   };
 }
+
+beforeEach(() => vi.stubGlobal("navigator", { userAgent: "Windows" }));
+afterEach(() => vi.unstubAllGlobals());
 
 describe("pending workspace refreshes", () => {
   it("retains an edited description and the latest file selection", () => {
@@ -66,6 +69,16 @@ describe("pending workspace refreshes", () => {
 });
 
 describe("workspace request ownership", () => {
+  it("does not expose a cached connection for actions while reconnecting or after failure", () => {
+    const previous = { ...session(), description: "Keep the previous server's draft" };
+    expect(usableP4Session(previous, previous.tabId, false, null)).toBe(previous);
+    expect(usableP4Session(previous, previous.tabId, true, null)).toBeNull();
+    expect(usableP4Session(previous, previous.tabId, false, "Connection failed")).toBeNull();
+    expect(previous.description).toBe("Keep the previous server's draft");
+    const reconnected = { ...previous, connection: { ...previous.connection, port: "ssl:other.example.com:1666" } };
+    expect(usableP4Session(reconnected, previous.tabId, false, null)).toBe(reconnected);
+  });
+
   it("distinguishes connections after reconnecting the same workspace root", () => {
     const connection = session().connection;
     expect(sameP4Connection(connection, { ...connection, root: "c:/work/client/" })).toBe(true);

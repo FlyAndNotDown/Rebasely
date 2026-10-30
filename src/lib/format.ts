@@ -83,18 +83,21 @@ function runtimePlatform(): string {
   return runtime.process?.platform ?? "";
 }
 
-/** Windows and macOS compare paths without case. Linux does not. */
+/** Only Windows can safely fold path case without probing the filesystem. */
 export function pathsIgnoreCase(): boolean {
   const agent = typeof navigator !== "undefined" ? navigator.userAgent : "";
-  if (/windows/i.test(agent) || /macintosh|mac os x/i.test(agent)) return true;
-  if (/linux/i.test(agent)) return false;
+  if (/windows/i.test(agent)) return true;
+  if (/linux|macintosh|mac os x/i.test(agent)) return false;
   const platform = runtimePlatform();
-  return platform === "win32" || platform === "darwin";
+  return platform === "win32";
 }
 
 export function foldRepoPath(path: string, ignoreCase: boolean): string {
-  const normalized = displayPath(path).replace(/\//g, "\\").replace(/\\+$/, "");
-  return ignoreCase ? normalized.toLowerCase() : normalized;
+  if (ignoreCase) {
+    const plain = path.startsWith("\\\\?\\UNC\\") ? `\\\\${path.slice(8)}` : path.startsWith("\\\\?\\") ? path.slice(4) : path;
+    return plain.replace(/\//g, "\\").replace(/\\+$/, "").toLowerCase();
+  }
+  return path === "/" ? path : path.replace(/\/+$/, "");
 }
 
 export function normalizeRepoPath(path: string): string {

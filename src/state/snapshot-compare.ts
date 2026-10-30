@@ -1,4 +1,4 @@
-import { normalizeRepoPath } from "@/lib/format";
+import { normalizeRepoPath, pathsIgnoreCase } from "@/lib/format";
 import type { FileDiff, FileStatus, WorkspaceSnapshot } from "@/types/git";
 
 export function keepRemoteBranches(
@@ -49,8 +49,10 @@ export function mergeRefreshHint(into: RefreshHint, extra: RefreshHint) {
 
 export function watchTouchesFile(changed: string, repoPath: string, filePath: string) {
   const norm = normalizeRepoPath(changed);
-  if (norm.includes("\\.git\\") || norm.endsWith("\\.git")) return true;
-  const full = normalizeRepoPath(`${repoPath.replace(/[\\/]+$/, "")}/${filePath}`);
+  const separator = pathsIgnoreCase() ? "\\" : "/";
+  if (norm.includes(`${separator}.git${separator}`) || norm.endsWith(`${separator}.git`)) return true;
+  const root = repoPath.replace(pathsIgnoreCase() ? /[\\/]+$/ : /\/+$/, "");
+  const full = normalizeRepoPath(`${root}/${filePath}`);
   return norm === full;
 }
 

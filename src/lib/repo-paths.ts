@@ -11,8 +11,11 @@ export function repoRelative(repoPath: string, changed: string): string | null {
   const root = normalizeRepoPath(repoPath);
   const norm = normalizeRepoPath(changed);
   if (norm === root) return "";
-  if (!norm.startsWith(`${root}\\`)) return null;
-  return norm.slice(root.length + 1).replace(/\\/g, "/");
+  const separator = pathsIgnoreCase() ? "\\" : "/";
+  const prefix = root.endsWith(separator) ? root : `${root}${separator}`;
+  if (!norm.startsWith(prefix)) return null;
+  const relative = norm.slice(prefix.length);
+  return pathsIgnoreCase() ? relative.replace(/\\/g, "/") : relative;
 }
 
 function parentDir(rel: string) {
