@@ -18,6 +18,8 @@ import { depotBase, P4_LOGIN, P4_MISSING, p4Api, syncSummary } from "@/lib/p4";
 import { sameRepoPath } from "@/lib/format";
 import { useGitPick } from "@/state/git-context";
 import { repoTabId, type RepoTab } from "@/state/session";
+import { defaultChange, fileKey, refreshPendingSession, sameP4Connection, shownFile, updateP4Session, type P4Session as Session, type P4View } from "@/state/p4-session";
+import { pendingDiffRequest, withP4Login } from "@/state/p4-requests";
 import type { FileDiff } from "@/types/git";
 import type {
   P4Auth,
@@ -25,7 +27,6 @@ import type {
   P4Changelist,
   P4Connection,
   P4DirEntry,
-  P4File,
   P4FileSearch,
   P4GetRevision,
   P4ResolveView,
@@ -33,7 +34,7 @@ import type {
   P4StreamOption,
 } from "@/types/p4";
 
-export type P4View = "pending" | "submitted" | "workspace";
+export type { P4View };
 
 const OPEN_SETTINGS_EVENT = "rebasely-open-settings";
 
@@ -41,26 +42,6 @@ class LoginCancelled extends Error {
   constructor() {
     super("Login cancelled");
   }
-}
-
-interface Session {
-  tabId: string;
-  connection: P4Connection;
-  pending: P4Changelist[];
-  selectedChange: string;
-  selectedFile: string | null;
-  selectedShelved: boolean;
-  description: string;
-  diff: FileDiff | null;
-  diffFor: string;
-  submitted: P4Changelist[];
-  submittedHasMore: boolean;
-  selectedSubmitted: string | null;
-  submittedDetail: P4Changelist | null;
-  submittedDiffs: FileDiff[];
-  submittedUser: string;
-  submittedClient: string;
-  view: P4View;
 }
 
 interface P4ContextValue {
@@ -151,7 +132,7 @@ export function P4Provider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [submittedLoading, setSubmittedLoading] = useState(false);
+  const [submittedBusy, setSubmittedBusy] = useState<ReadonlySet<string>>(() => new Set());
   const [loginOpen, setLoginOpen] = useState(false);
   const [connectionOpen, setConnectionOpen] = useState(false);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
@@ -159,20 +140,24 @@ export function P4Provider({ children }: { children: ReactNode }) {
   const bumpFiles = useCallback(() => setFilesEpoch((value) => value + 1), []);
   const cache = useRef(new Map<string, Session>());
   const generation = useRef(0);
-  const diffToken = useRef(0);
-  const refreshing = useRef(false);
+  const diffTokens = useRef(new Map<string, number>());
+  const pendingTokens = useRef(new Map<string, number>());
+  const submittedTokens = useRef(new Map<string, number>());
+  const refreshing = useRef(new Set<string>());
   const sessionRef = useRef(session);
   const loginRef = useRef<{ resolve: (value: string | null) => void } | null>(null);
   const activeTabRef = useRef(activeTab);
   const activePerforceId = activeTab.kind === "repo" && activeTab.vcs === "perforce" ? activeTab.id : "";
+  const visibleSession = session?.tabId === activePerforceId ? session : null;
+  const submittedLoading = submittedBusy.has(`${activePerforceId}:list`) || submittedBusy.has(`${activePerforceId}:detail`);
   const [attempt, setAttempt] = useState(0);
   const [loginTarget, setLoginTarget] = useState({ client: "", port: "" });
   const reconnect = useCallback(() => setAttempt((value) => value + 1), []);
 
   useLayoutEffect(() => {
     activeTabRef.current = activeTab;
-    sessionRef.current = session;
-  }, [activeTab, session]);
+    sessionRef.current = session?.tabId === activePerforceId ? session : cache.current.get(activePerforceId) ?? null;
+  }, [activePerforceId, activeTab, session]);
 
   const askPassword = useCallback((connection: P4Connection) => {
     setLoginTarget({ client: connection.client, port: connection.port });
@@ -192,15 +177,15 @@ export function P4Provider({ children }: { children: ReactNode }) {
 
   const guard = useCallback(
     async <T,>(connection: P4Connection, fn: () => Promise<T>): Promise<T> => {
-      try {
-        return await fn();
-      } catch (error) {
-        if (errorMessage(error) !== P4_LOGIN) throw error;
+      return withP4Login(fn, async () => {
+        const current = sessionRef.current;
+        if (!current || !sameP4Connection(current.connection, connection)) throw new LoginCancelled();
         const password = await askPassword(connection);
         if (!password) throw new LoginCancelled();
+        const latest = sessionRef.current;
+        if (!latest || !sameP4Connection(latest.connection, connection)) throw new LoginCancelled();
         await p4Api.login(connection, password);
-        return await fn();
-      }
+      });
     },
     [askPassword],
   );
@@ -228,6 +213,15 @@ export function P4Provider({ children }: { children: ReactNode }) {
     setSession(next);
   }, []);
 
+  const updateSession = useCallback((tabId: string, update: (current: Session) => Session) => {
+    const next = updateP4Session(cache.current, tabId, update);
+    if (next && activeTabRef.current.id === tabId) {
+      sessionRef.current = next;
+      setSession(next);
+    }
+    return next;
+  }, []);
+
   const patch = useCallback((update: Partial<Session>) => {
     const current = sessionRef.current;
     if (!current) return;
@@ -239,30 +233,34 @@ export function P4Provider({ children }: { children: ReactNode }) {
     if (!file) return;
     const key = fileKey(current.selectedChange, file, current.selectedShelved);
     if (current.diffFor === key) return;
-    const token = ++diffToken.current;
-    const load = current.selectedShelved
-      ? p4Api.shelfDiff(current.connection, file, current.selectedChange)
-      : p4Api.openedDiff(current.connection, file);
-    void guard(current.connection, () => load)
+    const token = nextToken(diffTokens.current, current.tabId);
+    void guard(current.connection, pendingDiffRequest(current.connection, current.selectedChange, file, current.selectedShelved))
       .then((diff) => {
-        if (token !== diffToken.current) return;
-        const latest = sessionRef.current;
-        if (!latest || fileKey(latest.selectedChange, latest.selectedFile, latest.selectedShelved) !== key) return;
-        patch({ diff, diffFor: key });
+        if (token !== diffTokens.current.get(current.tabId)) return;
+        const latest = cache.current.get(current.tabId);
+        if (!latest || !sameP4Connection(latest.connection, current.connection) ||
+          fileKey(latest.selectedChange, latest.selectedFile, latest.selectedShelved) !== key) return;
+        updateSession(current.tabId, (value) => ({ ...value, diff, diffFor: key }));
       })
       .catch((caught) => {
-        if (token !== diffToken.current) return;
-        const latest = sessionRef.current;
-        if (!latest || fileKey(latest.selectedChange, latest.selectedFile, latest.selectedShelved) !== key) return;
-        patch({ diff: null, diffFor: key });
+        if (token !== diffTokens.current.get(current.tabId)) return;
+        const latest = cache.current.get(current.tabId);
+        if (!latest || !sameP4Connection(latest.connection, current.connection) ||
+          fileKey(latest.selectedChange, latest.selectedFile, latest.selectedShelved) !== key) return;
+        updateSession(current.tabId, (value) => ({ ...value, diff: null, diffFor: key }));
         report(caught);
       });
-  }, [guard, patch, report]);
+  }, [guard, report, updateSession]);
 
   useEffect(() => {
     if (!activePerforceId) return;
     const tab = activeTabRef.current;
     if (tab.kind !== "repo" || tab.vcs !== "perforce") return;
+    nextToken(pendingTokens.current, tab.id);
+    nextToken(diffTokens.current, tab.id);
+    nextToken(submittedTokens.current, `${tab.id}:list`);
+    nextToken(submittedTokens.current, `${tab.id}:detail`);
+    setSubmittedBusy((busy) => withoutKey(withoutKey(busy, `${tab.id}:list`), `${tab.id}:detail`));
     const token = ++generation.current;
     const cached = cache.current.get(tab.id);
     if (cached) {
@@ -301,22 +299,26 @@ export function P4Provider({ children }: { children: ReactNode }) {
         } else {
           setTabMeta(target.id, name);
         }
-        const previous = cache.current.get(tabId);
+        const stored = cache.current.get(tabId);
+        const previous = stored && sameP4Connection(stored.connection, opened.connection) ? stored : undefined;
         const pending = opened.pending;
         const selectedChange =
           previous && pending.some((change) => change.id === previous.selectedChange)
             ? previous.selectedChange
             : defaultChange(pending);
         const selected = pending.find((change) => change.id === selectedChange);
-        const shown = shownFile(selected?.files ?? []);
-        const next: Session = {
+        const shown = shownFile(selected?.files ?? [], previous ? {
+          path: previous.selectedFile,
+          shelved: previous.selectedShelved,
+        } : undefined);
+        const next = refreshPendingSession({
           tabId,
           connection: opened.connection,
-          pending,
-          selectedChange,
+          pending: previous?.pending ?? [],
+          selectedChange: previous?.selectedChange ?? selectedChange,
           selectedFile: shown.path,
           selectedShelved: shown.shelved,
-          description: selected?.description ?? "",
+          description: previous?.description ?? "",
           diff: null,
           diffFor: "",
           submitted: previous?.submitted ?? [],
@@ -327,7 +329,7 @@ export function P4Provider({ children }: { children: ReactNode }) {
           submittedUser: previous?.submittedUser ?? "",
           submittedClient: previous?.submittedClient ?? "",
           view: previous?.view ?? "pending",
-        };
+        }, pending);
         cache.current.set(tabId, next);
         if (generation.current !== current) return;
         remember(next);
@@ -342,49 +344,45 @@ export function P4Provider({ children }: { children: ReactNode }) {
         if (generation.current === current) setLoading(false);
       }
     }
-  }, [activePerforceId, attempt, askPassword, refreshRecents, remember, report, requestDiff, retargetRepoTab, setTabMeta]);
+    return () => {
+      generation.current += 1;
+      finishLogin(null);
+    };
+  }, [activePerforceId, attempt, askPassword, finishLogin, refreshRecents, remember, report, requestDiff, retargetRepoTab, setTabMeta]);
 
-  const connection = session?.connection ?? null;
-  const selectedFile = session?.selectedFile ?? null;
-  const selectedShelved = session?.selectedShelved ?? false;
-  const selectedChange = session?.selectedChange ?? "default";
+  const connection = visibleSession?.connection ?? null;
+  const selectedFile = visibleSession?.selectedFile ?? null;
+  const selectedShelved = visibleSession?.selectedShelved ?? false;
+  const selectedChange = visibleSession?.selectedChange ?? "default";
   const diffKey = connection && selectedFile ? fileKey(selectedChange, selectedFile, selectedShelved) : "";
-  const diffLoading = diffKey !== "" && session?.diffFor !== diffKey;
+  const diffLoading = diffKey !== "" && visibleSession?.diffFor !== diffKey;
+
+  const reloadPending = useCallback(async (target: Session, selectId?: string) => {
+    const owner = cache.current.get(target.tabId);
+    if (!owner || !sameP4Connection(owner.connection, target.connection)) return;
+    const token = nextToken(pendingTokens.current, target.tabId);
+    const pending = await guard(target.connection, () => p4Api.refreshPending(target.connection));
+    if (pendingTokens.current.get(target.tabId) !== token) return;
+    const latest = cache.current.get(target.tabId);
+    if (!latest || !sameP4Connection(latest.connection, target.connection)) return;
+    const next = updateSession(target.tabId, (current) => refreshPendingSession(current, pending, selectId, target.selectedChange));
+    if (next) requestDiff(next);
+  }, [guard, requestDiff, updateSession]);
 
   const refresh = useCallback(async (quiet = false) => {
     const current = sessionRef.current;
-    if (!current || refreshing.current) return;
-    refreshing.current = true;
+    if (!current || refreshing.current.has(current.tabId)) return;
+    refreshing.current.add(current.tabId);
     const id = beginActivity("Refreshing workspace", current.connection.client);
     try {
-      const pending = await guard(current.connection, () => p4Api.refreshPending(current.connection));
-      const selected = pending.some((change) => change.id === current.selectedChange)
-        ? current.selectedChange
-        : defaultChange(pending);
-      const change = pending.find((item) => item.id === selected);
-      const shown = shownFile(change?.files ?? [], {
-        path: current.selectedFile,
-        shelved: current.selectedShelved,
-      });
-      const sameFile = shown.path === current.selectedFile && shown.shelved === current.selectedShelved && selected === current.selectedChange;
-      patch({
-        pending,
-        selectedChange: selected,
-        selectedFile: shown.path,
-        selectedShelved: shown.shelved,
-        description: change?.description ?? "",
-        diff: sameFile ? current.diff : null,
-        diffFor: sameFile ? current.diffFor : "",
-      });
-      const latest = sessionRef.current;
-      if (latest) requestDiff(latest);
+      await reloadPending(current);
     } catch (caught) {
       if (!quiet) report(caught);
     } finally {
-      refreshing.current = false;
+      refreshing.current.delete(current.tabId);
       endActivity(id);
     }
-  }, [beginActivity, endActivity, guard, patch, report, requestDiff]);
+  }, [beginActivity, endActivity, reloadPending, report]);
 
   useEffect(() => {
     const minutes = prefs.p4RefreshMinutes;
@@ -435,40 +433,6 @@ export function P4Provider({ children }: { children: ReactNode }) {
     patch({ view });
   }, [patch]);
 
-  const reloadPending = useCallback(
-    async (selectId?: string) => {
-      const current = sessionRef.current;
-      if (!current) return;
-      const pending = await guard(current.connection, () => p4Api.refreshPending(current.connection));
-      const selected = selectId && pending.some((change) => change.id === selectId)
-        ? selectId
-        : pending.some((change) => change.id === current.selectedChange)
-          ? current.selectedChange
-          : defaultChange(pending);
-      const change = pending.find((item) => item.id === selected);
-      const shown = shownFile(change?.files ?? [], {
-        path: current.selectedFile,
-        shelved: current.selectedShelved,
-      });
-      const sameSelection =
-        selected === current.selectedChange &&
-        shown.path === current.selectedFile &&
-        shown.shelved === current.selectedShelved;
-      patch({
-        pending,
-        selectedChange: selected,
-        selectedFile: shown.path,
-        selectedShelved: shown.shelved,
-        description: change?.description ?? current.description,
-        diff: sameSelection ? current.diff : null,
-        diffFor: sameSelection ? current.diffFor : "",
-      });
-      const latest = sessionRef.current;
-      if (latest) requestDiff(latest);
-    },
-    [guard, patch, requestDiff],
-  );
-
   const submitSelected = useCallback(async () => {
     const current = sessionRef.current;
     if (!current) return;
@@ -478,7 +442,7 @@ export function P4Provider({ children }: { children: ReactNode }) {
         p4Api.submit(current.connection, current.selectedChange, current.description),
       );
       toast.success("Submitted");
-      await reloadPending("default");
+      await reloadPending(current, "default");
     } catch (caught) {
       report(caught);
     } finally {
@@ -495,7 +459,7 @@ export function P4Provider({ children }: { children: ReactNode }) {
         p4Api.saveChange(current.connection, current.selectedChange, current.description),
       );
       toast.success(current.selectedChange === "default" ? `Created change ${saved}` : "Description saved");
-      await reloadPending(saved);
+      await reloadPending(current, saved);
     } catch (caught) {
       report(caught);
     } finally {
@@ -511,7 +475,7 @@ export function P4Provider({ children }: { children: ReactNode }) {
       try {
         const saved = await guard(current.connection, () => p4Api.newChange(current.connection, description));
         toast.success(`Created change ${saved}`);
-        await reloadPending(saved);
+        await reloadPending(current, saved);
       } catch (caught) {
         report(caught);
       } finally {
@@ -527,7 +491,7 @@ export function P4Provider({ children }: { children: ReactNode }) {
       if (!current || depotPaths.length === 0) return;
       try {
         await guard(current.connection, () => p4Api.reopen(current.connection, changeId, depotPaths));
-        await reloadPending(changeId);
+        await reloadPending(current, changeId);
       } catch (caught) {
         report(caught);
       }
@@ -580,7 +544,7 @@ export function P4Provider({ children }: { children: ReactNode }) {
           }
         });
         toast.success(!shelved && !shelf ? "Moved" : shelved && !shelf ? "Unshelved" : "Shelved");
-        await reloadPending(targetChange);
+        await reloadPending(current, targetChange);
       } catch (caught) {
         report(caught);
       } finally {
@@ -598,7 +562,7 @@ export function P4Provider({ children }: { children: ReactNode }) {
       try {
         await guard(current.connection, () => p4Api.revert(current.connection, paths, wipe));
         toast.success("Reverted");
-        await reloadPending();
+        await reloadPending(current);
       } catch (caught) {
         report(caught);
       } finally {
@@ -622,7 +586,7 @@ export function P4Provider({ children }: { children: ReactNode }) {
         });
         const skipped = files.length - numbered.length;
         toast.success(skipped > 0 ? "Shelved the files in numbered changelists." : "Shelved");
-        await reloadPending(numbered[0]?.change);
+        await reloadPending(current, numbered[0]?.change);
         return true;
       } catch (caught) {
         report(caught);
@@ -641,7 +605,7 @@ export function P4Provider({ children }: { children: ReactNode }) {
     try {
       await guard(current.connection, () => p4Api.shelve(current.connection, current.selectedChange));
       toast.success("Shelved");
-      await reloadPending(current.selectedChange);
+      await reloadPending(current, current.selectedChange);
     } catch (caught) {
       report(caught);
     } finally {
@@ -656,7 +620,7 @@ export function P4Provider({ children }: { children: ReactNode }) {
     try {
       await guard(current.connection, () => p4Api.unshelve(current.connection, current.selectedChange));
       toast.success("Unshelved");
-      await reloadPending(current.selectedChange);
+      await reloadPending(current, current.selectedChange);
     } catch (caught) {
       report(caught);
     } finally {
@@ -671,7 +635,7 @@ export function P4Provider({ children }: { children: ReactNode }) {
     try {
       await guard(current.connection, () => p4Api.deleteShelf(current.connection, current.selectedChange));
       toast.success("Shelf deleted");
-      await reloadPending(current.selectedChange);
+      await reloadPending(current, current.selectedChange);
     } catch (caught) {
       report(caught);
     } finally {
@@ -697,7 +661,7 @@ export function P4Provider({ children }: { children: ReactNode }) {
       try {
         await guard(current.connection, () => p4Api.resolveAccept(current.connection, path, mode));
         toast.success(mode === "merge" ? "Merged" : mode === "yours" ? "Accepted yours" : "Accepted theirs");
-        await reloadPending(current.selectedChange);
+        await reloadPending(current, current.selectedChange);
         return true;
       } catch (caught) {
         report(caught);
@@ -714,7 +678,7 @@ export function P4Provider({ children }: { children: ReactNode }) {
     if (!current) return;
     try {
       await guard(current.connection, () => p4Api.revertUnchanged(current.connection));
-      await reloadPending();
+      await reloadPending(current);
     } catch (caught) {
       report(caught);
     }
@@ -728,7 +692,7 @@ export function P4Provider({ children }: { children: ReactNode }) {
       try {
         const output = await guard(current.connection, () => p4Api.sync(current.connection, paths, id));
         toast.success(syncSummary(output));
-        await reloadPending();
+        await reloadPending(current);
         bumpFiles();
       } catch (caught) {
         report(caught);
@@ -750,7 +714,7 @@ export function P4Provider({ children }: { children: ReactNode }) {
         );
         if (!request.preview) {
           toast.success(lastLine(output) || "Got revision");
-          await reloadPending();
+          await reloadPending(current);
           bumpFiles();
         }
         return output;
@@ -771,7 +735,7 @@ export function P4Provider({ children }: { children: ReactNode }) {
     try {
       const output = await guard(current.connection, () => p4Api.reconcile(current.connection, id));
       toast.success(lastLine(output) || "Reconciled");
-      await reloadPending("default");
+      await reloadPending(current, "default");
       bumpFiles();
     } catch (caught) {
       report(caught);
@@ -788,7 +752,7 @@ export function P4Provider({ children }: { children: ReactNode }) {
       const id = beginActivity(label);
       try {
         await guard(current.connection, () => p4Api.fileAction(current.connection, action, paths));
-        await reloadPending("default");
+        await reloadPending(current, "default");
         bumpFiles();
       } catch (caught) {
         report(caught);
@@ -803,7 +767,9 @@ export function P4Provider({ children }: { children: ReactNode }) {
     async (more = false) => {
       const current = sessionRef.current;
       if (!current) return;
-      setSubmittedLoading(true);
+      const key = `${current.tabId}:list`;
+      const token = nextToken(submittedTokens.current, key);
+      setSubmittedBusy((busy) => new Set(busy).add(key));
       try {
         const oldest = more ? oldestChange(current.submitted) : null;
         const page = await guard(current.connection, () =>
@@ -815,23 +781,27 @@ export function P4Provider({ children }: { children: ReactNode }) {
             oldest,
           ),
         );
-        const latest = sessionRef.current;
+        if (submittedTokens.current.get(key) !== token) return;
+        const latest = cache.current.get(current.tabId);
         if (
           !latest ||
+          !sameP4Connection(latest.connection, current.connection) ||
           latest.submittedUser !== current.submittedUser ||
           latest.submittedClient !== current.submittedClient
         ) {
           return;
         }
         const submitted = more ? mergeChanges(latest.submitted, page.changes) : page.changes;
-        patch({ submitted, submittedHasMore: page.hasMore });
+        updateSession(current.tabId, (value) => ({ ...value, submitted, submittedHasMore: page.hasMore }));
       } catch (caught) {
         report(caught);
       } finally {
-        setSubmittedLoading(false);
+        if (submittedTokens.current.get(key) === token) {
+          setSubmittedBusy((busy) => withoutKey(busy, key));
+        }
       }
     },
-    [guard, patch, report],
+    [guard, report, updateSession],
   );
 
   const setSubmittedFilter = useCallback(
@@ -883,25 +853,31 @@ export function P4Provider({ children }: { children: ReactNode }) {
       if (!current) return;
       if (current.selectedSubmitted === id && current.submittedDetail?.id === id) return;
       patch({ selectedSubmitted: id, submittedDetail: null, submittedDiffs: [] });
-      setSubmittedLoading(true);
+      const key = `${current.tabId}:detail`;
+      const token = nextToken(submittedTokens.current, key);
+      setSubmittedBusy((busy) => new Set(busy).add(key));
       try {
         const described = await guard(current.connection, () => p4Api.describe(current.connection, id));
-        const latest = sessionRef.current;
-        if (!latest || latest.selectedSubmitted !== id) return;
-        patch({
+        if (submittedTokens.current.get(key) !== token) return;
+        const latest = cache.current.get(current.tabId);
+        if (!latest || !sameP4Connection(latest.connection, current.connection) || latest.selectedSubmitted !== id) return;
+        updateSession(current.tabId, (value) => ({ ...value,
           selectedSubmitted: id,
           submittedDetail: described.change,
           submittedDiffs: [],
-        });
+        }));
       } catch (caught) {
-        const latest = sessionRef.current;
-        if (!latest || latest.selectedSubmitted !== id) return;
+        if (submittedTokens.current.get(key) !== token) return;
+        const latest = cache.current.get(current.tabId);
+        if (!latest || !sameP4Connection(latest.connection, current.connection) || latest.selectedSubmitted !== id) return;
         report(caught);
       } finally {
-        if (sessionRef.current?.selectedSubmitted === id) setSubmittedLoading(false);
+        if (submittedTokens.current.get(key) === token) {
+          setSubmittedBusy((busy) => withoutKey(busy, key));
+        }
       }
     },
-    [guard, patch, report],
+    [guard, patch, report, updateSession],
   );
 
   const listDir = useCallback(
@@ -1023,25 +999,25 @@ export function P4Provider({ children }: { children: ReactNode }) {
 
   const value = useMemo<P4ContextValue>(
     () => ({
-      view: session?.view ?? "pending",
+      view: visibleSession?.view ?? "pending",
       setView,
       connection,
-      pending: session?.pending ?? [],
+      pending: visibleSession?.pending ?? [],
       loading,
       error,
       selectedChange,
       selectedFile,
       selectedShelved,
-      description: session?.description ?? "",
+      description: visibleSession?.description ?? "",
       setDescription,
-      diff: session?.diff ?? null,
+      diff: visibleSession?.diff ?? null,
       diffLoading,
-      submitted: session?.submitted ?? [],
+      submitted: visibleSession?.submitted ?? [],
       submittedLoading,
-      submittedHasMore: session?.submittedHasMore ?? true,
-      selectedSubmitted: session?.selectedSubmitted ?? null,
-      submittedDetail: session?.submittedDetail ?? null,
-      submittedDiffs: session?.submittedDiffs ?? [],
+      submittedHasMore: visibleSession?.submittedHasMore ?? true,
+      selectedSubmitted: visibleSession?.selectedSubmitted ?? null,
+      submittedDetail: visibleSession?.submittedDetail ?? null,
+      submittedDiffs: visibleSession?.submittedDiffs ?? [],
       refresh,
       selectChange,
       selectFile,
@@ -1064,8 +1040,8 @@ export function P4Provider({ children }: { children: ReactNode }) {
       reconcile,
       fileAction,
       loadSubmitted,
-      submittedUser: session?.submittedUser ?? connection?.user ?? "",
-      submittedClient: session?.submittedClient ?? connection?.client ?? "",
+      submittedUser: visibleSession?.submittedUser ?? connection?.user ?? "",
+      submittedClient: visibleSession?.submittedClient ?? connection?.client ?? "",
       setSubmittedFilter,
       listUsers,
       listClients,
@@ -1126,7 +1102,7 @@ export function P4Provider({ children }: { children: ReactNode }) {
       selectedChange,
       selectedFile,
       selectedShelved,
-      session,
+      visibleSession,
       setDescription,
       setSubmittedFilter,
       setView,
@@ -1170,28 +1146,6 @@ function groupPaths(files: { change: string; path: string }[]) {
   return groups;
 }
 
-function fileKey(change: string, file: string | null, shelved: boolean) {
-  return `${change}\n${file ?? ""}\n${shelved ? "shelf" : "open"}`;
-}
-
-function shownFile(files: P4File[], preferred?: { path: string | null; shelved: boolean }) {
-  if (
-    preferred?.path &&
-    files.some((file) => file.depotPath === preferred.path && file.shelved === preferred.shelved)
-  ) {
-    return { path: preferred.path, shelved: preferred.shelved };
-  }
-  const opened = files.find((file) => !file.shelved);
-  if (opened) return { path: opened.depotPath, shelved: false };
-  const shelf = files.find((file) => file.shelved);
-  if (shelf) return { path: shelf.depotPath, shelved: true };
-  return { path: null, shelved: false };
-}
-
-function defaultChange(pending: P4Changelist[]) {
-  return pending.find((change) => change.id === "default")?.id ?? pending[0]?.id ?? "default";
-}
-
 function oldestChange(changes: P4Changelist[]) {
   const numbers = changes.map((change) => Number(change.id)).filter((value) => Number.isFinite(value) && value > 0);
   if (numbers.length === 0) return null;
@@ -1211,4 +1165,16 @@ function lastLine(text: string) {
   const line = lines[lines.length - 1];
   if (!line) return "";
   return line.length > 140 ? `${line.slice(0, 140)}…` : line;
+}
+
+function nextToken(tokens: Map<string, number>, key: string) {
+  const next = (tokens.get(key) ?? 0) + 1;
+  tokens.set(key, next);
+  return next;
+}
+
+function withoutKey(values: ReadonlySet<string>, key: string) {
+  const next = new Set(values);
+  next.delete(key);
+  return next;
 }
