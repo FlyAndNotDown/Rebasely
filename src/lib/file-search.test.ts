@@ -40,6 +40,23 @@ describe("nestSearchNodes", () => {
     ]);
     expect(names(tree.entries[""])).toEqual(["alpha", "zeta.txt"]);
   });
+
+  it("sorts matching files without case and keeps lexical number ordering", () => {
+    const tree = nestSearchNodes([
+      { relative: "src/item2.txt", dir: false },
+      { relative: "src/beta.txt", dir: false },
+      { relative: "src/item10.txt", dir: false },
+      { relative: "src/ALPHA.txt", dir: false },
+      { relative: "src/alpha.txt", dir: false },
+    ]);
+    expect(names(tree.entries.src)).toEqual([
+      "ALPHA.txt",
+      "alpha.txt",
+      "beta.txt",
+      "item10.txt",
+      "item2.txt",
+    ]);
+  });
 });
 
 describe("joinRoot", () => {

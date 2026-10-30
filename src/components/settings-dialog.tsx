@@ -35,6 +35,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Label } from "@/components/ui/label";
 import { SshKeysSettings } from "@/components/ssh-keys-settings";
+import { UpdatesSettings } from "@/components/app-updates";
 import { GitLogo, PerforceMark } from "@/components/vcs-icon";
 import { errorMessage, gitApi } from "@/lib/git";
 import { p4Api } from "@/lib/p4";
@@ -528,10 +529,11 @@ function SettingsForm() {
               <DialogHeader>
                 <DialogTitle>General</DialogTitle>
                 <DialogDescription>
-                  Appearance, and the apps used to open a repository.
+                  Application updates, appearance, and the apps used to open a repository.
                 </DialogDescription>
               </DialogHeader>
               <div className="mt-6 grid gap-8">
+                <UpdatesSettings />
                 <FieldGroup title="Appearance">
                   <SelectField
                     id="theme-choice"

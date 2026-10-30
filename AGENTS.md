@@ -35,6 +35,8 @@ Run the checks for the code you change. For a change across the command boundary
 
 The GitHub workflow checks Windows, macOS, and Linux natively. A successful Windows check does not establish that the other platforms work; distinguish local results from pending CI results.
 
+The Check workflow runs only when a pull request targeting `master` is opened, updated, or reopened. Do not add push, schedule, or manual triggers to Check. Ordinary branch pushes and merges must not start it. Preserve each successful native job's checked-source tree notice; owner-triggered releases use these notices to verify the merged source without repeating checks after a merge.
+
 ## Dependency selection
 
 - A newly selected direct Rust component must have at least 500 GitHub stars on its source repository when adopted. Verify the primary repository, maintenance status, license, platform support, and API fit before adding it; a download count is not a substitute for the star requirement.
@@ -115,6 +117,11 @@ Inspecting a live Git or Perforce workspace while debugging is allowed. Copying 
 - Use operating-system randomness for credential tokens and finite credential request lifetimes. Publish private keys without overwriting existing files, restrict permissions before publication, and never echo passphrases in failures.
 
 ## Commits
+
+- Make all development changes on `dev` or a topic branch based on `dev`. Commit and push routine work to `dev`; do not push directly to `master`.
+- Update `master` through a reviewed pull request from `dev`. Only the repository owner may explicitly authorize an exceptional direct push.
+- Use `FlyAndNotDown <johnkindem@qq.com>` as the public Git author and committer identity.
+- Release tags use `vX.Y.Z`. Publishing a release requires the repository owner to run the manual GitHub release workflow and enter the version explicitly.
 
 Use [Conventional Commits](https://www.conventionalcommits.org/) for every commit:
 

@@ -28,8 +28,8 @@ describe("shortcuts", () => {
   });
 
   it("matches modifiers exactly", () => {
-    expect(matchesCombo(event("F", { ctrlKey: true, shiftKey: true }), { key: "f", mod: true, shift: true })).toBe(true);
-    expect(matchesCombo(event("f", { ctrlKey: true }), { key: "f", mod: true, shift: true })).toBe(false);
+    expect(matchesCombo(event("F", { ctrlKey: true, shiftKey: true }), { key: "f", mod: true, shift: true }, false)).toBe(true);
+    expect(matchesCombo(event("f", { ctrlKey: true }), { key: "f", mod: true, shift: true }, false)).toBe(false);
     expect(matchesCombo(event("k", { metaKey: true }), { key: "k", mod: true }, true)).toBe(true);
   });
 

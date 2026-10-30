@@ -408,15 +408,46 @@ fn warm_reachable(repo: &Repository) -> Vec<thread::JoinHandle<()>> {
 }
 
 pub(super) fn reachable_commits(repo: &Repository, tip: &str) -> Option<Arc<HashSet<String>>> {
+    #[derive(PartialEq)]
+    struct Key {
+        root: PathBuf,
+        tip: String,
+        shallow: Option<Vec<u8>>,
+    }
+
     enum Cached {
         Set(Arc<HashSet<String>>),
         TooBig,
     }
     const MAX_REACHABLE: usize = 2_000_000;
-    static CACHE: OnceLock<Mutex<Vec<(String, Cached)>>> = OnceLock::new();
+    const MAX_SHALLOW_KEY_BYTES: u64 = 64 * 1024;
+    // A shallow boundary can change without moving the tip when fetching more
+    // history. Include its bytes, but avoid allocating an unbounded cache key.
+    let shallow = match fs::File::open(repo.commondir().join("shallow")) {
+        Ok(file) => {
+            let mut bytes = Vec::new();
+            if file
+                .take(MAX_SHALLOW_KEY_BYTES + 1)
+                .read_to_end(&mut bytes)
+                .is_err()
+                || bytes.len() as u64 > MAX_SHALLOW_KEY_BYTES
+            {
+                return walk_reachable(repo, tip, MAX_REACHABLE).map(Arc::new);
+            }
+            Some(bytes)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(_) => return walk_reachable(repo, tip, MAX_REACHABLE).map(Arc::new),
+    };
+    let key = Key {
+        root: repo.commondir().to_path_buf(),
+        tip: tip.to_string(),
+        shallow,
+    };
+    static CACHE: OnceLock<Mutex<Vec<(Key, Cached)>>> = OnceLock::new();
     let cache = CACHE.get_or_init(|| Mutex::new(Vec::new()));
     if let Ok(guard) = cache.lock() {
-        if let Some((_, cached)) = guard.iter().find(|(oid, _)| oid == tip) {
+        if let Some((_, cached)) = guard.iter().find(|(entry, _)| entry == &key) {
             return match cached {
                 Cached::Set(set) => Some(Arc::clone(set)),
                 Cached::TooBig => None,
@@ -433,8 +464,8 @@ pub(super) fn reachable_commits(repo: &Repository, tip: &str) -> Option<Arc<Hash
         Cached::TooBig => None,
     };
     if let Ok(mut guard) = cache.lock() {
-        guard.retain(|(oid, _)| oid != tip);
-        guard.push((tip.to_string(), cached));
+        guard.retain(|(entry, _)| entry != &key);
+        guard.push((key, cached));
         if guard.len() > 4 {
             let extra = guard.len() - 4;
             guard.drain(0..extra);
@@ -448,25 +479,39 @@ pub(super) fn walk_reachable(
     tip: &str,
     limit: usize,
 ) -> Option<HashSet<String>> {
-    let output = run_git(repo.workdir(), &["rev-list", tip]).ok()?;
-    if !output.status.success() {
+    let mut child = spawn_git_stdout(repo.workdir(), &["rev-list", tip]).ok()?;
+    let result = (|| {
+        let mut reader = BufReader::new(child.stdout.take()?);
+        let mut line = Vec::new();
+        let mut set = HashSet::new();
+        while read_git_line(&mut reader, &mut line).ok()? {
+            let text = String::from_utf8_lossy(&line);
+            let id = text.trim();
+            if id.is_empty() {
+                continue;
+            }
+            set.insert(id.to_string());
+            if set.len() > limit {
+                return None;
+            }
+        }
+        if set.is_empty() {
+            None
+        } else {
+            Some(set)
+        }
+    })();
+    if result.is_none() {
+        stop_child(&mut child);
         return None;
     }
-    let mut set = HashSet::new();
-    for line in String::from_utf8_lossy(&output.stdout).lines() {
-        let id = line.trim();
-        if id.is_empty() {
-            continue;
+    match child.wait() {
+        Ok(status) if status.success() => result,
+        Ok(_) => None,
+        Err(_) => {
+            stop_child(&mut child);
+            None
         }
-        set.insert(id.to_string());
-        if set.len() > limit {
-            return None;
-        }
-    }
-    if set.is_empty() {
-        None
-    } else {
-        Some(set)
     }
 }
 

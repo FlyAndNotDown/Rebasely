@@ -635,6 +635,69 @@ fn blame_parser_merges_runs_and_skips_uncommitted_lines() {
 }
 
 #[test]
+fn blame_parser_keeps_author_names_that_start_with_metadata_words() {
+    for author in ["mail author", "timely author", "tz author"] {
+        let id = "1".repeat(40);
+        let raw = format!(
+            "{id} 1 1 1\nauthor {author}\nauthor-mail <alice@example.com>\nauthor-time 100\nauthor-tz +0000\nfilename a.txt\n\tline one\n\
+             {id} 2 2\n\tline two\n"
+        );
+        let hunks = parse_blame_porcelain(raw.as_bytes());
+        assert_eq!(hunks.len(), 1);
+        assert_eq!(hunks[0].author, author);
+        assert_eq!(hunks[0].time, 100);
+        assert_eq!(hunks[0].count, 2);
+    }
+}
+
+#[test]
+fn reachable_history_respects_its_limit_and_shallow_boundary_changes() {
+    let (root, repo) = temp_repo();
+    commit_file(&repo, &root, "file.txt", "first\n", "first");
+    let first = head_id(&repo);
+    commit_file(&repo, &root, "file.txt", "second\n", "second");
+    let second = head_id(&repo);
+    commit_file(&repo, &root, "file.txt", "third\n", "third");
+    let third = head_id(&repo);
+
+    assert!(walk_reachable(&repo, &third, 0).is_none());
+    assert!(walk_reachable(&repo, &third, 2).is_none());
+    assert_eq!(walk_reachable(&repo, &third, 3).unwrap().len(), 3);
+
+    let shallow = repo.commondir().join("shallow");
+    fs::write(&shallow, format!("{third}\n")).unwrap();
+    assert_eq!(reachable_commits(&repo, &third).unwrap().len(), 1);
+    fs::write(&shallow, format!("{second}\n")).unwrap();
+    assert_eq!(reachable_commits(&repo, &third).unwrap().len(), 2);
+    fs::remove_file(&shallow).unwrap();
+    let complete = reachable_commits(&repo, &third).unwrap();
+    assert_eq!(complete.len(), 3);
+    assert!(complete.contains(&first));
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn reachable_history_cache_keeps_repository_specific_replacements_separate() {
+    let (root, repo) = temp_repo();
+    commit_file(&repo, &root, "file.txt", "first\n", "first");
+    commit_file(&repo, &root, "file.txt", "second\n", "second");
+    let tip = head_id(&repo);
+    assert_eq!(reachable_commits(&repo, &tip).unwrap().len(), 2);
+
+    let (other_root, other_repo) = temp_repo();
+    run_git_stdout(
+        &other_root,
+        &["fetch", "--no-tags", root.to_str().unwrap(), &tip],
+    )
+    .unwrap();
+    run_git_stdout(&other_root, &["replace", "--graft", &tip]).unwrap();
+    assert_eq!(reachable_commits(&other_repo, &tip).unwrap().len(), 1);
+    assert_eq!(reachable_commits(&repo, &tip).unwrap().len(), 2);
+    let _ = fs::remove_dir_all(&root);
+    let _ = fs::remove_dir_all(&other_root);
+}
+
+#[test]
 fn name_status_parser_reads_renames_old_path_first() {
     let files = parse_name_status_z(b"M\0a.txt\0R100\0old.txt\0new.txt\0A\0img.png\0").unwrap();
     let seen: Vec<_> = files

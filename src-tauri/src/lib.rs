@@ -11,6 +11,7 @@ mod recents;
 mod session;
 mod sshkeys;
 mod terminal;
+mod updater;
 mod watch;
 mod window_state;
 
@@ -1566,9 +1567,11 @@ fn silence_browser_shortcuts(_window: &tauri::WebviewWindow) {}
 pub fn run() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .manage(WatchState::default());
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(WatchState::default())
+        .manage(updater::UpdateManager::default());
     #[cfg(target_os = "macos")]
-    let builder = builder.menu(|app| macos_menu(app));
+    let builder = builder.menu(macos_menu);
     builder
         .on_page_load(|webview, payload| {
             if payload.event() != PageLoadEvent::Finished || payload.url().scheme() == "about" {
@@ -1609,6 +1612,10 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            updater::get_update_state,
+            updater::check_for_update,
+            updater::install_update,
+            updater::restart_after_update,
             list_recents,
             forget_recent,
             load_session,

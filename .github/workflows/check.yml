@@ -1,8 +1,9 @@
 name: Check
 
 on:
-  push:
   pull_request:
+    branches: [master]
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: read
@@ -39,6 +40,13 @@ jobs:
         run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy
       - name: Select Rust
         run: rustup default stable
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: "src-tauri -> target"
+          cache-workspace-crates: "false"
+          cache-on-failure: "true"
+          cache-bin: "false"
       - name: Install frontend dependencies
         run: npm ci
       - name: Check frontend
@@ -49,3 +57,9 @@ jobs:
         run: cargo build --manifest-path src-tauri/Cargo.toml --locked --bin rebasely
       - name: Check Rust
         run: npm run check:rust
+      - name: Record checked source
+        shell: bash
+        run: |
+          git diff --quiet HEAD --
+          checked_tree="$(git rev-parse 'HEAD^{tree}')"
+          printf '::notice title=Rebasely checked source::%s\n' "$checked_tree"

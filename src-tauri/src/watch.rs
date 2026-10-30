@@ -606,19 +606,15 @@ mod tests {
     #[test]
     fn skips_nested_build_output_and_git_objects() {
         assert!(ignored(Path::new(
-            r"C:\work\repo\module\Intermediate\Build\cache.obj"
+            "repo/module/Intermediate/Build/cache.obj"
         )));
-        assert!(ignored(Path::new(
-            r"C:\work\repo\module\Binaries\Win64\app.exe"
-        )));
-        assert!(ignored(Path::new(r"C:\work\repo\.git\objects\ab\cd")));
-        assert!(ignored(Path::new(r"C:\work\repo\.git\index.lock")));
-        assert!(!ignored(Path::new(
-            r"C:\work\repo\module\src\detail\impl.cpp"
-        )));
-        assert!(!ignored(Path::new(r"C:\work\repo\.git\index")));
-        assert!(!ignored(Path::new(r"C:\work\repo\.git\refs\heads\main")));
-        assert!(!IgnoreRules::fixed_only().ignores(Path::new(r"C:\work\repo\module\src\a.cpp")));
+        assert!(ignored(Path::new("repo/module/Binaries/Win64/app.exe")));
+        assert!(ignored(Path::new("repo/.git/objects/ab/cd")));
+        assert!(ignored(Path::new("repo/.git/index.lock")));
+        assert!(!ignored(Path::new("repo/module/src/detail/impl.cpp")));
+        assert!(!ignored(Path::new("repo/.git/index")));
+        assert!(!ignored(Path::new("repo/.git/refs/heads/main")));
+        assert!(!IgnoreRules::fixed_only().ignores(Path::new("repo/module/src/a.cpp")));
     }
 
     #[test]

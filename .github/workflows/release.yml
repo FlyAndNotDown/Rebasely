@@ -1,0 +1,201 @@
+name: Release
+run-name: Release ${{ inputs.version }} by ${{ github.actor }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Stable release version, including v (for example v0.0.1)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate owner, version, and checked revision
+    if: >-
+      github.ref == 'refs/heads/master' &&
+      github.actor == github.repository_owner &&
+      github.triggering_actor == github.repository_owner
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      checks: read
+      pull-requests: read
+    outputs:
+      version: ${{ steps.validate.outputs.version }}
+      tag: ${{ steps.validate.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Validate release request
+        id: validate
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        env:
+          RELEASE_TAG: ${{ inputs.version }}
+        with:
+          script: |
+            const { pathToFileURL } = require('node:url');
+            const path = require('node:path');
+            const { preflight } = await import(pathToFileURL(path.join(process.env.GITHUB_WORKSPACE, 'scripts/release-github.mjs')).href);
+            await preflight({ github, context, core, tag: process.env.RELEASE_TAG });
+
+  draft:
+    name: Create draft release
+    needs: validate
+    if: >-
+      github.actor == github.repository_owner &&
+      github.triggering_actor == github.repository_owner
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      actions: read
+      checks: read
+      pull-requests: read
+    outputs:
+      release_id: ${{ steps.draft.outputs.release_id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Create draft at the validated commit
+        id: draft
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        env:
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+        with:
+          script: |
+            const { pathToFileURL } = require('node:url');
+            const path = require('node:path');
+            const { createDraft } = await import(pathToFileURL(path.join(process.env.GITHUB_WORKSPACE, 'scripts/release-github.mjs')).href);
+            await createDraft({ github, context, core, tag: process.env.RELEASE_TAG });
+
+  build:
+    name: Build ${{ matrix.asset }}
+    needs: [validate, draft]
+    if: >-
+      github.actor == github.repository_owner &&
+      github.triggering_actor == github.repository_owner
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            bundles: nsis
+            asset: windows_x64
+            config: >-
+              --config '{"bundle":{"createUpdaterArtifacts":true}}'
+          - os: macos-15
+            target: aarch64-apple-darwin
+            bundles: app,dmg
+            asset: macos_arm64
+            config: >-
+              --config '{"bundle":{"createUpdaterArtifacts":true,"macOS":{"signingIdentity":"-"}}}'
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            bundles: app,dmg
+            asset: macos_x64
+            config: >-
+              --config '{"bundle":{"createUpdaterArtifacts":true,"macOS":{"signingIdentity":"-"}}}'
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            bundles: appimage,deb
+            asset: linux_x64
+            config: >-
+              --config '{"bundle":{"createUpdaterArtifacts":true}}'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev \
+            build-essential curl wget file libxdo-dev libssl-dev \
+            libayatana-appindicator3-dev librsvg2-dev patchelf xdg-utils
+      - name: Install Rust target
+        run: rustup toolchain install stable --profile minimal --target ${{ matrix.target }}
+      - name: Select Rust
+        run: rustup default stable
+      - name: Stamp the explicit version in the build checkout
+        env:
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+        run: node scripts/release-version.mjs set "$RELEASE_TAG"
+        shell: bash
+      - name: Install locked frontend dependencies
+        run: npm ci
+      - name: Check version consistency
+        run: npm run check:version
+      - name: Build signed updater packages and upload to the draft
+        uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          releaseId: ${{ needs.draft.outputs.release_id }}
+          tagName: ${{ needs.validate.outputs.tag }}
+          releaseDraft: true
+          prerelease: false
+          releaseCommitish: ${{ github.sha }}
+          releaseAssetNamePattern: Rebasely_v[version]_${{ matrix.asset }}[ext]
+          uploadUpdaterJson: false
+          uploadUpdaterSignatures: true
+          args: --ci --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} ${{ matrix.config }} -- --locked
+
+  publish:
+    name: Verify all packages and publish
+    needs: [validate, draft, build]
+    if: >-
+      github.actor == github.repository_owner &&
+      github.triggering_actor == github.repository_owner
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      actions: read
+      checks: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Assemble the complete updater manifest and publish
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        env:
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+          RELEASE_ID: ${{ needs.draft.outputs.release_id }}
+        with:
+          script: |
+            const { pathToFileURL } = require('node:url');
+            const path = require('node:path');
+            const { publishRelease } = await import(pathToFileURL(path.join(process.env.GITHUB_WORKSPACE, 'scripts/release-github.mjs')).href);
+            await publishRelease({ github, context, core, tag: process.env.RELEASE_TAG, releaseId: process.env.RELEASE_ID });

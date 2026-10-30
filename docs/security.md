@@ -25,6 +25,11 @@ not sandbox those command-line programs.
   without silent truncation.
 - Repository file browsing checks resolved paths against the worktree boundary.
   Image and text previews limit reads before allocating the whole file.
+- Application updates use the official Tauri updater with an embedded public
+  key and signed version verification. Checks run once at startup and on an
+  explicit request in Settings. Installation requires confirmation and accepts
+  only signed packages from this repository's HTTPS GitHub Releases URLs.
+  The private signing key stays outside the repository and in an Actions secret.
 
 These controls do not make arbitrary command output safe to publish. Review
 screenshots, logs, repository names, paths, and remote addresses before sharing
@@ -40,6 +45,7 @@ repositories, each verified above that threshold on 2026-10-30:
 | Component | Source repository | Use |
 | --- | --- | --- |
 | `tauri-plugin-opener` | [Tauri plugins](https://github.com/tauri-apps/plugins-workspace) | Native open and reveal operations |
+| `tauri-plugin-updater` | [Tauri plugins](https://github.com/tauri-apps/plugins-workspace) | Signed application updates from GitHub Releases |
 | `nix` | [nix](https://github.com/nix-rust/nix) | Safe Unix process-group cancellation |
 | `tempfile` | [tempfile](https://github.com/Stebalien/tempfile) | Atomic persistence and non-overwriting key publication |
 | `getrandom` | [getrandom](https://github.com/rust-random/getrandom) | Operating-system credential token randomness |
@@ -49,6 +55,12 @@ repositories, each verified above that threshold on 2026-10-30:
 
 The opener version is pinned to the current Tauri runtime's compatible release.
 Review the pin together with future runtime upgrades.
+
+The updater was adopted from the maintained Tauri plugins workspace (1,838
+GitHub stars on 2026-10-30), under Apache-2.0 or MIT, with Windows, macOS, and
+Linux support. Its signed version checks require the compatible Tauri 2.12
+runtime and CLI 2.12.4; the Windows WebView dependencies are aligned with that
+runtime.
 
 ## Audit commands and remaining upstream issues
 
@@ -68,8 +80,7 @@ reviewed:
   graph requires the 0.18 series; the upstream fix is in 0.20 and is not a
   compatible lockfile update. Rebasely does not directly call this iterator, but
   that does not establish that all upstream code is unaffected.
-- Tauri's build and Linux desktop dependencies include the unmaintained
-  `proc-macro-error` and `unic-*` crates.
+- Tauri's build dependencies include the unmaintained `proc-macro-error` crate.
 - The opener's Linux D-Bus dependencies include `zbus_names`, `zvariant`, and
   `zvariant_derive`, which moved into `zbus` 6 and are no longer maintained as
   separate crates. Follow the upstream opener migration rather than overriding
