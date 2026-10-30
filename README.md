@@ -58,7 +58,7 @@ Git work trees refresh when files change. Repositories keep their own progress a
 
 ### Prerequisites
 
-- **Node.js 22.13+ (22.x), or 24+**, with npm.
+- **Node.js 22.13+ (22.x), 24.x, or 26+**, with npm.
 - **Rust stable**, with `rustfmt` and `clippy` for development checks.
 - **Git**, available on `PATH` or selected in the app's Settings.
 - **Perforce CLI (`p4`)**, if you plan to use Perforce workspaces.
@@ -100,11 +100,12 @@ npm run check:all
 
 | Command | Checks |
 | --- | --- |
-| `npm run check` | TypeScript, ESLint, and frontend tests |
+| `npm run check` | English source policy, TypeScript, ESLint, and frontend tests |
 | `npm run check:rust` | Rust formatting, Clippy, and backend tests |
 | `npm run check:all` | Both check suites |
 | `npm run vite:build` | Frontend typecheck and production build |
 
+The [GitHub check workflow](.github/workflows/check.yml) runs the frontend build and both check suites on Windows, macOS, and Linux.
 
 ### Architecture
 
@@ -119,7 +120,11 @@ React + TypeScript
      Git CLI         Perforce CLI
 ```
 
-The frontend calls typed command clients; Rust owns filesystem and process work. Blocking work runs off the UI thread. Shared backend modules handle credential prompts, filesystem watching, editor and terminal integration, and persisted preferences and sessions.
+The frontend calls typed command clients; Rust owns filesystem and process work. Blocking work runs off the UI thread. Shared backend modules handle credential prompts, filesystem watching, editor and terminal integration, and persisted preferences and sessions. Native file opening and process cancellation share one platform layer.
+
+Settings remains available when Git or Perforce is missing so you can select the executable and retry. Perforce TLS trust must be established explicitly after verifying the server fingerprint. Error messages redact URL credentials, and SSH key creation preserves existing files.
+
+See [security boundaries and upstream dependency findings](docs/security.md) for audit commands and current limitations.
 
 <details>
 <summary><strong>Repository map</strong></summary>
