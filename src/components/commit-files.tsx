@@ -51,13 +51,16 @@ export function CommitFiles() {
                 <span className="min-w-0 truncate font-mono">{comparison.base.label}</span>
               </HoverTip>
               <HoverTip label="Swap sides">
-                <button
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label="Swap sides"
                   type="button"
                   className="flex size-5 shrink-0 items-center justify-center rounded-sm hover:bg-muted hover:text-foreground"
                   onClick={swapComparison}
                 >
                   <ArrowLeftRightIcon className="size-3.5" />
-                </button>
+                </Button>
               </HoverTip>
               <HoverTip label={comparison.head.rev}>
                 <span className="min-w-0 truncate font-mono">{comparison.head.label}</span>
@@ -65,13 +68,16 @@ export function CommitFiles() {
             </div>
           </div>
           <HoverTip label="Close compare">
-            <button
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              aria-label="Close comparison"
               type="button"
               className="flex size-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground"
               onClick={closeComparison}
             >
               <XIcon className="size-3.5" />
-            </button>
+            </Button>
           </HoverTip>
         </div>
         {comparison.files === null ? (

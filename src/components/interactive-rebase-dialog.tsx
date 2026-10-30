@@ -115,8 +115,8 @@ function InteractiveRebaseForm({
         </DialogDescription>
       </DialogHeader>
       <div className="max-h-80 space-y-2 overflow-auto pr-1">
-        {loading ? <p className="text-sm text-muted-foreground">Loading commits…</p> : null}
-        {error ? <p className="text-sm text-destructive">{error}</p> : null}
+        {loading ? <p role="status" className="text-sm text-muted-foreground">Loading commits…</p> : null}
+        {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
         {!loading && !error && steps.length === 0 ? (
           <p className="text-sm text-muted-foreground">Nothing to rebase.</p>
         ) : null}
