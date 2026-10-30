@@ -239,10 +239,8 @@ pub(super) fn parse_blame_porcelain(bytes: &[u8]) -> Vec<BlameHunk> {
             continue;
         }
         if let Some(name) = line.strip_prefix("author ") {
-            if !name.starts_with("mail") && !name.starts_with("time") && !name.starts_with("tz") {
-                author = name.to_string();
-                described = true;
-            }
+            author = name.to_string();
+            described = true;
             continue;
         }
         if let Some(value) = line.strip_prefix("author-time ") {

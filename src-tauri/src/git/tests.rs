@@ -635,6 +635,22 @@ fn blame_parser_merges_runs_and_skips_uncommitted_lines() {
 }
 
 #[test]
+fn blame_parser_keeps_author_names_that_start_with_metadata_words() {
+    for author in ["mail author", "timely author", "tz author"] {
+        let id = "1".repeat(40);
+        let raw = format!(
+            "{id} 1 1 1\nauthor {author}\nauthor-mail <alice@example.com>\nauthor-time 100\nauthor-tz +0000\nfilename a.txt\n\tline one\n\
+             {id} 2 2\n\tline two\n"
+        );
+        let hunks = parse_blame_porcelain(raw.as_bytes());
+        assert_eq!(hunks.len(), 1);
+        assert_eq!(hunks[0].author, author);
+        assert_eq!(hunks[0].time, 100);
+        assert_eq!(hunks[0].count, 2);
+    }
+}
+
+#[test]
 fn name_status_parser_reads_renames_old_path_first() {
     let files = parse_name_status_z(b"M\0a.txt\0R100\0old.txt\0new.txt\0A\0img.png\0").unwrap();
     let seen: Vec<_> = files
