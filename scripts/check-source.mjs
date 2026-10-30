@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const extensions = new Set([".rs", ".ts", ".tsx", ".js", ".mjs", ".cjs", ".css", ".html", ".json", ".toml", ".yml", ".yaml", ".svg", ".md", ".lock"]);
-const directories = ["src", "src-tauri/src", "src-tauri/capabilities", "scripts", ".github", ".vscode", "docs"];
+const directories = ["src", "src-tauri/src", "src-tauri/capabilities", "scripts", ".github", "docs"];
 const files = [];
 const violations = [];
 const han = /\p{Script=Han}/u;

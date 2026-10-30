@@ -110,6 +110,7 @@ Inspecting a live Git or Perforce workspace while debugging is allowed. Copying 
 - Public dependency names, documented protocol defaults, portable system lookup paths, and required loopback endpoints may remain when they describe actual application behavior.
 - The existing About dialog author is the only personal identity that belongs in the source tree. Git author and committer metadata use the configured repository identity.
 - Keep diagnostic dumps and backups outside the repository. Review staged files and commit messages for live-environment details before publishing.
+- Keep editor workspace configuration such as `.vscode/` untracked. Do not add allowlist exceptions for editor recommendations or local settings.
 - Never accept a new or changed Perforce TLS fingerprint automatically. Ask users to verify and establish trust using the CLI, then retry. Redact embedded URL credentials and sensitive query parameters before serializing backend errors.
 - Use operating-system randomness for credential tokens and finite credential request lifetimes. Publish private keys without overwriting existing files, restrict permissions before publication, and never echo passphrases in failures.
 
