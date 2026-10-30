@@ -23,11 +23,9 @@ pub fn write_atomic(path: &Path, contents: &[u8]) -> io::Result<()> {
         let _ = fs::remove_file(&tmp);
         return Err(err);
     }
-    // A scanner holding the target open can make the rename fail on Windows;
-    // a plain write is still better than losing the change.
-    if fs::rename(&tmp, path).is_err() {
+    if let Err(err) = fs::rename(&tmp, path) {
         let _ = fs::remove_file(&tmp);
-        fs::write(path, contents)?;
+        return Err(err);
     }
     Ok(())
 }
@@ -52,5 +50,34 @@ mod tests {
             .collect();
         assert_eq!(names.len(), 1, "{names:?}");
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn preserves_the_original_when_replacement_is_blocked() {
+        use std::fs::OpenOptions;
+        use std::os::windows::fs::OpenOptionsExt;
+
+        let dir =
+            std::env::temp_dir().join(format!("rebasely-fsutil-locked-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("prefs.json");
+        fs::write(&path, b"original").unwrap();
+        // Permit reads and writes, but block replacing the file's directory entry.
+        let reader = OpenOptions::new()
+            .read(true)
+            .share_mode(0x1 | 0x2)
+            .open(&path)
+            .unwrap();
+
+        let result = write_atomic(&path, b"updated");
+        let contents = fs::read(&path).unwrap();
+        let entries = fs::read_dir(&dir).unwrap().count();
+        drop(reader);
+        fs::remove_dir_all(&dir).unwrap();
+
+        assert!(result.is_err());
+        assert_eq!(contents, b"original");
+        assert_eq!(entries, 1);
     }
 }
