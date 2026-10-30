@@ -63,6 +63,8 @@ export function P4ConnectionDialog() {
         charset,
       });
       setConnectionOpen(false);
+    } catch {
+      // The context reports the failure; keep the entered connection for retry.
     } finally {
       setSaving(false);
     }
