@@ -520,18 +520,7 @@ pub fn filelog(connection: &P4Connection, path: &str) -> AppResult<Vec<P4Revisio
 
 pub fn list_dir(connection: &P4Connection, relative: &str) -> AppResult<Vec<P4DirEntry>> {
     let root = PathBuf::from(&connection.root);
-    let relative = relative.trim().trim_matches(['/', '\\']);
-    let dir = if relative.is_empty() {
-        root.clone()
-    } else {
-        root.join(relative)
-    };
-    if !path_is_within(&root, &dir) {
-        return Err(AppError::msg("Path is outside the workspace."));
-    }
-    if !dir.is_dir() {
-        return Err(AppError::msg("Folder not found."));
-    }
+    let dir = workspace_directory(&root, relative)?;
     let mut entries = Vec::new();
     for entry in fs::read_dir(&dir)? {
         let entry = entry?;
@@ -559,6 +548,27 @@ pub fn list_dir(connection: &P4Connection, relative: &str) -> AppResult<Vec<P4Di
     });
     // Icons come from a later fstat so the names can paint without a server round trip.
     Ok(entries)
+}
+
+fn workspace_directory(root: &Path, directory: &str) -> AppResult<PathBuf> {
+    let directory = PathBuf::from(strip_verbatim_prefix(directory.trim()));
+    let dir = if directory.as_os_str().is_empty() {
+        root.to_path_buf()
+    } else if directory.is_absolute() {
+        directory
+    } else {
+        root.join(directory)
+    };
+    if !path_is_within(root, &dir) {
+        return Err(AppError::msg("Path is outside the workspace."));
+    }
+    if !dir.is_dir() {
+        return Err(AppError::msg("Folder not found."));
+    }
+    if !path_is_within(&fs::canonicalize(root)?, &fs::canonicalize(&dir)?) {
+        return Err(AppError::msg("Path is outside the workspace."));
+    }
+    Ok(dir)
 }
 
 /// One level of the depot, starting at the depot roots when `path` is empty.
@@ -929,20 +939,7 @@ pub fn listing_status(
         return Ok(statuses_from(&env_for(connection), &[spec], true));
     }
     let root = PathBuf::from(&connection.root);
-    let directory = directory.trim().trim_matches(['/', '\\']);
-    let dir = if directory.is_empty() {
-        root.clone()
-    } else {
-        let path = PathBuf::from(strip_verbatim_prefix(directory));
-        if path.is_absolute() {
-            path
-        } else {
-            root.join(&path)
-        }
-    };
-    if !path_is_within(&root, &dir) {
-        return Err(AppError::msg("Path is outside the workspace."));
-    }
+    let dir = workspace_directory(&root, directory)?;
     let pattern = dir.join("*").to_string_lossy().into_owned();
     Ok(statuses_from(&env_for(connection), &[pattern], false))
 }
@@ -3285,11 +3282,81 @@ fn first_text(preferred: Option<&String>, fallback: &str) -> String {
 mod tests {
     use super::*;
 
+    struct TestDirectory(PathBuf);
+
+    impl TestDirectory {
+        fn new(label: &str) -> Self {
+            let unique = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!(
+                "rebasely-p4-{label}-{}-{unique}",
+                std::process::id()
+            ));
+            fs::create_dir(&path).unwrap();
+            Self(path)
+        }
+    }
+
+    impl Drop for TestDirectory {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
     fn record(pairs: &[(&str, &str)]) -> ZtagRecord {
         pairs
             .iter()
             .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
             .collect()
+    }
+
+    #[test]
+    fn workspace_directories_keep_absolute_paths_and_reject_parent_escapes() {
+        let temporary = TestDirectory::new("directory");
+        let root = temporary.0.join("client");
+        let src = root.join("src");
+        let outside = temporary.0.join("outside");
+        fs::create_dir_all(&src).unwrap();
+        fs::create_dir(&outside).unwrap();
+        fs::write(src.join("file.txt"), b"content").unwrap();
+        fs::write(outside.join("private.txt"), b"outside").unwrap();
+
+        assert_eq!(workspace_directory(&root, "src").unwrap(), src);
+        assert_eq!(
+            workspace_directory(&root, &src.to_string_lossy()).unwrap(),
+            src
+        );
+        assert_eq!(workspace_directory(&root, "").unwrap(), root);
+        assert!(workspace_directory(&root, "../outside").is_err());
+        assert!(workspace_directory(&root, &outside.to_string_lossy()).is_err());
+
+        let connection = P4Connection {
+            root: root.to_string_lossy().into_owned(),
+            port: String::new(),
+            user: String::new(),
+            client: String::new(),
+            charset: String::new(),
+            stream: None,
+            server: String::new(),
+        };
+        assert_eq!(list_dir(&connection, "src").unwrap()[0].name, "file.txt");
+        assert!(list_dir(&connection, "../outside").is_err());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn workspace_directories_reject_symlinks_to_outside_folders() {
+        let temporary = TestDirectory::new("symlink");
+        let root = temporary.0.join("client");
+        let outside = temporary.0.join("outside");
+        fs::create_dir(&root).unwrap();
+        fs::create_dir(&outside).unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("link")).unwrap();
+
+        assert!(workspace_directory(&root, "link").is_err());
+        assert!(workspace_directory(&root, "link/..").is_err());
     }
 
     #[test]

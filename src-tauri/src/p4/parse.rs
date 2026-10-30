@@ -370,8 +370,22 @@ pub fn path_depth(root: &Path, path: &Path) -> Option<usize> {
 
 fn folded_components(path: &Path) -> Vec<String> {
     let text = strip_verbatim_prefix(&path.to_string_lossy());
-    PathBuf::from(text)
-        .components()
+    let path = PathBuf::from(text);
+    let mut components = Vec::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !matches!(components.last(), Some(Component::Normal(_))) {
+                    return Vec::new();
+                }
+                components.pop();
+            }
+            _ => components.push(component),
+        }
+    }
+    components
+        .into_iter()
         .filter_map(|component| match component {
             Component::CurDir | Component::ParentDir => None,
             Component::RootDir => Some(String::new()),
@@ -789,12 +803,29 @@ error: something failed for //depot/main/Other.ini#1
 
     #[test]
     fn a_path_is_inside_its_root_and_not_a_sibling() {
-        let root = Path::new(r"C:\Repo");
-        assert!(path_is_within(root, Path::new(r"C:\Repo\src")));
-        assert!(path_is_within(root, Path::new(r"c:\repo")));
-        assert!(!path_is_within(root, Path::new(r"C:\Repo2")));
-        assert_eq!(path_depth(root, Path::new(r"C:\Repo\src\a")), Some(2));
-        assert_eq!(path_depth(root, Path::new(r"D:\Repo")), None);
+        let root = Path::new("/work/client");
+        assert!(path_is_within(root, Path::new("/work/client/src")));
+        assert!(!path_is_within(root, Path::new("/work/client-other")));
+        assert_eq!(path_depth(root, Path::new("/work/client/src/a")), Some(2));
+        assert_eq!(path_depth(root, Path::new("/other/client")), None);
+        assert!(path_is_within(
+            root,
+            Path::new("/work/client/src/../file.txt")
+        ));
+        assert_eq!(
+            path_depth(root, Path::new("/work/client/src/../file.txt")),
+            Some(1)
+        );
+        assert!(!path_is_within(root, Path::new("/work/client/../outside")));
+        assert!(!path_is_within(root, Path::new("/work/client/../../..")));
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn workspace_paths_follow_windows_drive_and_case_rules() {
+        let root = Path::new(r"C:\work\client");
+        assert!(path_is_within(root, Path::new(r"c:\WORK\client")));
+        assert_eq!(path_depth(root, Path::new(r"D:\work\client")), None);
     }
 
     #[test]
