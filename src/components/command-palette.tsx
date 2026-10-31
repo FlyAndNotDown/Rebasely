@@ -1,3 +1,4 @@
+import { useTranslation } from "@/i18n";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { SearchIcon } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
@@ -25,6 +26,7 @@ const QUIET_LIMIT = 6;
 
 /** Owns the app-wide shortcuts and the command palette that lists them. */
 export function CommandCenter() {
+  const { t } = useTranslation();
   const git = useGitPick([
     "snapshot",
     "recents",
@@ -78,81 +80,81 @@ export function CommandCenter() {
     };
     if (perforceOpen) {
       list.push(
-        { id: "view-pending", label: "Go to Pending", group: "Navigate", shortcut: "viewChanges", run: () => p4.setView("pending") },
-        { id: "view-submitted", label: "Go to History", group: "Navigate", shortcut: "viewHistory", run: () => p4.setView("submitted") },
-        { id: "view-workspace", label: "Go to Workspace", group: "Navigate", shortcut: "viewStash", run: () => p4.setView("workspace") },
-        { id: "sync", label: "Get latest", group: "Workspace", shortcut: "fetch", run: () => void p4.sync() },
-        { id: "reconcile", label: "Reconcile offline work", group: "Workspace", run: () => void p4.reconcile() },
-        { id: "refresh-p4", label: "Refresh workspace", group: "Workspace", run: () => void p4.refresh() },
-        { id: "editor", label: "Open in editor", group: "Repository", shortcut: "openInEditor", run: () => void git.openInEditor() },
-        { id: "terminal", label: "Open terminal", group: "Repository", shortcut: "openTerminal", run: () => void git.openTerminal() },
-        { id: "reveal", label: "Open folder", group: "Repository", run: () => void git.revealRepo() },
-        { id: "close", label: "Close repository", group: "Repository", shortcut: "closeRepository", run: () => git.closeRepo() },
+        { id: "view-pending", label: t("desktop.commandPalette.go_to_pending"), group: t("desktop.commandPalette.navigate"), shortcut: "viewChanges", run: () => p4.setView("pending") },
+        { id: "view-submitted", label: t("desktop.commandPalette.go_to_history"), group: t("desktop.commandPalette.navigate"), shortcut: "viewHistory", run: () => p4.setView("submitted") },
+        { id: "view-workspace", label: t("desktop.commandPalette.go_to_workspace"), group: t("desktop.commandPalette.navigate"), shortcut: "viewStash", run: () => p4.setView("workspace") },
+        { id: "sync", label: t("desktop.commandPalette.get_latest"), group: t("desktop.appSidebar.workspace"), shortcut: "fetch", run: () => void p4.sync() },
+        { id: "reconcile", label: t("desktop.commandPalette.reconcile_offline_work"), group: t("desktop.appSidebar.workspace"), run: () => void p4.reconcile() },
+        { id: "refresh-p4", label: t("desktop.commandPalette.refresh_workspace"), group: t("desktop.appSidebar.workspace"), run: () => void p4.refresh() },
+        { id: "editor", label: t("desktop.appHeader.open_in_editor"), group: t("desktop.commandPalette.repository"), shortcut: "openInEditor", run: () => void git.openInEditor() },
+        { id: "terminal", label: t("desktop.appHeader.open_terminal"), group: t("desktop.commandPalette.repository"), shortcut: "openTerminal", run: () => void git.openTerminal() },
+        { id: "reveal", label: t("desktop.sshKeysSettings.open_folder"), group: t("desktop.commandPalette.repository"), run: () => void git.revealRepo() },
+        { id: "close", label: t("desktop.commandPalette.close_repository"), group: t("desktop.commandPalette.repository"), shortcut: "closeRepository", run: () => git.closeRepo() },
         {
           id: "toggle-split",
-          label: prefs.diffSplit ? "Show diffs inline" : "Show diffs side by side",
-          group: "View",
+          label: prefs.diffSplit ? t("desktop.commandPalette.show_diffs_inline") : t("desktop.commandPalette.show_diffs_side_by_side"),
+          group: t("desktop.commandPalette.view"),
           run: () => void git.setDiffOptions({ split: !prefs.diffSplit }),
         },
       );
     }
     if (repoOpen) {
       list.push(
-        { id: "view-changes", label: "Go to Changes", group: "Navigate", shortcut: "viewChanges", run: () => git.setView("changes") },
-        { id: "view-history", label: "Go to History", group: "Navigate", shortcut: "viewHistory", run: () => git.setView("history") },
-        { id: "view-stash", label: "Go to Stash", group: "Navigate", shortcut: "viewStash", run: () => git.setView("stash") },
-        { id: "view-files", label: "Go to Files", group: "Navigate", shortcut: "viewFiles", run: () => git.setView("files") },
-        { id: "refresh", label: "Refresh", group: "Repository", run: () => void git.refreshRepository() },
-        { id: "fetch", label: "Fetch", group: "Remote", shortcut: "fetch", run: () => void git.fetchRemote() },
-        { id: "fetch-all", label: "Fetch all remotes", group: "Remote", run: () => void git.fetchAllRemotes() },
+        { id: "view-changes", label: t("desktop.commandPalette.go_to_changes"), group: t("desktop.commandPalette.navigate"), shortcut: "viewChanges", run: () => git.setView("changes") },
+        { id: "view-history", label: t("desktop.commandPalette.go_to_history"), group: t("desktop.commandPalette.navigate"), shortcut: "viewHistory", run: () => git.setView("history") },
+        { id: "view-stash", label: t("desktop.commandPalette.go_to_stash"), group: t("desktop.commandPalette.navigate"), shortcut: "viewStash", run: () => git.setView("stash") },
+        { id: "view-files", label: t("desktop.commandPalette.go_to_files"), group: t("desktop.commandPalette.navigate"), shortcut: "viewFiles", run: () => git.setView("files") },
+        { id: "refresh", label: t("common.refresh"), group: t("desktop.commandPalette.repository"), run: () => void git.refreshRepository() },
+        { id: "fetch", label: t("desktop.appToolbar.fetch"), group: t("desktop.appToolbar.remote"), shortcut: "fetch", run: () => void git.fetchRemote() },
+        { id: "fetch-all", label: t("desktop.commandPalette.fetch_all_remotes"), group: t("desktop.appToolbar.remote"), run: () => void git.fetchAllRemotes() },
         {
           id: "pull",
-          label: prefs.pullRebase ? "Pull (rebase)" : "Pull (merge)",
-          group: "Remote",
+          label: prefs.pullRebase ? t("desktop.commandPalette.pull_rebase") : t("desktop.commandPalette.pull_merge"),
+          group: t("desktop.appToolbar.remote"),
           shortcut: "pull",
           run: () => void git.pullRemote(undefined, prefs.pullRebase),
         },
         {
           id: "pull-other",
-          label: prefs.pullRebase ? "Pull with merge" : "Pull with rebase",
-          group: "Remote",
+          label: prefs.pullRebase ? t("desktop.commandPalette.pull_with_merge") : t("desktop.commandPalette.pull_with_rebase"),
+          group: t("desktop.appToolbar.remote"),
           run: () => void git.pullRemote(undefined, !prefs.pullRebase),
         },
-        { id: "push", label: "Push", group: "Remote", shortcut: "push", run: () => void git.pushRemote() },
-        ...(snapshot?.repo.headId ? [{ id: "new-branch", label: "New branch…", group: "Branch", shortcut: "newBranch" as const, run: () => setOpenPanel("new-branch") }] : []),
-        { id: "stash-all", label: "Stash all changes", group: "Changes", shortcut: "stashAll", run: () => void git.stashSave("", true) },
-        { id: "undo-commit", label: "Undo last commit", group: "Changes", run: () => void git.undoLastCommit() },
-        { id: "apply-patch", label: "Apply patch…", group: "Changes", run: () => void git.applyPatch() },
-        { id: "reflog", label: "Show reflog", group: "History", shortcut: "reflog", run: () => setOpenPanel("reflog") },
-        { id: "editor", label: "Open in editor", group: "Repository", shortcut: "openInEditor", run: () => void git.openInEditor() },
-        { id: "terminal", label: "Open terminal", group: "Repository", shortcut: "openTerminal", run: () => void git.openTerminal() },
-        { id: "reveal", label: "Open folder", group: "Repository", run: () => void git.revealRepo() },
-        { id: "close", label: "Close repository", group: "Repository", shortcut: "closeRepository", run: () => git.closeRepo() },
+        { id: "push", label: t("desktop.appToolbar.push"), group: t("desktop.appToolbar.remote"), shortcut: "push", run: () => void git.pushRemote() },
+        ...(snapshot?.repo.headId ? [{ id: "new-branch", label: t("desktop.commandPalette.new_branch"), group: t("common.branch"), shortcut: "newBranch" as const, run: () => setOpenPanel("new-branch") }] : []),
+        { id: "stash-all", label: t("desktop.commandPalette.stash_all_changes"), group: t("desktop.appSidebar.changes"), shortcut: "stashAll", run: () => void git.stashSave("", true) },
+        { id: "undo-commit", label: t("desktop.commandPalette.undo_last_commit"), group: t("desktop.appSidebar.changes"), run: () => void git.undoLastCommit() },
+        { id: "apply-patch", label: t("desktop.commandPalette.apply_patch"), group: t("desktop.appSidebar.changes"), run: () => void git.applyPatch() },
+        { id: "reflog", label: t("desktop.commandPalette.show_reflog"), group: t("desktop.appSidebar.history"), shortcut: "reflog", run: () => setOpenPanel("reflog") },
+        { id: "editor", label: t("desktop.appHeader.open_in_editor"), group: t("desktop.commandPalette.repository"), shortcut: "openInEditor", run: () => void git.openInEditor() },
+        { id: "terminal", label: t("desktop.appHeader.open_terminal"), group: t("desktop.commandPalette.repository"), shortcut: "openTerminal", run: () => void git.openTerminal() },
+        { id: "reveal", label: t("desktop.sshKeysSettings.open_folder"), group: t("desktop.commandPalette.repository"), run: () => void git.revealRepo() },
+        { id: "close", label: t("desktop.commandPalette.close_repository"), group: t("desktop.commandPalette.repository"), shortcut: "closeRepository", run: () => git.closeRepo() },
         {
           id: "toggle-split",
-          label: prefs.diffSplit ? "Show diffs inline" : "Show diffs side by side",
-          group: "View",
+          label: prefs.diffSplit ? t("desktop.commandPalette.show_diffs_inline") : t("desktop.commandPalette.show_diffs_side_by_side"),
+          group: t("desktop.commandPalette.view"),
           run: () => void git.setDiffOptions({ split: !prefs.diffSplit }),
         },
         {
           id: "toggle-whitespace",
-          label: prefs.diffIgnoreWhitespace ? "Show whitespace changes" : "Hide whitespace changes",
-          group: "View",
+          label: prefs.diffIgnoreWhitespace ? t("desktop.commandPalette.show_whitespace_changes") : t("desktop.commandPalette.hide_whitespace_changes"),
+          group: t("desktop.commandPalette.view"),
           run: () => void git.setDiffOptions({ ignoreWhitespace: !prefs.diffIgnoreWhitespace }),
         },
         {
           id: "toggle-tree",
-          label: prefs.changesTree ? "List changed files flat" : "Group changed files by folder",
-          group: "View",
+          label: prefs.changesTree ? t("desktop.commandPalette.list_changed_files_flat") : t("desktop.commandPalette.group_changed_files_by_folder"),
+          group: t("desktop.commandPalette.view"),
           run: () => void git.updatePrefs({ ...prefs, changesTree: !prefs.changesTree }),
         },
       );
     }
     list.push(
-      { id: "open", label: "Open local repository…", group: "Repository", shortcut: "openRepository", run: () => void git.openFolder() },
-      { id: "next-tab", label: "Next tab", group: "Navigate", shortcut: "nextTab", run: () => cycle(1) },
-      { id: "previous-tab", label: "Previous tab", group: "Navigate", shortcut: "previousTab", run: () => cycle(-1) },
-      { id: "settings", label: "Settings", group: "App", shortcut: "settings", run: () => setOpenPanel("settings") },
+      { id: "open", label: t("desktop.commandPalette.open_local_repository"), group: t("desktop.commandPalette.repository"), shortcut: "openRepository", run: () => void git.openFolder() },
+      { id: "next-tab", label: t("desktop.commandPalette.next_tab"), group: t("desktop.commandPalette.navigate"), shortcut: "nextTab", run: () => cycle(1) },
+      { id: "previous-tab", label: t("desktop.commandPalette.previous_tab"), group: t("desktop.commandPalette.navigate"), shortcut: "previousTab", run: () => cycle(-1) },
+      { id: "settings", label: t("common.settings"), group: t("desktop.commandPalette.app"), shortcut: "settings", run: () => setOpenPanel("settings") },
     );
     if (repoOpen) {
       const branch = snapshot.repo.currentBranch;
@@ -160,8 +162,8 @@ export function CommandCenter() {
         if (local.name === branch) continue;
         list.push({
           id: `branch:${local.name}`,
-          label: `Switch to ${local.name}`,
-          group: "Branches",
+          label: t("desktop.commandPalette.switchBranch", { name: local.name }),
+          group: t("desktop.commandPalette.branches"),
           dynamic: true,
           run: () => void git.checkoutBranch(local.name),
         });
@@ -169,8 +171,8 @@ export function CommandCenter() {
       for (const remote of snapshot.branches.remote) {
         list.push({
           id: `remote:${remote.name}`,
-          label: `Check out ${remote.name}`,
-          group: "Remote branches",
+          label: t("desktop.commandPalette.checkoutBranch", { name: remote.name }),
+          group: t("desktop.appHeader.remote_branches"),
           dynamic: true,
           run: () => void git.checkoutBranch(remote.name),
         });
@@ -181,15 +183,15 @@ export function CommandCenter() {
       if (open.has(normalizeRepoPath(recent.path))) continue;
       list.push({
         id: `repo:${recent.path}`,
-        label: `Open ${recent.name}`,
+        label: t("desktop.commandPalette.openRepository", { name: recent.name }),
         detail: recent.path,
-        group: "Recent repositories",
+        group: t("desktop.appMenu.recent_repositories"),
         dynamic: true,
         run: () => void git.openPath(recent.path, recent.vcs ? asVcs(recent.vcs) : undefined),
       });
     }
     return list;
-  }, [activeTabId, git, p4, perforceOpen, prefs, recents, repoOpen, setOpenPanel, snapshot, tabs]);
+  }, [t, activeTabId, git, p4, perforceOpen, prefs, recents, repoOpen, setOpenPanel, snapshot, tabs]);
 
   const commandsRef = useRef(commands);
   const panelRef = useRef(openPanel);
@@ -227,7 +229,7 @@ export function CommandCenter() {
         showCloseButton={false}
         className="top-[14%] translate-y-0 gap-0 overflow-hidden p-0 sm:max-w-xl"
       >
-        <DialogTitle className="sr-only">Command palette</DialogTitle>
+        <DialogTitle className="sr-only">{t("desktop.commandPalette.command_palette")}</DialogTitle>
         {openPanel === "palette" ? (
           <PaletteBody
             commands={commands}
@@ -243,6 +245,7 @@ export function CommandCenter() {
 }
 
 function PaletteBody({ commands, onRun }: { commands: Command[]; onRun: (command: Command) => void }) {
+  const { t } = useTranslation();
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
   const activeRef = useRef<HTMLButtonElement>(null);
@@ -253,7 +256,7 @@ function PaletteBody({ commands, onRun }: { commands: Command[]; onRun: (command
       return commands.filter((command) => {
         if (!command.dynamic) return true;
         const shown = quiet.get(command.group) ?? 0;
-        if (command.group === "Remote branches" || shown >= QUIET_LIMIT) return false;
+        if (command.group === t("desktop.appHeader.remote_branches") || shown >= QUIET_LIMIT) return false;
         quiet.set(command.group, shown + 1);
         return true;
       });
@@ -264,7 +267,7 @@ function PaletteBody({ commands, onRun }: { commands: Command[]; onRun: (command
       .sort((left, right) => right.score - left.score)
       .slice(0, 60)
       .map((item) => item.command);
-  }, [commands, query]);
+  }, [t, commands, query]);
   const shown = Math.min(active, Math.max(0, results.length - 1));
 
   useEffect(() => {
@@ -278,8 +281,8 @@ function PaletteBody({ commands, onRun }: { commands: Command[]; onRun: (command
         <input
           autoFocus
           value={query}
-          placeholder="Type a command, branch, or repository"
-          aria-label="Command"
+          placeholder={t("desktop.commandPalette.type_a_command_branch_or_repository")}
+          aria-label={t("desktop.commandPalette.command")}
           className="h-11 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
           onChange={(event) => {
             setQuery(event.target.value);
@@ -298,9 +301,9 @@ function PaletteBody({ commands, onRun }: { commands: Command[]; onRun: (command
           }}
         />
       </div>
-      <div role="listbox" aria-label="Commands" className="min-h-0 flex-1 overflow-y-auto p-1">
+      <div role="listbox" aria-label={t("desktop.welcomeScreen.commands")} className="min-h-0 flex-1 overflow-y-auto p-1">
         {results.length === 0 ? (
-          <p className="px-3 py-6 text-center text-sm text-muted-foreground">No matching commands</p>
+          <p className="px-3 py-6 text-center text-sm text-muted-foreground">{t("desktop.commandPalette.no_matching_commands")}</p>
         ) : null}
         {results.map((command, index) => (
           <button

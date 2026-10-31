@@ -282,6 +282,7 @@ export interface ToolConfig {
 }
 
 export interface AppPrefs {
+  language: "system" | "en" | "zh-CN";
   httpProxy: { mode: "none" | "system" | "manual"; url: string };
   avatarProvider: "builtin" | "github" | "gitlab";
   terminalId: string;

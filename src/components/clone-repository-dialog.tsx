@@ -1,3 +1,4 @@
+import { t, useTranslation } from "@/i18n";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { ChevronDownIcon, FolderOpenIcon, Loader2Icon } from "lucide-react";
@@ -59,6 +60,7 @@ export function CloneRepositoryDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+
   const [cloning, setCloning] = useState(false);
   return (
     <Dialog
@@ -85,11 +87,12 @@ function CloneForm({
   setCloning: (cloning: boolean) => void;
   onOpenChange: (open: boolean) => void;
 }) {
+  useTranslation();
   const [kind, setKind] = useState<"git" | "perforce">("git");
   return (
     <div>
       <SegmentedControl
-        label="Repository kind"
+        label={t("desktop.cloneRepositoryDialog.repository_kind")}
         value={kind}
         disabled={cloning}
         className="mb-4 w-fit"
@@ -117,6 +120,7 @@ function GitCloneForm({
   setCloning: (cloning: boolean) => void;
   onOpenChange: (open: boolean) => void;
 }) {
+  useTranslation();
   const { cloneRepository } = useGitPick(["cloneRepository"]);
   const [url, setUrl] = useState("");
   const [parent, setParent] = useState("");
@@ -139,7 +143,7 @@ function GitCloneForm({
     const selected = await open({
       directory: true,
       multiple: false,
-      title: "Choose clone location",
+      title: t("desktop.cloneRepositoryDialog.choose_clone_location"),
     });
     if (typeof selected === "string") setParent(selected);
   }
@@ -169,10 +173,9 @@ function GitCloneForm({
       }}
     >
       <DialogHeader>
-        <DialogTitle>Open remote repository</DialogTitle>
+        <DialogTitle>{t("desktop.appMenu.open_remote_repository")}</DialogTitle>
         <DialogDescription>
-          Clones a remote repository into a local folder and opens it.
-        </DialogDescription>
+          {t("desktop.cloneRepositoryDialog.clones_a_remote_repository_into_a_local_folder")}</DialogDescription>
       </DialogHeader>
       <div className="mt-3 grid min-w-0 gap-4">
         <div className="grid gap-2">
@@ -188,7 +191,7 @@ function GitCloneForm({
           />
         </div>
         <div className="grid gap-2">
-          <Label htmlFor="clone-folder">Folder name</Label>
+          <Label htmlFor="clone-folder">{t("desktop.cloneRepositoryDialog.folder_name")}</Label>
           <Input
             id="clone-folder"
             className="font-mono"
@@ -202,12 +205,11 @@ function GitCloneForm({
           />
           {folder.trim() && !folderOk ? (
             <p className="text-xs text-destructive">
-              Folder name cannot include \ / : * ? &quot; &lt; &gt; |
-            </p>
+              {t("desktop.cloneRepositoryDialog.folder_name_cannot_include")}</p>
           ) : null}
         </div>
         <div className="grid min-w-0 gap-2">
-          <Label htmlFor="clone-parent">Location</Label>
+          <Label htmlFor="clone-parent">{t("desktop.cloneRepositoryDialog.location")}</Label>
           <div className="flex min-w-0 gap-2">
             <HoverTip label={parent}>
               <Input
@@ -215,7 +217,7 @@ function GitCloneForm({
                 className="min-w-0 font-mono"
                 readOnly
                 value={parent}
-                placeholder="Choose a parent folder"
+                placeholder={t("desktop.cloneRepositoryDialog.choose_a_parent_folder")}
               />
             </HoverTip>
             <Button
@@ -225,8 +227,7 @@ function GitCloneForm({
               onClick={() => void browse()}
             >
               <FolderOpenIcon data-icon="inline-start" />
-              Browse
-            </Button>
+              {t("desktop.cloneRepositoryDialog.browse")}</Button>
           </div>
           {destination ? (
             <HoverTip label={destination}>
@@ -247,6 +248,7 @@ function GitCloneActivity({ activityId, cloning, canClone, incomplete, onClose }
   incomplete: boolean;
   onClose: () => void;
 }) {
+  useTranslation();
   const activity = useActivities().find((item) => item.id === activityId);
   const latest = useRef(activity);
   const liveId = useRef(activityId);
@@ -286,12 +288,12 @@ function GitCloneActivity({ activityId, cloning, canClone, incomplete, onClose }
       if (liveId.current !== id) return;
       if (!accepted) {
         setCancellingId(null);
-        setCancelError({ id, message: "Cancellation is not available yet. Try again shortly." });
+        setCancelError({ id, message: t("desktop.cloneRepositoryDialog.cancellation_is_not_available_yet_try_again_shortly") });
       }
     } catch {
       if (liveId.current === id) {
         setCancellingId(null);
-        setCancelError({ id, message: "Could not cancel cloning. Try again." });
+        setCancelError({ id, message: t("desktop.cloneRepositoryDialog.could_not_cancel_cloning_try_again") });
       }
     } finally {
       if (!accepted && cancellingRequest.current === id) cancellingRequest.current = null;
@@ -303,22 +305,21 @@ function GitCloneActivity({ activityId, cloning, canClone, incomplete, onClose }
       {cloning ? (
         <div className="mt-4 grid gap-2 rounded-lg border p-3">
           <div className="flex items-center justify-between gap-3 text-xs">
-            <p role="status">{cancelling ? "Cancelling clone…" : activity ? "Cloning repository…" : activityId ? "Opening repository…" : "Preparing clone…"}</p>
+            <p role="status">{cancelling ? t("desktop.cloneRepositoryDialog.cancelling_clone") : activity ? t("desktop.cloneRepositoryDialog.cloning_repository") : activityId ? t("desktop.cloneRepositoryDialog.opening_repository") : t("desktop.cloneRepositoryDialog.preparing_clone")}</p>
             {progress !== undefined && !cancelling ? <span className="shrink-0 tabular-nums text-muted-foreground">{progress}%</span> : null}
           </div>
-          {shown ? <div role="progressbar" aria-label="Clone progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress}><ActivityBar activity={{ ...shown, progress }} /></div> : null}
+          {shown ? <div role="progressbar" aria-label={t("desktop.cloneRepositoryDialog.clone_progress")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress}><ActivityBar activity={{ ...shown, progress }} /></div> : null}
           {shown?.detail ? <p className="truncate font-mono text-[11px] text-muted-foreground">{shown.detail}</p> : null}
           {activity && cancelError?.id === activityId ? <p role="alert" className="text-xs text-destructive">{cancelError.message}</p> : null}
         </div>
-      ) : incomplete ? <p role="status" className="mt-4 text-xs text-muted-foreground">Clone did not complete. Check the details and retry.</p> : null}
+      ) : incomplete ? <p role="status" className="mt-4 text-xs text-muted-foreground">{t("desktop.cloneRepositoryDialog.clone_did_not_complete_check_the_details_and")}</p> : null}
       <DialogFooter className="mt-4">
         <Button type="button" variant="outline" disabled={cloning && (!activity?.cancellable || cancelling)} onClick={() => { if (cloning) void cancel(); else onClose(); }}>
-          {cancelling ? "Cancelling…" : cloning ? "Cancel clone" : "Cancel"}
+          {cancelling ? t("desktop.cloneRepositoryDialog.cancelling") : cloning ? t("desktop.cloneRepositoryDialog.cancel_clone") : t("common.cancel")}
         </Button>
         <Button type="submit" disabled={!canClone}>
           {cloning ? <Loader2Icon className="animate-spin motion-reduce:animate-none" /> : null}
-          Clone
-        </Button>
+          {t("desktop.cloneRepositoryDialog.clone")}</Button>
       </DialogFooter>
     </>
   );
@@ -333,6 +334,7 @@ function P4CloneForm({
   setCloning: (cloning: boolean) => void;
   onOpenChange: (open: boolean) => void;
 }) {
+  useTranslation();
   const { prefs, openPath, updatePrefs, beginActivity, endActivity } = useGitPick([
     "prefs",
     "openPath",
@@ -385,7 +387,7 @@ function P4CloneForm({
       } catch (error) {
         if (!mounted.current) return;
         const message = errorMessage(error);
-        toast.error(message === P4_LOGIN ? "Enter the password for this user and try again." : message);
+        toast.error(message === P4_LOGIN ? t("desktop.cloneRepositoryDialog.enter_the_password_for_this_user_and_try") : message);
       } finally {
         if (mounted.current) setChecking(false);
       }
@@ -396,14 +398,14 @@ function P4CloneForm({
     if (!selected || checking) return;
     await mutation.run(async () => {
       setCloning(true);
-      const id = beginActivity("Opening workspace", selected.name);
+      const id = beginActivity(t("desktop.cloneRepositoryDialog.opening_workspace"), selected.name);
       try {
         const root = await p4Api.prepareClient(auth(), selected.name);
         await openPath(root, "perforce");
         onOpenChange(false);
       } catch (error) {
         const message = errorMessage(error);
-        toast.error(message === P4_LOGIN ? "Enter the password for this user and try again." : message);
+        toast.error(message === P4_LOGIN ? t("desktop.cloneRepositoryDialog.enter_the_password_for_this_user_and_try") : message);
       } finally {
         endActivity(id);
         setCloning(false);
@@ -422,14 +424,13 @@ function P4CloneForm({
         }}
       >
         <DialogHeader>
-          <DialogTitle>Open remote repository</DialogTitle>
+          <DialogTitle>{t("desktop.appMenu.open_remote_repository")}</DialogTitle>
           <DialogDescription>
-            Check the server, then open one of that user's clients or create a new one.
-          </DialogDescription>
+            {t("desktop.cloneRepositoryDialog.check_the_server_then_open_one_of_that")}</DialogDescription>
         </DialogHeader>
         <div className="mt-3 grid min-w-0 gap-4">
           <div className="grid gap-2">
-            <Label htmlFor="p4-port">Server</Label>
+            <Label htmlFor="p4-port">{t("desktop.cloneRepositoryDialog.server")}</Label>
             <Input
               id="p4-port"
               className="font-mono"
@@ -445,7 +446,7 @@ function P4CloneForm({
           </div>
           <div className="grid grid-cols-[1fr_1fr_auto] items-end gap-3">
             <div className="grid gap-2">
-              <Label htmlFor="p4-user">User</Label>
+              <Label htmlFor="p4-user">{t("desktop.cloneRepositoryDialog.user")}</Label>
               <Input
                 id="p4-user"
                 className="font-mono"
@@ -458,7 +459,7 @@ function P4CloneForm({
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="p4-password">Password</Label>
+              <Label htmlFor="p4-password">{t("desktop.cloneRepositoryDialog.password")}</Label>
               <Input
                 id="p4-password"
                 type="password"
@@ -468,17 +469,16 @@ function P4CloneForm({
                   setPassword(event.target.value);
                   forgetCheck();
                 }}
-                placeholder="Optional"
+                placeholder={t("desktop.cloneRepositoryDialog.optional")}
               />
             </div>
             <Button type="button" variant="outline" disabled={cloning || checking || !port.trim() || !user.trim()} onClick={() => void check()}>
               {checking ? <Loader2Icon className="animate-spin" /> : null}
-              Check connection
-            </Button>
+              {t("desktop.cloneRepositoryDialog.check_connection")}</Button>
           </div>
-          {server ? <p className="text-xs text-muted-foreground">Connected to {server}</p> : null}
+          {server ? <p className="text-xs text-muted-foreground">{t("desktop.cloneRepositoryDialog.connected_to")}{" "}{server}</p> : null}
           <div className="grid gap-2">
-            <Label>Client</Label>
+            <Label>{t("desktop.cloneRepositoryDialog.client")}</Label>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
@@ -488,7 +488,7 @@ function P4CloneForm({
                   className="justify-between font-normal"
                 >
                   <span className="min-w-0 truncate font-mono">
-                    {selected ? selected.name : clients ? "Select a client" : "Check the connection first"}
+                    {selected ? selected.name : clients ? t("desktop.cloneRepositoryDialog.select_a_client") : t("desktop.cloneRepositoryDialog.check_the_connection_first")}
                   </span>
                   <ChevronDownIcon />
                 </Button>
@@ -505,19 +505,17 @@ function P4CloneForm({
                   </DropdownMenuItem>
                 ))}
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => void startCreate()}>Create</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => void startCreate()}>{t("common.create")}</DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
         </div>
         <DialogFooter className="mt-4">
           <Button type="button" variant="outline" disabled={cloning} onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
+            {t("common.cancel")}</Button>
           <Button type="submit" disabled={!selected || cloning}>
             {cloning ? <Loader2Icon className="animate-spin" /> : null}
-            Open
-          </Button>
+            {t("common.open")}</Button>
         </DialogFooter>
       </form>
       <CreateClientDialog
@@ -528,7 +526,7 @@ function P4CloneForm({
         onCreate={async (request) => {
           await mutation.run(async () => {
             setCloning(true);
-            const id = beginActivity("Creating workspace", request.client);
+            const id = beginActivity(t("desktop.cloneRepositoryDialog.creating_workspace"), request.client);
             try {
               const connection = await p4Api.createWorkspace(request, id);
               await openPath(connection.root, "perforce");
@@ -536,7 +534,7 @@ function P4CloneForm({
               onOpenChange(false);
             } catch (error) {
               const message = errorMessage(error);
-              toast.error(message === P4_LOGIN ? "Enter the password for this user and try again." : message);
+              toast.error(message === P4_LOGIN ? t("desktop.cloneRepositoryDialog.enter_the_password_for_this_user_and_try") : message);
             } finally {
               endActivity(id);
               setCloning(false);
@@ -557,6 +555,7 @@ interface CreateClientDialogProps {
 }
 
 function CreateClientDialog(props: CreateClientDialogProps) {
+
   return <Dialog open={props.open} onOpenChange={(next) => !props.cloning && props.onOpenChange(next)}>
     <DialogContent className="sm:max-w-lg">
       {props.open ? <CreateClientForm {...props} /> : null}
@@ -565,6 +564,7 @@ function CreateClientDialog(props: CreateClientDialogProps) {
 }
 
 function CreateClientForm({ auth, cloning, onOpenChange, onCreate }: CreateClientDialogProps) {
+  useTranslation();
   const [client, setClient] = useState("");
   const [mapping, setMapping] = useState<"stream" | "depot">("stream");
   const [stream, setStream] = useState("");
@@ -591,19 +591,19 @@ function CreateClientForm({ auth, cloning, onOpenChange, onCreate }: CreateClien
     .slice(0, 80);
 
   async function browse() {
-    const selected = await open({ directory: true, multiple: false, title: "Choose workspace root" });
+    const selected = await open({ directory: true, multiple: false, title: t("desktop.cloneRepositoryDialog.choose_workspace_root") });
     if (typeof selected === "string") setRoot(selected);
   }
 
   return (
     <>
         <DialogHeader>
-          <DialogTitle>Create client</DialogTitle>
-          <DialogDescription>Creates a client, syncs it, and opens the workspace.</DialogDescription>
+          <DialogTitle>{t("desktop.cloneRepositoryDialog.create_client")}</DialogTitle>
+          <DialogDescription>{t("desktop.cloneRepositoryDialog.creates_a_client_syncs_it_and_opens_the")}</DialogDescription>
         </DialogHeader>
         <div className="grid gap-3">
           <div className="grid gap-2">
-            <Label htmlFor="new-p4-client">Client name</Label>
+            <Label htmlFor="new-p4-client">{t("desktop.cloneRepositoryDialog.client_name")}</Label>
             <Input
               id="new-p4-client"
               className="font-mono"
@@ -618,12 +618,10 @@ function CreateClientForm({ auth, cloning, onOpenChange, onCreate }: CreateClien
             <div className="flex gap-3 text-sm">
               <label className="flex items-center gap-1.5">
                 <input type="radio" checked={mapping === "stream"} disabled={cloning} onChange={() => setMapping("stream")} />
-                Stream
-              </label>
+                {t("desktop.cloneRepositoryDialog.stream")}</label>
               <label className="flex items-center gap-1.5">
                 <input type="radio" checked={mapping === "depot"} disabled={cloning} onChange={() => setMapping("depot")} />
-                Depot path
-              </label>
+                {t("desktop.cloneRepositoryDialog.depot_path")}</label>
             </div>
             {mapping === "stream" ? (
               <div className="grid gap-2">
@@ -632,15 +630,15 @@ function CreateClientForm({ auth, cloning, onOpenChange, onCreate }: CreateClien
                   disabled={cloning}
                   value={streamQuery}
                   onChange={(event) => setStreamQuery(event.target.value)}
-                  placeholder={streams ? "Filter streams" : "Loading streams"}
+                  placeholder={streams ? t("desktop.cloneRepositoryDialog.filter_streams") : t("desktop.cloneRepositoryDialog.loading_streams")}
                 />
                 <div className="max-h-40 overflow-auto rounded-md border">
                   {currentStreams?.error ? (
-                    <div role="alert" className="grid gap-2 px-3 py-2 text-xs text-destructive"><p className="break-words">{currentStreams.error}</p><Button variant="outline" size="xs" className="w-fit" onClick={() => setRetry((value) => value + 1)}>Retry</Button></div>
+                    <div role="alert" className="grid gap-2 px-3 py-2 text-xs text-destructive"><p className="break-words">{currentStreams.error}</p><Button variant="outline" size="xs" className="w-fit" onClick={() => setRetry((value) => value + 1)}>{t("common.retry")}</Button></div>
                   ) : streams === null ? (
-                    <p role="status" className="px-3 py-2 text-xs text-muted-foreground">Loading streams…</p>
+                    <p role="status" className="px-3 py-2 text-xs text-muted-foreground">{t("desktop.cloneRepositoryDialog.loading_streams_2")}</p>
                   ) : visibleStreams.length === 0 ? (
-                    <p className="px-3 py-2 text-xs text-muted-foreground">No matching streams</p>
+                    <p className="px-3 py-2 text-xs text-muted-foreground">{t("desktop.cloneRepositoryDialog.no_matching_streams")}</p>
                   ) : (
                     visibleStreams.map((item) => (
                       <button
@@ -658,12 +656,12 @@ function CreateClientForm({ auth, cloning, onOpenChange, onCreate }: CreateClien
               </div>
             ) : (
               <Button type="button" variant="outline" className="justify-start font-mono font-normal" disabled={cloning} onClick={() => setDepotOpen(true)}>
-                <span className="truncate">{depotPath || "Choose depot path"}</span>
+                <span className="truncate">{depotPath || t("desktop.cloneRepositoryDialog.choose_depot_path")}</span>
               </Button>
             )}
           </div>
           <div className="grid min-w-0 gap-2">
-            <Label htmlFor="new-p4-root">Local root</Label>
+            <Label htmlFor="new-p4-root">{t("desktop.cloneRepositoryDialog.local_root")}</Label>
             <div className="flex min-w-0 gap-2">
               <Input
                 id="new-p4-root"
@@ -675,15 +673,13 @@ function CreateClientForm({ auth, cloning, onOpenChange, onCreate }: CreateClien
               />
               <Button type="button" variant="outline" disabled={cloning} onClick={() => void browse()}>
                 <FolderOpenIcon data-icon="inline-start" />
-                Browse
-              </Button>
+                {t("desktop.cloneRepositoryDialog.browse")}</Button>
             </div>
           </div>
         </div>
         <DialogFooter>
           <Button type="button" variant="outline" disabled={cloning} onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
+            {t("common.cancel")}</Button>
           <Button
             type="button"
             disabled={!canCreate}
@@ -698,8 +694,7 @@ function CreateClientForm({ auth, cloning, onOpenChange, onCreate }: CreateClien
             }
           >
             {cloning ? <Loader2Icon className="animate-spin" /> : null}
-            Create
-          </Button>
+            {t("common.create")}</Button>
         </DialogFooter>
         <DepotPicker
           open={depotOpen}
@@ -720,6 +715,7 @@ function DepotPicker({ open: isOpen, auth, onOpenChange, onPick }: {
   onOpenChange: (open: boolean) => void;
   onPick: (path: string) => void;
 }) {
+
   return <Dialog open={isOpen} onOpenChange={onOpenChange}>
     <DialogContent className="sm:max-w-md">
       {isOpen ? <DepotPickerForm auth={auth} onClose={() => onOpenChange(false)} onPick={onPick} /> : null}
@@ -732,6 +728,7 @@ function DepotPickerForm({ auth, onClose, onPick }: {
   onClose: () => void;
   onPick: (path: string) => void;
 }) {
+  useTranslation();
   const [path, setPath] = useState("//");
   const [retry, setRetry] = useState(0);
   const [request] = useState(createLatestRequest);
@@ -748,24 +745,24 @@ function DepotPickerForm({ auth, onClose, onPick }: {
 
   return <>
     <DialogHeader>
-      <DialogTitle>Depot path</DialogTitle>
+      <DialogTitle>{t("desktop.cloneRepositoryDialog.depot_path")}</DialogTitle>
       <DialogDescription className="truncate font-mono">{path}</DialogDescription>
     </DialogHeader>
     <div className="max-h-72 overflow-auto rounded-md border">
       {parent ? <Button variant="ghost" className="w-full justify-start rounded-none font-mono font-normal" onClick={() => setPath(parent)}>..</Button> : null}
       {current?.error ? (
-        <div role="alert" className="grid gap-2 px-3 py-2 text-xs text-destructive"><p className="break-words">{current.error}</p><Button variant="outline" size="xs" className="w-fit" onClick={() => setRetry((value) => value + 1)}>Retry</Button></div>
+        <div role="alert" className="grid gap-2 px-3 py-2 text-xs text-destructive"><p className="break-words">{current.error}</p><Button variant="outline" size="xs" className="w-fit" onClick={() => setRetry((value) => value + 1)}>{t("common.retry")}</Button></div>
       ) : current?.entries === undefined || current.entries === null ? (
-        <p role="status" className="px-3 py-2 text-xs text-muted-foreground">Loading depot folders…</p>
+        <p role="status" className="px-3 py-2 text-xs text-muted-foreground">{t("desktop.cloneRepositoryDialog.loading_depot_folders")}</p>
       ) : current.entries.length === 0 ? (
-        <p className="px-3 py-2 text-xs text-muted-foreground">No subfolders</p>
+        <p className="px-3 py-2 text-xs text-muted-foreground">{t("desktop.cloneRepositoryDialog.no_subfolders")}</p>
       ) : current.entries.map((entry) => (
         <Button key={entry.path} variant="ghost" className="w-full justify-start rounded-none font-mono text-xs font-normal" onClick={() => setPath(entry.path)}><span className="truncate">{entry.path}</span></Button>
       ))}
     </div>
     <DialogFooter>
-      <Button variant="outline" onClick={onClose}>Cancel</Button>
-      <Button disabled={path === "//" || !current?.entries || Boolean(current.error)} onClick={() => onPick(path)}>Use this path</Button>
+      <Button variant="outline" onClick={onClose}>{t("common.cancel")}</Button>
+      <Button disabled={path === "//" || !current?.entries || Boolean(current.error)} onClick={() => onPick(path)}>{t("desktop.cloneRepositoryDialog.use_this_path")}</Button>
     </DialogFooter>
   </>;
 }

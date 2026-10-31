@@ -1,3 +1,4 @@
+import { t, useTranslation } from "@/i18n";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ArchiveIcon, CircleDotIcon, FolderTreeIcon, HistoryIcon, SettingsIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -9,19 +10,20 @@ import { useGitPick, type View } from "@/state/git-context";
 import { useP4, type P4View } from "@/state/p4-context";
 
 const itemMeta: Record<View, { label: string; icon: typeof CircleDotIcon }> = {
-  changes: { label: "Changes", icon: CircleDotIcon },
-  history: { label: "History", icon: HistoryIcon },
-  stash: { label: "Stash", icon: ArchiveIcon },
-  files: { label: "Files", icon: FolderTreeIcon },
+  changes: { get label() { return t("desktop.appSidebar.changes"); }, icon: CircleDotIcon },
+  history: { get label() { return t("desktop.appSidebar.history"); }, icon: HistoryIcon },
+  stash: { get label() { return t("desktop.appSidebar.stash"); }, icon: ArchiveIcon },
+  files: { get label() { return t("desktop.appSidebar.files"); }, icon: FolderTreeIcon },
 };
 
 const perforceItems: { id: P4View; label: string; icon: typeof CircleDotIcon }[] = [
-  { id: "pending", label: "Pending", icon: CircleDotIcon },
-  { id: "submitted", label: "History", icon: HistoryIcon },
-  { id: "workspace", label: "Workspace", icon: FolderTreeIcon },
+  { id: "pending", get label() { return t("desktop.appSidebar.pending"); }, icon: CircleDotIcon },
+  { id: "submitted", get label() { return t("desktop.appSidebar.history"); }, icon: HistoryIcon },
+  { id: "workspace", get label() { return t("desktop.appSidebar.workspace"); }, icon: FolderTreeIcon },
 ];
 
 export function AppSidebar() {
+  useTranslation();
   const { view, setView, activeTab, prefs, updatePrefs, openPanel, setOpenPanel } = useGitPick([
     "view",
     "setView",
@@ -187,13 +189,13 @@ export function AppSidebar() {
               type="button"
               variant="ghost"
               size="icon"
-              aria-label="Settings"
+              aria-label={t("common.settings")}
               onClick={() => setSettingsOpen(true)}
             >
               <SettingsIcon />
             </Button>
           </TooltipTrigger>
-          <TooltipContent side="right">Settings</TooltipContent>
+          <TooltipContent side="right">{t("common.settings")}</TooltipContent>
         </Tooltip>
       </div>
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />

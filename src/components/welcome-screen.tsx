@@ -1,3 +1,4 @@
+import { t, useTranslation } from "@/i18n";
 import { useState } from "react";
 import { ArrowRightIcon, ClockIcon, DownloadIcon, FolderOpenIcon, GitCommitHorizontalIcon, HistoryIcon, PlusIcon, SearchIcon, SettingsIcon, XIcon } from "lucide-react";
 import { AppMark } from "@/components/app-mark";
@@ -13,6 +14,7 @@ import { useGitPick } from "@/state/git-context";
 import { asVcs } from "@/state/session";
 
 export function WelcomeScreen() {
+  useTranslation();
   const { recents, openFolder, openPath, forgetRecent, setOpenPanel } = useGitPick([
     "recents", "openFolder", "openPath", "forgetRecent", "setOpenPanel",
   ]);
@@ -27,44 +29,43 @@ export function WelcomeScreen() {
           <AppMark className="size-11" iconClassName="size-6" />
           <div>
             <p className="text-sm font-medium">Rebasely</p>
-            <p className="text-xs text-muted-foreground">A unified version control client</p>
+            <p className="text-xs text-muted-foreground">{t("desktop.welcomeScreen.a_unified_version_control_client")}</p>
           </div>
         </div>
         <div className="grid gap-10 md:grid-cols-[1fr_1fr] lg:gap-14">
           <section aria-labelledby="welcome-title">
-            <h1 id="welcome-title" className="text-3xl font-medium tracking-tight">Make your next change.</h1>
+            <h1 id="welcome-title" className="text-3xl font-medium tracking-tight">{t("desktop.welcomeScreen.make_your_next_change")}</h1>
             <p className="mt-3 max-w-sm text-sm leading-relaxed text-muted-foreground">
-              Open a Git repository or Perforce workspace. Review, commit, and follow your work in one place.
-            </p>
+              {t("desktop.welcomeScreen.open_a_git_repository_or_perforce_workspace_review")}</p>
             <div className="mt-7 space-y-3">
               <Button className="h-auto w-full justify-start gap-3 px-4 py-3 text-left" onClick={() => void openFolder()}>
                 <FolderOpenIcon className="size-5 shrink-0" />
                 <span className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
-                  <span>Open local repository</span>
-                  <span className="text-xs font-normal opacity-70">Choose a repository or workspace folder</span>
+                  <span>{t("desktop.appMenu.open_local_repository")}</span>
+                  <span className="text-xs font-normal opacity-70">{t("desktop.welcomeScreen.choose_a_repository_or_workspace_folder")}</span>
                 </span>
                 <Kbd className="shrink-0 bg-primary-foreground/15 text-primary-foreground">{formatCombo(SHORTCUTS.openRepository[0])}</Kbd>
               </Button>
               <Button variant="outline" className="h-auto w-full justify-start gap-3 px-4 py-3 text-left" onClick={() => setCloneOpen(true)}>
                 <DownloadIcon className="size-5 shrink-0" />
                 <span className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
-                  <span>Open remote repository</span>
-                  <span className="text-xs font-normal text-muted-foreground">Clone Git or connect to Perforce</span>
+                  <span>{t("desktop.appMenu.open_remote_repository")}</span>
+                  <span className="text-xs font-normal text-muted-foreground">{t("desktop.welcomeScreen.clone_git_or_connect_to_perforce")}</span>
                 </span>
                 <ArrowRightIcon className="size-4 text-muted-foreground" />
               </Button>
             </div>
-            <Button variant="ghost" size="sm" className="mt-2" onClick={() => setInitializeOpen(true)}><PlusIcon />Create Git repository</Button>
+            <Button variant="ghost" size="sm" className="mt-2" onClick={() => setInitializeOpen(true)}><PlusIcon />{t("desktop.appMenu.create_git_repository")}</Button>
             <div className="mt-7 space-y-4 border-t pt-6">
-              <WelcomeStep icon={SearchIcon} title="Review changes" detail="Inspect files and stage exactly what belongs together." />
-              <WelcomeStep icon={GitCommitHorizontalIcon} title="Keep work organized" detail="Commit, shelve, or set changes aside for later." />
-              <WelcomeStep icon={HistoryIcon} title="Follow the history" detail="Explore branches, revisions, and file changes." />
+              <WelcomeStep icon={SearchIcon} title={t("desktop.welcomeScreen.review_changes")} detail={t("desktop.welcomeScreen.inspect_files_and_stage_exactly_what_belongs_together")} />
+              <WelcomeStep icon={GitCommitHorizontalIcon} title={t("desktop.welcomeScreen.keep_work_organized")} detail={t("desktop.welcomeScreen.commit_shelve_or_set_changes_aside_for_later")} />
+              <WelcomeStep icon={HistoryIcon} title={t("desktop.welcomeScreen.follow_the_history")} detail={t("desktop.welcomeScreen.explore_branches_revisions_and_file_changes")} />
             </div>
           </section>
           <section aria-labelledby="recent-title" className="min-w-0">
             <div className="mb-3 flex h-7 items-center gap-2">
               <ClockIcon className="size-4 text-muted-foreground" />
-              <h2 id="recent-title" className="text-sm font-medium">Recent repositories</h2>
+              <h2 id="recent-title" className="text-sm font-medium">{t("desktop.appMenu.recent_repositories")}</h2>
               {recents.length ? <span className="ml-auto text-xs text-muted-foreground">{recents.length}</span> : null}
             </div>
             {recents.length ? (
@@ -82,8 +83,8 @@ export function WelcomeScreen() {
                         </button>
                       </HoverTip>
                       <span className="shrink-0 text-[11px] text-muted-foreground">{formatRelativeTime(repo.lastOpened)}</span>
-                      <HoverTip label="Remove from recents">
-                        <Button variant="ghost" size="icon-xs" className="mr-1" onClick={() => void forgetRecent(repo.path)} aria-label={`Remove ${repo.name} from recents`}><XIcon /></Button>
+                      <HoverTip label={t("desktop.welcomeScreen.remove_from_recents")}>
+                        <Button variant="ghost" size="icon-xs" className="mr-1" onClick={() => void forgetRecent(repo.path)} aria-label={t("desktop.welcomeScreen.removeRecent", { name: repo.name })}><XIcon /></Button>
                       </HoverTip>
                     </li>
                   ))}
@@ -92,13 +93,13 @@ export function WelcomeScreen() {
             ) : (
               <div className="flex min-h-60 flex-col items-center justify-center rounded-lg border border-dashed bg-muted/20 p-6 text-center">
                 <FolderOpenIcon className="mb-3 size-6 text-muted-foreground" />
-                <p className="text-sm font-medium">Start with a repository</p>
-                <p className="mt-1 max-w-56 text-xs leading-relaxed text-muted-foreground">Your recently opened repositories will appear here.</p>
+                <p className="text-sm font-medium">{t("desktop.welcomeScreen.start_with_a_repository")}</p>
+                <p className="mt-1 max-w-56 text-xs leading-relaxed text-muted-foreground">{t("desktop.welcomeScreen.your_recently_opened_repositories_will_appear_here")}</p>
               </div>
             )}
             <div className="mt-5 flex flex-wrap items-center gap-2">
-              <Button variant="ghost" size="sm" onClick={() => setOpenPanel("settings")}><SettingsIcon />Set up tools</Button>
-              <Button variant="ghost" size="sm" onClick={() => setOpenPanel("palette")}><SearchIcon />Commands<Kbd>{formatCombo(SHORTCUTS.palette[0])}</Kbd></Button>
+              <Button variant="ghost" size="sm" onClick={() => setOpenPanel("settings")}><SettingsIcon />{t("desktop.welcomeScreen.set_up_tools")}</Button>
+              <Button variant="ghost" size="sm" onClick={() => setOpenPanel("palette")}><SearchIcon />{t("desktop.welcomeScreen.commands")}<Kbd>{formatCombo(SHORTCUTS.palette[0])}</Kbd></Button>
             </div>
           </section>
         </div>
@@ -110,6 +111,7 @@ export function WelcomeScreen() {
 }
 
 function WelcomeStep({ icon: Icon, title, detail }: { icon: typeof SearchIcon; title: string; detail: string }) {
+
   return (
     <div className="flex items-start gap-3">
       <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />

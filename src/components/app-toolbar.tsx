@@ -1,3 +1,4 @@
+import { t, useTranslation } from "@/i18n";
 import { useState, type ReactNode } from "react";
 import {
   ArrowDownFromLineIcon,
@@ -35,6 +36,7 @@ import { defaultFetchRemote, primaryRemote, useGitPick } from "@/state/git-conte
 type SyncAction = "fetch" | "pull" | "push" | null;
 
 export function AppToolbar() {
+  useTranslation();
   const {
     snapshot,
     prefs,
@@ -75,15 +77,15 @@ export function AppToolbar() {
   return (
     <>
       <div className="flex h-7 shrink-0 items-center gap-1.5 rounded-[min(var(--radius-md),12px)] border border-input bg-secondary px-0.5">
-        <ToolbarAction label="Refresh" onClick={() => void refreshRepository()}>
+        <ToolbarAction label={t("common.refresh")} onClick={() => void refreshRepository()}>
           <RefreshCwIcon className="size-4" />
         </ToolbarAction>
         <SyncPopover
           action="fetch"
           openAction={syncAction}
           onOpenAction={setSyncAction}
-          label="Fetch"
-          hint={fetchTarget ? `Fetch from ${fetchTarget}` : "Fetch"}
+          label={t("desktop.appToolbar.fetch")}
+          hint={fetchTarget ? t("desktop.appToolbar.fetchFrom", { remote: fetchTarget }) : t("desktop.appToolbar.fetch")}
           icon={<ArrowDownFromLineIcon className="size-4" />}
         >
           <FetchPanel
@@ -100,13 +102,13 @@ export function AppToolbar() {
           action="pull"
           openAction={syncAction}
           onOpenAction={setSyncAction}
-          label="Pull"
+          label={t("desktop.appToolbar.pull")}
           hint={
             primary
               ? behind > 0
-                ? `Pull from ${primary} · ${behind} behind`
-                : `Pull from ${primary}`
-              : "Pull"
+                ? t("desktop.appToolbar.pullBehind", { remote: primary, count: behind })
+                : t("desktop.appToolbar.pullFrom", { remote: primary })
+              : t("desktop.appToolbar.pull")
           }
           badge={behind > 0 ? behind : undefined}
           icon={<ArrowDownToLineIcon className="size-4" />}
@@ -126,13 +128,13 @@ export function AppToolbar() {
           action="push"
           openAction={syncAction}
           onOpenAction={setSyncAction}
-          label="Push"
+          label={t("desktop.appToolbar.push")}
           hint={
             primary
               ? ahead > 0
-                ? `Push to ${primary} · ${ahead} ahead`
-                : `Push to ${primary}`
-              : "Push"
+                ? t("desktop.appToolbar.pushAhead", { remote: primary, count: ahead })
+                : t("desktop.appToolbar.pushTo", { remote: primary })
+              : t("desktop.appToolbar.push")
           }
           badge={ahead > 0 ? ahead : undefined}
           icon={<ArrowUpFromLineIcon className="size-4" />}
@@ -147,11 +149,11 @@ export function AppToolbar() {
             }}
           />
         </SyncPopover>
-        <ToolbarAction label="Apply patch" onClick={() => void applyPatch()}>
+        <ToolbarAction label={t("desktop.appToolbar.apply_patch")} onClick={() => void applyPatch()}>
           <FileInputIcon className="size-4" />
         </ToolbarAction>
         <span className="h-3.5 w-px self-center bg-foreground/20" />
-        <ToolbarAction label="Repository settings" onClick={() => setRepoSettingsOpen(true)}>
+        <ToolbarAction label={t("desktop.appToolbar.repository_settings")} onClick={() => setRepoSettingsOpen(true)}>
           <Settings2Icon className="size-4" />
         </ToolbarAction>
       </div>
@@ -164,18 +166,14 @@ export function AppToolbar() {
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Publish branch?</DialogTitle>
+            <DialogTitle>{t("desktop.appToolbar.publish_branch")}</DialogTitle>
             <DialogDescription>
-              <span className="font-mono">{publishPrompt?.branch}</span> does not track a remote
-              branch. Publish it to <span className="font-mono">{publishPrompt?.remote}</span> and
-              set that as the upstream?
-            </DialogDescription>
+              <span className="font-mono">{publishPrompt?.branch}</span> {t("desktop.appToolbar.does_not_track_a_remote_branch_publish_it")}<span className="font-mono">{publishPrompt?.remote}</span> {t("desktop.appToolbar.and_set_that_as_the_upstream")}</DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={dismissPublish}>
-              Cancel
-            </Button>
-            <Button onClick={() => void confirmPublish()}>Publish</Button>
+              {t("common.cancel")}</Button>
+            <Button onClick={() => void confirmPublish()}>{t("desktop.appToolbar.publish")}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -202,6 +200,7 @@ function SyncPopover({
   icon: ReactNode;
   children: ReactNode;
 }) {
+
   const open = openAction === action;
   return (
     <PopoverPrimitive.Root
@@ -249,19 +248,20 @@ function FetchPanel({
   initial?: string;
   onFetch: (remote: string) => void;
 }) {
+  useTranslation();
   const [remote, setRemote] = useState(() => (initial && remotes.includes(initial) ? initial : "*"));
   return (
     <Panel
-      title="Fetch"
-      action="Fetch"
+      title={t("desktop.appToolbar.fetch")}
+      action={t("desktop.appToolbar.fetch")}
       disabled={remotes.length === 0}
       onSubmit={() => onFetch(remote)}
     >
       <SelectField
-        label="Remote"
+        label={t("desktop.appToolbar.remote")}
         value={remote}
-        empty="Add a remote before fetching"
-        options={[...remotes.map((name) => ({ id: name, label: name })), { id: "*", label: "All remotes" }]}
+        empty={t("desktop.appToolbar.add_a_remote_before_fetching")}
+        options={[...remotes.map((name) => ({ id: name, label: name })), { id: "*", label: t("desktop.appToolbar.all_remotes") }]}
         onChange={setRemote}
       />
     </Panel>
@@ -279,23 +279,24 @@ function PullPanel({
   rebase: boolean;
   onPull: (remote: string, rebase: boolean) => void;
 }) {
+  useTranslation();
   const [remote, setRemote] = useState(() => pickRemote(remotes, initial));
   const [strategy, setStrategy] = useState(rebase ? "rebase" : "merge");
   return (
-    <Panel title="Pull" action="Pull" disabled={!remote} onSubmit={() => onPull(remote, strategy === "rebase")}>
+    <Panel title={t("desktop.appToolbar.pull")} action={t("desktop.appToolbar.pull")} disabled={!remote} onSubmit={() => onPull(remote, strategy === "rebase")}>
       <SelectField
-        label="Remote"
+        label={t("desktop.appToolbar.remote")}
         value={remote}
-        empty="Add a remote before pulling"
+        empty={t("desktop.appToolbar.add_a_remote_before_pulling")}
         options={remotes.map((name) => ({ id: name, label: name }))}
         onChange={setRemote}
       />
       <SelectField
-        label="Strategy"
+        label={t("desktop.appToolbar.strategy")}
         value={strategy}
         options={[
-          { id: "merge", label: "Merge" },
-          { id: "rebase", label: "Rebase" },
+          { id: "merge", label: t("desktop.appToolbar.merge") },
+          { id: "rebase", label: t("desktop.appToolbar.rebase") },
         ]}
         onChange={setStrategy}
       />
@@ -318,31 +319,32 @@ function PushPanel({
   branch: string | null;
   onPush: (remote: string, force: boolean) => void;
 }) {
+  useTranslation();
   const [remote, setRemote] = useState(() => pickRemote(remotes, initial));
   const [force, setForce] = useState(false);
-  const target = remote && branch ? `${remote}/${branch}` : "the remote branch";
+  const target = remote && branch ? `${remote}/${branch}` : t("desktop.appToolbar.the_remote_branch");
   return (
     <Panel
-      title="Push"
-      action={force ? "Force push" : "Push"}
+      title={t("desktop.appToolbar.push")}
+      action={force ? t("desktop.appToolbar.force_push") : t("desktop.appToolbar.push")}
       destructive={force}
       disabled={!remote}
       onSubmit={() => onPush(remote, force)}
     >
       <SelectField
-        label="Remote"
+        label={t("desktop.appToolbar.remote")}
         value={remote}
-        empty="Add a remote before pushing"
+        empty={t("desktop.appToolbar.add_a_remote_before_pushing")}
         options={remotes.map((name) => ({ id: name, label: name }))}
         onChange={setRemote}
       />
       <label className="flex items-start gap-2 text-sm">
         <Checkbox className="mt-0.5" checked={force} onCheckedChange={(value) => setForce(value === true)} />
-        <span>Force push</span>
+        <span>{t("desktop.appToolbar.force_push")}</span>
       </label>
       {force ? (
         <p className="min-w-0 text-xs break-all text-muted-foreground">
-          Overwrites <span className="font-mono text-foreground">{target}</span>.
+          {t("desktop.appToolbar.overwrites")}{" "}<span className="font-mono text-foreground">{target}</span>.
         </p>
       ) : null}
     </Panel>
@@ -364,6 +366,7 @@ function Panel({
   onSubmit: () => void;
   children: ReactNode;
 }) {
+
   return (
     <form
       className="grid min-w-0 gap-3"
@@ -394,6 +397,7 @@ function SelectField({
   empty?: string;
   onChange: (id: string) => void;
 }) {
+
   const current = options.find((option) => option.id === value);
   return (
     <div className="grid gap-1.5">
@@ -433,6 +437,7 @@ function ToolbarButton({
   children,
   ...props
 }: React.ComponentProps<typeof Button> & { label: string; badge?: number }) {
+
   return (
     <Button
       type="button"
@@ -465,6 +470,7 @@ function ToolbarAction({
   onClick: () => void;
   children: ReactNode;
 }) {
+
   const tip = hint ?? label;
   return (
     <Tooltip>

@@ -1,3 +1,4 @@
+import { formatBytes, t, useTranslation } from "@/i18n";
 import { useEffect, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { RefreshCwIcon } from "lucide-react";
 import { DiffSkeleton } from "@/components/skeletons";
@@ -24,18 +25,13 @@ const CHECKERBOARD: CSSProperties = {
 type Mode = "split" | "swipe" | "fade";
 type Size = { width: number; height: number };
 
-function formatBytes(bytes: number) {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-}
-
 /** Before and after views of a changed image, side by side or overlaid. */
 export function ImageDiff({ repoPath, source, refreshIdentity }: {
   repoPath: string;
   source: FileSource;
   refreshIdentity: FileDiff | null;
 }) {
+  useTranslation();
   const sourceKey = JSON.stringify(source);
   const key = imageLoadKey(repoPath, source);
   const [loader] = useState(() => createImageLoader(gitApi.getImagePair, errorMessage));
@@ -77,7 +73,7 @@ export function ImageDiff({ repoPath, source, refreshIdentity }: {
               aria-pressed={mode === item}
               onClick={() => setMode(item)}
             >
-              {item === "split" ? "Side by side" : item === "swipe" ? "Swipe" : "Onion skin"}
+              {item === "split" ? t("desktop.imageDiff.side_by_side") : item === "swipe" ? t("desktop.imageDiff.swipe") : t("desktop.imageDiff.onion_skin")}
             </Button>
           ))}
           {shownMode !== "split" ? (
@@ -86,37 +82,37 @@ export function ImageDiff({ repoPath, source, refreshIdentity }: {
               min={0}
               max={100}
               value={amount}
-              aria-label={shownMode === "swipe" ? "Swipe position" : "After opacity"}
+              aria-label={shownMode === "swipe" ? t("desktop.imageDiff.swipe_position") : t("desktop.imageDiff.after_opacity")}
               className="ml-2 min-w-12 max-w-40 flex-1 accent-foreground"
               onChange={(event) => setAmount(Number(event.target.value))}
             />
           ) : null}
         </> : null}
-        <HoverTip label={busy ? "Loading image" : error ? "Retry loading image" : "Reload image"}>
-          <Button variant="ghost" size={comparable ? "icon-xs" : "xs"} className="ml-auto" aria-label={busy ? "Loading image" : error ? "Retry loading image" : "Reload image"} disabled={busy || !repoPath} onClick={() => setAttempt((value) => value + 1)}>
+        <HoverTip label={busy ? t("desktop.imageDiff.loading_image") : error ? t("desktop.imageDiff.retry_loading_image") : t("desktop.imageDiff.reload_image")}>
+          <Button variant="ghost" size={comparable ? "icon-xs" : "xs"} className="ml-auto" aria-label={busy ? t("desktop.imageDiff.loading_image") : error ? t("desktop.imageDiff.retry_loading_image") : t("desktop.imageDiff.reload_image")} disabled={busy || !repoPath} onClick={() => setAttempt((value) => value + 1)}>
             <RefreshCwIcon className={busy ? "motion-safe:animate-spin" : ""} />
-            {!comparable ? busy ? "Loading…" : error ? "Retry" : "Reload image" : null}
+            {!comparable ? busy ? t("common.loading") : error ? t("common.retry") : t("desktop.imageDiff.reload_image") : null}
           </Button>
         </HoverTip>
       </div>
       {error ? <p role="alert" className="break-words px-3 py-2 text-xs text-destructive">{error}</p> : null}
-      {!pair ? (error ? null : <div className="relative min-h-0 flex-1"><DiffSkeleton fill label="Loading image" /></div>) : shownMode === "split" ? (
+      {!pair ? (error ? null : <div className="relative min-h-0 flex-1"><DiffSkeleton fill label={t("desktop.imageDiff.loading_image")} /></div>) : shownMode === "split" ? (
         <div className="grid min-h-0 flex-1 grid-cols-2 gap-3 p-3">
-          <ImagePanel label="Before" side={before} size={beforeSize} missing="Not in the older version" onLoad={measure("before")} />
-          <ImagePanel label="After" side={after} size={afterSize} missing="Deleted" onLoad={measure("after")} />
+          <ImagePanel label={t("common.before")} side={before} size={beforeSize} missing={t("desktop.imageDiff.not_in_the_older_version")} onLoad={measure("before")} />
+          <ImagePanel label={t("common.after")} side={after} size={afterSize} missing={t("desktop.imageDiff.deleted")} onLoad={measure("after")} />
         </div>
       ) : (
         <div className="flex min-h-0 flex-1 flex-col gap-2 p-3">
           <div className="relative min-h-0 flex-1 overflow-hidden rounded-md border" style={CHECKERBOARD}>
             <img
               src={before?.dataUrl ?? undefined}
-              alt="Before"
+              alt={t("common.before")}
               className="absolute inset-0 m-auto max-h-full max-w-full object-contain"
               onLoad={measure("before")}
             />
             <img
               src={after?.dataUrl ?? undefined}
-              alt="After"
+              alt={t("common.after")}
               className="absolute inset-0 m-auto max-h-full max-w-full object-contain"
               style={
                 shownMode === "swipe"
@@ -133,8 +129,8 @@ export function ImageDiff({ repoPath, source, refreshIdentity }: {
             ) : null}
           </div>
           <div className="flex justify-between text-[11px] text-muted-foreground">
-            <span>Before · {describe(before, beforeSize)}</span>
-            <span>After · {describe(after, afterSize)}</span>
+            <span>{t("desktop.imageDiff.before")}{" "}{describe(before, beforeSize)}</span>
+            <span>{t("desktop.imageDiff.after")}{" "}{describe(after, afterSize)}</span>
           </div>
         </div>
       )}
@@ -143,7 +139,7 @@ export function ImageDiff({ repoPath, source, refreshIdentity }: {
 }
 
 function describe(side: ImageSide | null, size?: Size) {
-  if (!side) return "none";
+  if (!side) return t("desktop.settingsDialog.none");
   const dimensions = size ? `${size.width} × ${size.height}` : null;
   return [dimensions, formatBytes(side.size)].filter(Boolean).join(" · ");
 }
@@ -161,12 +157,13 @@ function ImagePanel({
   missing: string;
   onLoad: (event: React.SyntheticEvent<HTMLImageElement>) => void;
 }) {
+  useTranslation();
   const note = !side
     ? missing
     : side.lfs
-      ? "Stored in Git LFS; only the pointer is in this version"
+      ? t("desktop.imageDiff.stored_in_git_lfs_only_the_pointer_is")
       : side.tooLarge
-        ? `Too large to preview (${formatBytes(side.size)})`
+        ? t("desktop.imageDiff.tooLarge", { size: formatBytes(side.size) })
         : null;
   return (
     <div className="flex min-h-0 flex-col gap-1.5">
