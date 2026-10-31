@@ -321,14 +321,27 @@ describe("release publication guards", () => {
 });
 
 describe("release updater manifest", () => {
-  it("assembles every platform in one manifest with versioned public asset URLs", () => {
+  it("publishes only Windows x64 and macOS Apple Silicon packages", () => {
+    expect(releaseAssets(tag)).toEqual([
+      { platform: "windows-x86_64", name: "Rebasely_v0.0.1_windows_x64.exe" },
+      { platform: "darwin-aarch64", name: "Rebasely_v0.0.1_macos_arm64.app.tar.gz", installer: "Rebasely_v0.0.1_macos_arm64.dmg" },
+    ]);
     const manifest = buildUpdaterManifest(fixture());
     expect(manifest.version).toBe("0.0.1");
-    expect(Object.keys(manifest.platforms).sort()).toEqual(["darwin-aarch64", "linux-x86_64", "linux-x86_64-deb", "windows-x86_64"]);
+    expect(Object.keys(manifest.platforms).sort()).toEqual(["darwin-aarch64", "windows-x86_64"]);
     expect(manifest.platforms).toHaveProperty("windows-x86_64.url", expect.stringContaining("/v0.0.1/Rebasely_v0.0.1_windows_x64.exe"));
     expect(manifest.platforms).toHaveProperty("darwin-aarch64.signature", signature);
-    expect(manifest.platforms).toHaveProperty("linux-x86_64-deb.url", expect.stringMatching(/\.deb$/));
-    expect(manifest.platforms).toHaveProperty("linux-x86_64.url", expect.stringMatching(/\.AppImage$/));
+    expect(manifest.platforms).not.toHaveProperty("darwin-x86_64");
+  });
+
+  it("does not add unsupported platform assets to the updater manifest", () => {
+    const input = fixture();
+    input.assets.push(...["linux_x64.AppImage", "linux_x64.deb", "macos_x64.app.tar.gz"].map((suffix, index) => ({
+      id: 100 + index, name: `Rebasely_${tag}_${suffix}`, state: "uploaded", size: 100,
+      browser_download_url: `https://github.com/${repository}/releases/download/${tag}/Rebasely_${tag}_${suffix}`,
+    })));
+    const manifest = buildUpdaterManifest(input);
+    expect(Object.keys(manifest.platforms).sort()).toEqual(["darwin-aarch64", "windows-x86_64"]);
   });
 
   it("normalizes every draft platform URL to its final versioned download URL", () => {
@@ -388,7 +401,7 @@ describe("release updater manifest", () => {
   });
 
   it("refuses partial uploads, missing signatures, and missing installer packages", () => {
-    for (const missing of ["Rebasely_v0.0.1_linux_x64.AppImage", "Rebasely_v0.0.1_windows_x64.exe.sig", "Rebasely_v0.0.1_macos_arm64.dmg"]) {
+    for (const missing of ["Rebasely_v0.0.1_macos_arm64.app.tar.gz", "Rebasely_v0.0.1_windows_x64.exe.sig", "Rebasely_v0.0.1_macos_arm64.dmg"]) {
       const input = fixture();
       input.assets = input.assets.filter((asset: { name: string }) => asset.name !== missing);
       expect(() => buildUpdaterManifest(input)).toThrow("Required release asset");

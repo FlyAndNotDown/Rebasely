@@ -117,13 +117,6 @@ jobs:
             platform: macOS arm64
             config: >-
               --config '{"bundle":{"createUpdaterArtifacts":true,"macOS":{"signingIdentity":"-"}}}'
-          - os: ubuntu-22.04
-            target: x86_64-unknown-linux-gnu
-            bundles: appimage,deb
-            asset: linux_x64
-            platform: Linux x64
-            config: >-
-              --config '{"bundle":{"createUpdaterArtifacts":true}}'
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -135,13 +128,6 @@ jobs:
         with:
           node-version: 24
           package-manager-cache: false
-      - name: System packages
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev \
-            build-essential curl wget file libxdo-dev libssl-dev \
-            libayatana-appindicator3-dev librsvg2-dev patchelf xdg-utils
       - name: Rust
         run: |
           rustup toolchain install stable --profile minimal --target ${{ matrix.target }}
@@ -211,3 +197,6 @@ jobs:
       pages: write
       id-token: write
     uses: ./.github/workflows/pages.yml
+    secrets:
+      GOOGLE_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GOOGLE_WORKLOAD_IDENTITY_PROVIDER }}
+      GOOGLE_SEARCH_CONSOLE_SERVICE_ACCOUNT: ${{ secrets.GOOGLE_SEARCH_CONSOLE_SERVICE_ACCOUNT }}
