@@ -3,12 +3,12 @@
 <p align="center">
   Review changes. Follow history. Keep your work in view.<br><br>
   <a href="https://flyandnotdown.github.io/Rebasely/">Website</a> ·
-  <a href="https://github.com/FlyAndNotDown/Rebasely/releases">Download</a> ·
+  <a href="https://github.com/FlyAndNotDown/Rebasely/releases/latest">Download</a> ·
   <a href="CONTRIBUTING.md">Contribute</a>
 </p>
 
-Rebasely brings your repositories into one desktop workspace. Move between
-projects, inspect a diff, and make the next change with context.
+Rebasely is an open-source, unified version control client. Review changes,
+follow history, and move between repositories in one desktop workspace.
 
 - **Review precisely.** Inspect unified or split text diffs, compare images, and stage a file, hunk, or line.
 - **Follow the work.** Explore commit graphs, branches, file history, and changelists.
@@ -21,9 +21,11 @@ Supports Git and Perforce. Available for **macOS Apple Silicon** and **Windows x
 
 ## Get started
 
-1. [Download a release](https://github.com/FlyAndNotDown/Rebasely/releases) for your platform.
+1. [Download the latest release](https://github.com/FlyAndNotDown/Rebasely/releases/latest) for your platform.
 2. Install Git for Git repositories, or the Perforce CLI (`p4`) for Perforce workspaces.
 3. Open or clone a Git repository, or connect an existing Perforce workspace.
+
+Diagnostics are stored locally and are not uploaded automatically.
 
 To build or contribute, see the [development guide](docs/development.md).
 Bug reports and ideas are welcome in

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { FolderTreeIcon, GitBranchIcon, MenuIcon, MinusIcon, RotateCcwIcon, SquareIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -6,8 +6,11 @@ import { desktopPlatform } from "@/lib/desktop-platform";
 import { GitDemo } from "./demo-git";
 import { PerforceDemo } from "./demo-perforce";
 
+const subscribePlatform = () => () => {};
+const serverPlatform = () => "macos" as const;
+
 export function WorkspacePreview() {
-  const platform = desktopPlatform();
+  const platform = useSyncExternalStore(subscribePlatform, desktopPlatform, serverPlatform);
   const [repository, setRepository] = useState("git");
   const [generation, setGeneration] = useState(0);
   const [notice, setNotice] = useState("Select a file, stage a hunk, then create a sample commit.");

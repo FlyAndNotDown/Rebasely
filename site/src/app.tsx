@@ -42,7 +42,7 @@ type DownloadState = { kind: "idle" | "pending" | "error" } | { kind: "ready"; d
 export function Site() {
   const [downloadOpen, setDownloadOpen] = useState(false);
   const [downloads, setDownloads] = useState<DownloadState>({ kind: "idle" });
-  const downloadTrigger = useRef<HTMLButtonElement | null>(null);
+  const downloadTrigger = useRef<HTMLAnchorElement | null>(null);
   const downloadRequest = useRef<AbortController | null>(null);
   const downloadCache = useRef<{ state: DownloadState; until: number } | null>(null);
 
@@ -88,7 +88,9 @@ export function Site() {
     setDownloadOpen(open);
   }
 
-  function openDownload(event: MouseEvent<HTMLButtonElement>) {
+  function openDownload(event: MouseEvent<HTMLAnchorElement>) {
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
     downloadTrigger.current = event.currentTarget;
     setDownloadOpen(true);
     loadDownloads();
@@ -106,7 +108,7 @@ export function Site() {
           <Button variant="ghost" size="sm" asChild className="overview-link">
             <a href="#features">Features</a>
           </Button>
-          <Button variant="ghost" size="sm" onClick={openDownload}>Download</Button>
+          <Button variant="ghost" size="sm" asChild><a href={LATEST_RELEASE_URL} onClick={openDownload}>Download</a></Button>
           <HoverTip label="Source on GitHub">
             <Button variant="ghost" size="icon-sm" asChild>
               <a href={REPOSITORY} aria-label="Source on GitHub"><CodeXmlIcon /></a>
@@ -126,9 +128,11 @@ export function Site() {
           <div className="site-hero-actions">
             <p>Review changes. Prepare the next commit.<br />Move between projects without losing context.</p>
             <div className="site-actions">
-              <Button size="lg" onClick={openDownload}>
-                <ArrowDownToLineIcon data-icon="inline-start" />
-                Download
+              <Button size="lg" asChild>
+                <a href={LATEST_RELEASE_URL} onClick={openDownload}>
+                  <ArrowDownToLineIcon data-icon="inline-start" />
+                  Download
+                </a>
               </Button>
               <Button variant="outline" size="lg" asChild>
                 <a href={REPOSITORY}>Source <ArrowUpRightIcon data-icon="inline-end" /></a>
@@ -143,8 +147,9 @@ export function Site() {
             <div><p className="site-eyebrow">FEATURES</p><h2 id="workspace-title">Try the next step.</h2></div>
             <span>Interactive demo · Sample data</span>
           </div>
+          <noscript className="site-preview-caption">Enable JavaScript to try the interactive demo. Product details and download links remain available below.</noscript>
           <WorkspacePreview />
-          <p className="site-preview-caption">Switch between the Git and Perforce tabs. Changes live in this demo.</p>
+          <p className="site-preview-caption">Supports Git repositories and Perforce workspaces. Try either tab with sample data; changes stay in this demo.</p>
         </section>
 
         <section className="site-features" aria-label="Made for your workflow">
@@ -171,9 +176,9 @@ export function Site() {
         <section className="site-download" aria-labelledby="download-title">
           <div>
             <h2 id="download-title">Ready for your next change.</h2>
-            <p>Open a repository. Pick up where you left off.</p>
+            <p>Open source under the MIT License. Diagnostics are local and are not uploaded automatically.</p>
           </div>
-          <Button size="lg" onClick={openDownload}>Get Rebasely <ArrowUpRightIcon data-icon="inline-end" /></Button>
+          <Button size="lg" asChild><a href={LATEST_RELEASE_URL} onClick={openDownload}>Get Rebasely <ArrowUpRightIcon data-icon="inline-end" /></a></Button>
         </section>
       </main>
 
@@ -239,7 +244,7 @@ function ThemeMenu() {
 function DownloadDialog({ open, onOpenChange, returnFocusTo, state, onRefresh }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  returnFocusTo: RefObject<HTMLButtonElement | null>;
+  returnFocusTo: RefObject<HTMLAnchorElement | null>;
   state: DownloadState;
   onRefresh: () => void;
 }) {

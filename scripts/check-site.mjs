@@ -2,6 +2,7 @@ import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+import { validateSiteDocument } from "./site-document.mjs";
 
 const root = fileURLToPath(new URL("../site/dist/", import.meta.url));
 const files = new Set();
@@ -68,6 +69,12 @@ for (const [filename, content] of textFiles) {
     }
   }
 }
+
+violations.push(...validateSiteDocument({
+  html: textFiles.get("index.html") ?? "",
+  sitemap: files.has("sitemap.xml") ? await readFile(path.join(root, "sitemap.xml"), "utf8") : "",
+  files,
+}));
 
 if (violations.length) {
   console.error(violations.join("\n"));
