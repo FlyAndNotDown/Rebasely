@@ -22,11 +22,12 @@ function hostFixture() {
 }
 
 describe("official Google tag adapter", () => {
-  it("uses generic metadata, explicit app identity and no automatic page view or advertising", () => {
+  it("uses scoped cross-site cookies, generic metadata and no automatic page view or advertising", () => {
     expect(analyticsConfiguration(init)).toEqual({
       client_id: init.clientId, session_id: init.sessionId, send_page_view: false,
       page_title: "Rebasely desktop", page_location: ANALYTICS_BRIDGE_URL, page_referrer: "",
       ignore_referrer: true, allow_google_signals: false, allow_ad_personalization_signals: false,
+      cookie_flags: "SameSite=None;Secure",
       cookie_prefix: "rebasely_app", cookie_path: "/Rebasely/analytics/", cookie_expires: 0, cookie_update: false,
     });
     expect(analyticsEventParameters(init, {

@@ -14,6 +14,7 @@ export function analyticsConfiguration(init: AnalyticsInit) {
     ignore_referrer: true,
     allow_google_signals: false,
     allow_ad_personalization_signals: false,
+    cookie_flags: "SameSite=None;Secure",
     cookie_prefix: "rebasely_app",
     cookie_path: "/Rebasely/analytics/",
     cookie_expires: 0,
@@ -54,7 +55,8 @@ export function createGoogleAnalyticsTag(host: Window, measurementId: string | u
     if (!disabled) layer.push(arguments);
   }
   globals.gtag = gtag;
-  // Explicit app identifiers work when third-party cookies are unavailable.
+  // Cross-site cookie attributes support the HTTPS bridge iframe, but browser
+  // privacy settings can still block third-party cookies.
   // The dedicated GA stream must also have Enhanced Measurement disabled.
   gtag("consent", "default", {
     ad_storage: "denied", ad_user_data: "denied", ad_personalization: "denied",
