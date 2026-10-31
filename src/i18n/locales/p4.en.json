@@ -16,7 +16,6 @@
   "diff": "Diff",
   "sideBySide": "Side by side",
   "binaryFile": "Binary file",
-  "noDifferencesAgainstTheHaveRevision": "No differences against the have revision",
   "diffTruncated": "Diff truncated",
   "thatPathIsNotInThisWorkspace": "That path is not in this workspace.",
   "getLatest": "Get latest",
@@ -258,5 +257,6 @@
     "unlocking": "Unlocking files",
     "locked": "Locked selected files for submit",
     "unlocked": "Unlocked selected files"
-  }
+  },
+  "noTextDifferences": "No text differences"
 }

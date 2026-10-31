@@ -178,7 +178,7 @@ export function P4OperationDialog({ operation, path, depot, onClose }: {
             <div className="grid gap-2 rounded-md border p-3">
               <p className="text-sm font-medium">{t("p4-operations.previewTitle")}</p>
               {preview ? <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-all font-mono text-xs">{preview.value.output || t("p4-operations.noChanges")}</pre> : <p role="status" className="text-xs text-muted-foreground">{t(busy === "preview" ? "p4-operations.previewing" : "p4-operations.previewRequired")}</p>}
-              {preview && !approved ? <p role="status" className="text-xs text-muted-foreground">{t("p4-operations.previewAgain")}</p> : null}
+              {preview && !approved && busy !== "apply" ? <p role="status" className="text-xs text-muted-foreground">{t("p4-operations.previewAgain")}</p> : null}
             </div>
             {error ? <div role="alert" className="grid gap-1 rounded-md border border-destructive/30 p-3 text-xs text-destructive"><p>{t("p4-operations.failed")}</p><p className="whitespace-pre-wrap break-all">{error}</p></div> : null}
           </div>

@@ -55,7 +55,8 @@
     "confirm": "Open integration changes for {{target}} in {{change}}.",
     "action": "Integrate file",
     "running": "Integrating file",
-    "completed": "Integration opened. Review the pending changes and resolve if needed."
+    "completed": "Integration opened. Review the pending changes and resolve if needed.",
+    "intoMenu": "Integrate into file…"
   },
   "undo": {
     "title": "Undo submitted revisions…",

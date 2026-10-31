@@ -96,7 +96,7 @@ export function P4Diff({
         <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">{t("p4.binaryFile")}</div>
       ) : contentLines.length === 0 ? (
         <div className="flex flex-1 items-center justify-center p-6 text-center text-sm text-muted-foreground">
-          {captions ? empty : t("p4.noDifferencesAgainstTheHaveRevision")}
+          {captions ? empty : t("p4.noTextDifferences")}
         </div>
       ) : sideBySide ? (
         <SplitDiff lines={contentLines} />

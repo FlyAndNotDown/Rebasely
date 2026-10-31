@@ -16,7 +16,6 @@
   "diff": "差异",
   "sideBySide": "并排显示",
   "binaryFile": "二进制文件",
-  "noDifferencesAgainstTheHaveRevision": "与工作区版本没有差异",
   "diffTruncated": "差异内容已截断",
   "thatPathIsNotInThisWorkspace": "此路径不在当前工作区中。",
   "getLatest": "获取最新版本",
@@ -258,5 +257,6 @@
     "unlocking": "正在解锁文件",
     "locked": "已锁定所选文件的提交",
     "unlocked": "已解锁所选文件"
-  }
+  },
+  "noTextDifferences": "没有文本差异"
 }

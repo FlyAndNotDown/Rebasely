@@ -55,7 +55,8 @@
     "confirm": "将 {{target}} 的集成更改放入{{change}}。",
     "action": "集成文件",
     "running": "正在集成文件",
-    "completed": "已创建待提交的集成更改，请审查并按需解决冲突。"
+    "completed": "已创建待提交的集成更改，请审查并按需解决冲突。",
+    "intoMenu": "集成到此文件…"
   },
   "undo": {
     "title": "撤销已提交修订…",

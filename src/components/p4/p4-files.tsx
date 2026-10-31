@@ -201,7 +201,7 @@ export function P4Files() {
           <HistoryIcon />{t("p4.getRevision")}</ContextMenuItem>
         {!entry.dir ? <>
           <ContextMenuItem disabled={p4.busy} onClick={() => setOperation({ kind: "integrate", path: entry.path, depot: mode === "depot" })}>
-            <GitMergeIcon />{t("p4-operations.integrate.title")}
+            <GitMergeIcon />{t(mode === "workspace" ? "p4-operations.integrate.intoMenu" : "p4-operations.integrate.title")}
           </ContextMenuItem>
           {mode === "workspace" ? <ContextMenuItem disabled={p4.busy} onClick={() => setOperation({ kind: "undo", path: entry.path, depot: false })}>
             <Undo2Icon />{t("p4-operations.undo.title")}
