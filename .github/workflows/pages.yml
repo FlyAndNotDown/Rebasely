@@ -90,9 +90,9 @@ jobs:
           import { appendFileSync } from 'node:fs';
           const provider = Boolean(process.env.IDENTITY_PROVIDER);
           const account = Boolean(process.env.SERVICE_ACCOUNT);
-          if (provider !== account) throw new Error('Configure both Search Console repository secrets; see docs/search-indexing.md.');
+          if (provider !== account) throw new Error('Search Console configuration is incomplete.');
           appendFileSync(process.env.GITHUB_OUTPUT, `enabled=${provider && account}\n`);
-          if (!provider) console.log('::notice::Sitemap submission is not configured. See docs/search-indexing.md.');
+          if (!provider) console.log('::notice::Sitemap submission is not configured; skipping.');
           NODE
       - name: Google authentication
         if: steps.configuration.outputs.enabled == 'true'
