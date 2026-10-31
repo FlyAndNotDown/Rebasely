@@ -182,7 +182,7 @@ export function RepoStructure({ onReady }: { onReady?: (repoPath: string) => voi
                       type="button"
                       className="flex h-7 w-full items-center gap-1.5 pr-2 pl-7 text-left text-xs hover:bg-muted/70"
                       onDoubleClick={() => {
-                        if (module.state !== "uninitialized") void openPath(joinPath(repoPath, module.path));
+                        if (module.state !== "uninitialized") void openPath(joinPath(repoPath, module.path), "git");
                       }}
                     >
                       <BoxIcon className="size-3.5 shrink-0 text-muted-foreground" />
@@ -206,7 +206,7 @@ export function RepoStructure({ onReady }: { onReady?: (repoPath: string) => voi
                   </HoverTip>
                   <ContextMenuContent className="w-48">
                     {module.state !== "uninitialized" ? (
-                      <ContextMenuItem onClick={() => void openPath(joinPath(repoPath, module.path))}>
+                      <ContextMenuItem onClick={() => void openPath(joinPath(repoPath, module.path), "git")}>
                         <AppWindowIcon />
                         Open in a new tab
                       </ContextMenuItem>
@@ -286,7 +286,7 @@ export function RepoStructure({ onReady }: { onReady?: (repoPath: string) => voi
                     type="button"
                     className="flex h-7 w-full items-center gap-1.5 pr-2 pl-7 text-left text-xs hover:bg-muted/70"
                     onDoubleClick={() => {
-                      if (!tree.current && !tree.prunable) void openPath(tree.path);
+                      if (!tree.current && !tree.prunable) void openPath(tree.path, "git");
                     }}
                   >
                     <FolderGit2Icon className="size-3.5 shrink-0 text-muted-foreground" />
@@ -302,7 +302,7 @@ export function RepoStructure({ onReady }: { onReady?: (repoPath: string) => voi
                 </HoverTip>
                 <ContextMenuContent className="w-48">
                   {!tree.current && !tree.prunable ? (
-                    <ContextMenuItem onClick={() => void openPath(tree.path)}>
+                    <ContextMenuItem onClick={() => void openPath(tree.path, "git")}>
                       <AppWindowIcon />
                       Open in a new tab
                     </ContextMenuItem>
@@ -331,7 +331,7 @@ export function RepoStructure({ onReady }: { onReady?: (repoPath: string) => voi
         onOpenChange={setAdding}
         onCreated={(path) => {
           setReload((value) => value + 1);
-          toast.success("Created worktree", { action: { label: "Open", onClick: () => void openPath(path) } });
+          toast.success("Created worktree", { action: { label: "Open", onClick: () => void openPath(path, "git") } });
         }}
       />
       <RemoveWorktreeDialog
