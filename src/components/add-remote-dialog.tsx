@@ -1,3 +1,4 @@
+import { t, useTranslation } from "@/i18n";
 import { useState } from "react";
 import { Loader2Icon } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -21,6 +22,7 @@ type AddRemoteProps = {
 };
 
 export function AddRemoteDialog({ open, ...props }: AddRemoteProps & { open: boolean }) {
+  useTranslation();
   return (
     <Dialog open={open} onOpenChange={props.onOpenChange}>
       <DialogContent className="sm:max-w-md">
@@ -32,6 +34,7 @@ export function AddRemoteDialog({ open, ...props }: AddRemoteProps & { open: boo
 }
 
 function AddRemoteForm({ onOpenChange, existingNames, onAdd }: AddRemoteProps) {
+  useTranslation();
   const repoPath = useGitSelect((state) => state.snapshot?.repo.path);
   const [name, setName] = useState(() =>
     existingNames.some((item) => item.toLowerCase() === "origin") ? "" : "origin",
@@ -54,10 +57,7 @@ function AddRemoteForm({ onOpenChange, existingNames, onAdd }: AddRemoteProps) {
       const result = await gitApi.probeRemoteUrl(repoPath, trimmedUrl);
       setProbe({
         ok: true,
-        message:
-          result.heads === 0
-            ? "Reachable · no heads yet"
-            : `Reachable · ${result.heads} head${result.heads === 1 ? "" : "s"}`,
+        message: t("git.remote.reachable", { count: result.heads }),
       });
     } catch (error) {
       setProbe({ ok: false, message: errorMessage(error) });
@@ -85,32 +85,31 @@ function AddRemoteForm({ onOpenChange, existingNames, onAdd }: AddRemoteProps) {
       }}
     >
       <DialogHeader>
-        <DialogTitle>Add remote</DialogTitle>
-        <DialogDescription>
-          Adds a remote to this repository, then fetches its branches.
-        </DialogDescription>
+        <DialogTitle>{t("git.ui.add_remote")}</DialogTitle>
+        <DialogDescription>{t("git.ui.adds_a_remote_to_this_repository_then_fetches_its_branches")}</DialogDescription>
       </DialogHeader>
       <div className="mt-3 grid gap-4">
         <div className="grid gap-2">
-          <Label htmlFor="add-remote-name">Name</Label>
+          <Label htmlFor="add-remote-name">{t("git.ui.name")}</Label>
           <Input
             id="add-remote-name"
             className="font-mono"
             autoFocus
             value={name}
             onChange={(event) => setName(event.target.value)}
-            placeholder="origin"
+            placeholder={t("git.dynamic.remoteExample")}
           />
           {taken ? (
-            <p className="text-xs text-destructive">A remote named {trimmedName} already exists.</p>
+            <p role="alert" className="text-xs text-destructive">{t("git.dynamic.remoteExists", { name: trimmedName })}</p>
           ) : null}
         </div>
         <div className="grid gap-2">
-          <Label htmlFor="add-remote-url">URL</Label>
+          <Label htmlFor="add-remote-url">{t("git.ui.url")}</Label>
           <Input
             id="add-remote-url"
             className="font-mono"
             value={url}
+            disabled={testing || saving}
             onChange={(event) => {
               setUrl(event.target.value);
               setProbe(null);
@@ -119,7 +118,7 @@ function AddRemoteForm({ onOpenChange, existingNames, onAdd }: AddRemoteProps) {
           />
         </div>
         {probe ? (
-          <p className={probe.ok ? "text-xs text-emerald-600 dark:text-emerald-400" : "text-xs text-destructive"}>
+          <p role={probe.ok ? "status" : "alert"} className={probe.ok ? "text-xs text-muted-foreground" : "text-xs text-destructive"}>
             {probe.message}
           </p>
         ) : null}
@@ -132,16 +131,10 @@ function AddRemoteForm({ onOpenChange, existingNames, onAdd }: AddRemoteProps) {
           disabled={!repoPath || !trimmedUrl || testing || saving}
           onClick={() => void testConnection()}
         >
-          {testing ? <Loader2Icon className="animate-spin" /> : null}
-          Test connection
-        </Button>
-        <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-          Cancel
-        </Button>
+          {testing ? <Loader2Icon className="animate-spin" /> : null}{t("git.ui.test_connection")}</Button>
+        <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>{t("git.ui.cancel")}</Button>
         <Button type="submit" disabled={!canSubmit}>
-          {saving ? <Loader2Icon className="animate-spin" /> : null}
-          Add
-        </Button>
+          {saving ? <Loader2Icon className="animate-spin" /> : null}{t("git.ui.add")}</Button>
       </DialogFooter>
     </form>
   );

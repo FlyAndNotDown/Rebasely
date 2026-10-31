@@ -1,3 +1,4 @@
+import { formatNumber, t, useTranslation } from "@/i18n";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { ChevronDownIcon, ChevronUpIcon, Redo2Icon, Undo2Icon } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -24,6 +25,7 @@ export function ConflictEditor({
   path: string;
   rebasing: boolean;
 }) {
+  useTranslation();
   const { saveConflict, resolveConflict, runMergetool } = useGitPick([
     "saveConflict",
     "resolveConflict",
@@ -48,8 +50,8 @@ export function ConflictEditor({
   });
   const hunks = conflictHunks(text);
   const segments = conflictSegments(text);
-  const current = rebasing ? "Target" : "Current";
-  const incoming = rebasing ? "Replaying" : "Incoming";
+  const current = t(rebasing ? "git-files.target" : "git-files.current");
+  const incoming = t(rebasing ? "git-files.replaying" : "git-files.incoming");
   const shown = hunks.length === 0 ? 0 : Math.min(active, hunks.length - 1);
 
   // The parent keys this editor by file, so each file starts from fresh state.
@@ -177,7 +179,7 @@ export function ConflictEditor({
   }
 
   if (loading) {
-    return <p role="status" className="p-4 text-sm text-muted-foreground">Loading conflict…</p>;
+    return <p role="status" className="p-4 text-sm text-muted-foreground">{t("git-files.loadingConflict")}</p>;
   }
   if (error) {
     return <p role="alert" className="p-4 text-sm text-destructive">{error}</p>;
@@ -185,15 +187,15 @@ export function ConflictEditor({
   if (binary) {
     return (
       <div className="flex flex-wrap items-center gap-2 p-4">
-        <p className="w-full text-sm text-muted-foreground">This file has no text conflict markers.</p>
+        <p className="w-full text-sm text-muted-foreground">{t("git-files.noMarkers")}</p>
         <Button type="button" size="xs" variant="outline" onClick={() => void resolveConflict(path, "ours")}>
-          Use {current}
+          {t("git-files.useSide", { side: current })}
         </Button>
         <Button type="button" size="xs" variant="outline" onClick={() => void resolveConflict(path, "theirs")}>
-          Use {incoming}
+          {t("git-files.useSide", { side: incoming })}
         </Button>
         <Button type="button" size="xs" variant="outline" onClick={() => void runMergetool(path)}>
-          Open in merge tool
+          {t("git-files.openMergeTool")}
         </Button>
       </div>
     );
@@ -202,20 +204,20 @@ export function ConflictEditor({
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-conflict-editor="">
       <div className="flex h-9 shrink-0 items-center gap-1 border-b px-3">
-        <IconButton label="Previous conflict" disabled={hunks.length === 0 || shown === 0} onClick={() => go(shown - 1)}>
+        <IconButton label={t("git-files.previousConflict")} disabled={hunks.length === 0 || shown === 0} onClick={() => go(shown - 1)}>
           <ChevronUpIcon />
         </IconButton>
-        <IconButton label="Next conflict" disabled={hunks.length === 0 || shown >= hunks.length - 1} onClick={() => go(shown + 1)}>
+        <IconButton label={t("git-files.nextConflict")} disabled={hunks.length === 0 || shown >= hunks.length - 1} onClick={() => go(shown + 1)}>
           <ChevronDownIcon />
         </IconButton>
-        <IconButton label="Undo" disabled={!canUndo} onClick={undo}>
+        <IconButton label={t("git-files.undo")} disabled={!canUndo} onClick={undo}>
           <Undo2Icon />
         </IconButton>
-        <IconButton label="Redo" disabled={!canRedo} onClick={redo}>
+        <IconButton label={t("git-files.redo")} disabled={!canRedo} onClick={redo}>
           <Redo2Icon />
         </IconButton>
         <span className="text-xs text-muted-foreground">
-          {hunks.length === 0 ? "No conflicts left" : `${shown + 1} / ${hunks.length}`}
+          {hunks.length === 0 ? t("git-files.noConflicts") : t("git-files.conflictPosition", { position: formatNumber(shown + 1), total: formatNumber(hunks.length) })}
         </span>
         <Button
           type="button"
@@ -224,7 +226,7 @@ export function ConflictEditor({
           className="ml-auto"
           onClick={() => void runMergetool(path)}
         >
-          Open in merge tool
+          {t("git-files.openMergeTool")}
         </Button>
         <Button
           type="button"
@@ -232,7 +234,7 @@ export function ConflictEditor({
           disabled={hunks.length > 0}
           onClick={() => void saveConflict(path, eol === "\r\n" ? text.replace(/\n/g, "\r\n") : text)}
         >
-          Mark resolved
+          {t("git-files.markResolved")}
         </Button>
       </div>
       <div className="min-h-0 flex-1 overflow-auto">
@@ -266,13 +268,13 @@ export function ConflictEditor({
                     {incoming}
                   </Button>
                   <Button type="button" size="xs" variant="outline" onClick={() => choose(segment.index, "both")}>
-                    Both
+                    {t("git-files.both")}
                   </Button>
                   <Button type="button" size="xs" variant="outline" onClick={() => choose(segment.index, "none")}>
-                    None
+                    {t("git-files.none")}
                   </Button>
                 </div>
-                <MarkerLine>{`<<<<<<< ${current}`}</MarkerLine>
+                <MarkerLine>{t("git-files.currentMarker", { side: current })}</MarkerLine>
                 <FitText
                   value={visibleBody(segment.hunk.ours)}
                   className="bg-diff-del-bg text-diff-del"
@@ -292,7 +294,7 @@ export function ConflictEditor({
                   className="bg-diff-add-bg text-diff-add"
                   onChange={(value) => edit(setConflictSide(textRef.current, segment.index, "theirs", value))}
                 />
-                <MarkerLine>{`>>>>>>> ${incoming}`}</MarkerLine>
+                <MarkerLine>{t("git-files.incomingMarker", { side: incoming })}</MarkerLine>
               </div>
             ),
           )}

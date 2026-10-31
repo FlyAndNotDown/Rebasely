@@ -1081,6 +1081,155 @@ fn pull_and_push_follow_an_upstream_with_a_different_name() {
 }
 
 #[test]
+fn renaming_a_branch_preserves_its_tip_tracking_config_and_reflog() {
+    let (root, repo) = temp_repo();
+    commit_file(&repo, &root, "file.txt", "base\n", "base");
+    create_branch(&repo, "feature/original", true, None).unwrap();
+    commit_file(&repo, &root, "file.txt", "feature\n", "feature");
+    let tip = head_id(&repo);
+    run_git_stdout(
+        &root,
+        &["config", "branch.feature/original.remote", "origin"],
+    )
+    .unwrap();
+    run_git_stdout(
+        &root,
+        &[
+            "config",
+            "branch.feature/original.merge",
+            "refs/heads/remote-feature",
+        ],
+    )
+    .unwrap();
+    let reflog = run_git_stdout(
+        &root,
+        &["reflog", "show", "--format=%H", "feature/original"],
+    )
+    .unwrap();
+
+    rename_branch(&repo, "feature/original", "feature/renamed").unwrap();
+    assert_eq!(symbolic_branch(&repo).as_deref(), Some("feature/renamed"));
+    assert_eq!(head_id(&repo), tip);
+    assert!(!ref_exists(&repo, "refs/heads/feature/original"));
+    assert_eq!(
+        config_get(&repo, "branch.feature/renamed.remote").as_deref(),
+        Some("origin")
+    );
+    assert_eq!(
+        config_get(&repo, "branch.feature/renamed.merge").as_deref(),
+        Some("refs/heads/remote-feature")
+    );
+    assert!(config_get(&repo, "branch.feature/original.remote").is_none());
+    let renamed_log =
+        run_git_stdout(&root, &["reflog", "show", "--format=%H", "feature/renamed"]).unwrap();
+    assert!(renamed_log.ends_with(&reflog));
+
+    create_branch(&repo, "occupied", false, None).unwrap();
+    assert!(rename_branch(&repo, "feature/renamed", "occupied").is_err());
+    assert!(rename_branch(&repo, "feature/renamed", "invalid..name").is_err());
+    assert!(rename_branch(&repo, "feature/renamed", "--force").is_err());
+    assert!(rename_branch(&repo, "missing", "new").is_err());
+    assert_eq!(symbolic_branch(&repo).as_deref(), Some("feature/renamed"));
+    assert_eq!(head_id(&repo), tip);
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn upstream_can_be_changed_and_removed_without_switching_or_pushing() {
+    let (root, repo) = temp_repo();
+    commit_file(&repo, &root, "file.txt", "base\n", "base");
+    let original_branch = symbolic_branch(&repo).unwrap();
+    let tip = head_id(&repo);
+    create_branch(&repo, "feature", false, None).unwrap();
+    add_remote(&repo, "origin", "https://git.example.com/team/project.git").unwrap();
+    for name in ["first", "second"] {
+        run_git_stdout(
+            &root,
+            &["update-ref", &format!("refs/remotes/origin/{name}"), &tip],
+        )
+        .unwrap();
+    }
+
+    set_branch_upstream(&repo, "feature", Some("origin/first")).unwrap();
+    assert_eq!(
+        config_get(&repo, "branch.feature.remote").as_deref(),
+        Some("origin")
+    );
+    assert_eq!(
+        config_get(&repo, "branch.feature.merge").as_deref(),
+        Some("refs/heads/first")
+    );
+    set_branch_upstream(&repo, "feature", Some("origin/second")).unwrap();
+    let listed = branches(&repo, true).unwrap();
+    assert_eq!(
+        listed
+            .local
+            .iter()
+            .find(|branch| branch.name == "feature")
+            .unwrap()
+            .upstream
+            .as_deref(),
+        Some("origin/second")
+    );
+    assert!(set_branch_upstream(&repo, "feature", Some("origin/missing")).is_err());
+    assert!(set_branch_upstream(&repo, "feature", Some("origin/HEAD")).is_err());
+    assert!(set_branch_upstream(&repo, "feature", Some("--help")).is_err());
+    assert!(set_branch_upstream(&repo, "origin/first", None).is_err());
+    assert_eq!(
+        config_get(&repo, "branch.feature.merge").as_deref(),
+        Some("refs/heads/second")
+    );
+
+    set_branch_upstream(&repo, "feature", None).unwrap();
+    assert!(config_get(&repo, "branch.feature.remote").is_none());
+    assert!(config_get(&repo, "branch.feature.merge").is_none());
+    assert_eq!(
+        symbolic_branch(&repo).as_deref(),
+        Some(original_branch.as_str())
+    );
+    assert_eq!(head_id(&repo), tip);
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn editing_a_remote_fetch_url_persists_without_changing_its_explicit_push_url() {
+    let (root, repo) = temp_repo();
+    add_remote(&repo, "origin", "https://git.example.com/team/old.git").unwrap();
+    run_git_stdout(
+        &root,
+        &[
+            "remote",
+            "set-url",
+            "--push",
+            "origin",
+            "ssh://git@git.example.com/team/push.git",
+        ],
+    )
+    .unwrap();
+    set_remote_url(&repo, "origin", "https://git.example.com/team/new.git").unwrap();
+    let reopened = open_at(&root).unwrap();
+    let remotes = list_remotes(&reopened).unwrap();
+    let remote = remotes
+        .iter()
+        .find(|remote| remote.name == "origin")
+        .unwrap();
+    assert_eq!(
+        remote.url.as_deref(),
+        Some("https://git.example.com/team/new.git")
+    );
+    assert_eq!(
+        remote.push_url.as_deref(),
+        Some("ssh://git@git.example.com/team/push.git")
+    );
+    assert!(set_remote_url(&repo, "origin", " ").is_err());
+    assert_eq!(
+        config_get(&repo, "remote.origin.url").as_deref(),
+        Some("https://git.example.com/team/new.git")
+    );
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
 fn ignoring_appends_new_patterns_once_and_hides_the_files() {
     let (root, repo) = temp_repo();
     commit_file(&repo, &root, ".gitignore", "target/\r\n", "ignore");

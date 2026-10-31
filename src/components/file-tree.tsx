@@ -1,3 +1,4 @@
+import { t, useTranslation } from "@/i18n";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ChevronRightIcon, FileIcon, FolderIcon, FolderOpenIcon, SearchIcon } from "lucide-react";
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu";
@@ -36,13 +37,14 @@ export function FileTree({
   trailing?: (entry: FileTreeEntry) => ReactNode;
   menu?: (entry: FileTreeEntry) => ReactNode;
 }) {
+  useTranslation();
   const items = entries[dir];
   if (!items) return null;
   return (
     <>
       {items.map((item) => {
         const expanded = item.dir && open.has(item.path);
-        const tip = item.iconTitle || (item.ignored ? "Ignored" : item.name);
+        const tip = item.iconTitle || (item.ignored ? t("git-files.ignored") : item.name);
         const row = (
             <button
               type="button"
@@ -117,7 +119,7 @@ export function FileTreeFilter({
   query,
   onQuery,
   leading,
-  placeholder = "Filter files",
+  placeholder,
 }: {
   title: string;
   query: string;
@@ -125,6 +127,7 @@ export function FileTreeFilter({
   leading?: ReactNode;
   placeholder?: string;
 }) {
+  useTranslation();
   return (
     <div className="flex h-10 shrink-0 items-center gap-2 border-b px-2">
       {leading ?? <span className="shrink-0 px-1 text-sm font-medium">{title}</span>}
@@ -139,8 +142,8 @@ export function FileTreeFilter({
               onQuery("");
             }
           }}
-          placeholder={placeholder}
-          aria-label={`Filter ${title}`}
+          placeholder={placeholder ?? t("git-files.filterFiles")}
+          aria-label={t("git-files.filterTitle", { title })}
           spellCheck={false}
           className="h-7 pl-7"
         />
@@ -193,6 +196,7 @@ export function FilteredFileTree({
   menu?: (entry: FileTreeEntry) => ReactNode;
   decorate?: (node: SearchNode, entry: FileTreeEntry) => FileTreeEntry;
 }) {
+  useTranslation();
   const [seen, setSeen] = useState(nodes);
   const [generation, setGeneration] = useState(0);
   const generationRef = useRef(generation);
@@ -234,7 +238,7 @@ export function FilteredFileTree({
   }
 
   if (nodes.length === 0) {
-    return <p className="px-3 py-2 text-xs text-muted-foreground">No matching files.</p>;
+    return <p className="px-3 py-2 text-xs text-muted-foreground">{t("git-files.noMatches")}</p>;
   }
 
   return (

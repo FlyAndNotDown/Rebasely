@@ -1,3 +1,4 @@
+import { t, useTranslation } from "@/i18n";
 import { useMemo, useState, type KeyboardEvent, type MouseEvent } from "react";
 import {
   AppWindowIcon,
@@ -71,7 +72,7 @@ import type { FileStatus, WorkspaceSnapshot } from "@/types/git";
 
 const ROW_HEIGHT = 28;
 const SECTIONS: ChangeSection[] = ["unstaged", "staged"];
-const SECTION_TITLE: Record<ChangeSection, string> = { unstaged: "Changes", staged: "Staged" };
+const SECTION_TITLE: Record<ChangeSection, string> = { unstaged: "git.ui.changes", staged: "git.ui.staged" };
 
 type ListRow =
   | { kind: "section"; section: ChangeSection; count: number; open: boolean }
@@ -81,10 +82,10 @@ type ListRow =
 type ChangeListSelection = { section: ChangeSection; paths: ReadonlySet<string>; anchor: string | null };
 
 const CONTINUE_LABEL: Record<string, string> = {
-  merge: "Continue merge",
-  rebase: "Continue rebase",
-  "cherry-pick": "Continue cherry-pick",
-  revert: "Continue revert",
+  merge: "git.ui.continue_merge",
+  rebase: "git.ui.continue_rebase",
+  "cherry-pick": "git.ui.continue_cherry_pick",
+  revert: "git.ui.continue_revert",
 };
 
 function headCommitMessage(snapshot: WorkspaceSnapshot) {
@@ -94,7 +95,7 @@ function headCommitMessage(snapshot: WorkspaceSnapshot) {
 }
 
 function plural(count: number, noun: string) {
-  return `${count} ${noun}${count === 1 ? "" : "s"}`;
+  return t(noun === "file" ? "git.dynamic.fileCount" : "git.dynamic.changedFileCount", { count });
 }
 
 function rowKey(row: ListRow) {
@@ -104,6 +105,7 @@ function rowKey(row: ListRow) {
 }
 
 export function ChangesPane() {
+  useTranslation();
   const {
     snapshot,
     changeSelection,
@@ -245,10 +247,10 @@ export function ChangesPane() {
     ? !committing && !conflicted
     : !committing && message.trim().length > 0 && (amend ? canAmend : files.staged.length > 0);
   const primaryLabel = operation
-    ? (CONTINUE_LABEL[operation.kind] ?? "Continue")
+    ? t(CONTINUE_LABEL[operation.kind] ?? "git.ui.continue")
     : amend
-      ? "Amend"
-      : "Commit";
+      ? t("git.ui.amend")
+      : t("git.ui.commit");
 
   function focusFile(section: ChangeSection, path: string) {
     void selectChange(path, section === "staged");
@@ -355,9 +357,9 @@ export function ChangesPane() {
   async function copyText(value: string) {
     try {
       await navigator.clipboard.writeText(value);
-      toast.success("Copied");
+      toast.success(t("git.ui.copied"));
     } catch {
-      toast.error("Could not copy to the clipboard");
+      toast.error(t("git.ui.could_not_copy_to_the_clipboard"));
     }
   }
 
@@ -420,18 +422,16 @@ export function ChangesPane() {
       <ContextMenuContent className="min-w-52">
         <ContextMenuItem onClick={() => primaryAction(section, targets)}>
           {section === "staged" ? <MinusIcon /> : <PlusIcon />}
-          {section === "staged" ? "Unstage" : "Stage"}
+          {section === "staged" ? t("git.ui.unstage") : t("git.ui.stage")}
           {many ? ` ${plural(targets.length, "file")}` : ""}
         </ContextMenuItem>
         {section === "unstaged" ? (
           <>
             <ContextMenuItem onClick={() => setStashTarget(targets)}>
-              <ArchiveIcon />
-              Stash {many ? plural(targets.length, "file") : "changes"}…
+              <ArchiveIcon />{t(many ? "git.dynamic.stashFiles" : "git.dynamic.stashChanges", { count: targets.length })}
             </ContextMenuItem>
             <ContextMenuItem variant="destructive" onClick={() => setDiscardTarget(targets)}>
-              <Trash2Icon />
-              Discard {many ? plural(targets.length, "file") : "changes"}…
+              <Trash2Icon />{t(many ? "git.dynamic.discardMenuFiles" : "git.dynamic.discardChanges", { count: targets.length })}
             </ContextMenuItem>
           </>
         ) : null}
@@ -440,30 +440,22 @@ export function ChangesPane() {
             <ContextMenuSeparator />
             {many ? (
               <ContextMenuItem onClick={() => void ignorePaths(targets.map((path) => ignorePathPattern(path)))}>
-                <FileXIcon />
-                Ignore {plural(targets.length, "file")}
+                <FileXIcon />{t("git.dynamic.ignoreFiles", { count: targets.length })}
               </ContextMenuItem>
             ) : (
               <ContextMenuSub>
                 <ContextMenuSubTrigger>
-                  <FileXIcon />
-                  Add to .gitignore
-                </ContextMenuSubTrigger>
+                  <FileXIcon />{t("git.ui.add_to_gitignore")}</ContextMenuSubTrigger>
                 <ContextMenuSubContent>
                   <ContextMenuItem onClick={() => void ignorePaths([ignorePathPattern(file.path)])}>
-                    <FileIcon />
-                    This file
-                  </ContextMenuItem>
+                    <FileIcon />{t("git.ui.this_file")}</ContextMenuItem>
                   {extension ? (
                     <ContextMenuItem onClick={() => void ignorePaths([extension])}>
-                      <FilesIcon />
-                      All {extension} files
-                    </ContextMenuItem>
+                      <FilesIcon />{t("git.dynamic.allExtension", { extension })}</ContextMenuItem>
                   ) : null}
                   {folder ? (
                     <ContextMenuItem onClick={() => void ignorePaths([ignorePathPattern(folder, true)])}>
-                      <FolderIcon />
-                      Folder {folder}/
+                      <FolderIcon />{t("git.ui.folder")}{" "}{folder}/
                     </ContextMenuItem>
                   ) : null}
                 </ContextMenuSubContent>
@@ -477,13 +469,9 @@ export function ChangesPane() {
             {file.kind !== "deleted" ? (
               <>
                 <ContextMenuItem onClick={() => void openInEditor(file.path)}>
-                  <FilePenIcon />
-                  Open in editor
-                </ContextMenuItem>
+                  <FilePenIcon />{t("git.ui.open_in_editor")}</ContextMenuItem>
                 <ContextMenuItem onClick={() => void openRepoFile(file.path)}>
-                  <AppWindowIcon />
-                  Open with default app
-                </ContextMenuItem>
+                  <AppWindowIcon />{t("git.ui.open_with_default_app")}</ContextMenuItem>
               </>
             ) : null}
             {file.kind !== "untracked" && file.kind !== "conflicted" ? (
@@ -492,46 +480,32 @@ export function ChangesPane() {
                   void openDifftool({ kind: "workdir", path: file.path, staged: section === "staged" })
                 }
               >
-                <Columns2Icon />
-                Open in diff tool
-              </ContextMenuItem>
+                <Columns2Icon />{t("git.ui.open_in_diff_tool")}</ContextMenuItem>
             ) : null}
             {file.kind === "conflicted" ? (
               <ContextMenuItem onClick={() => void runMergetool(file.path)}>
-                <GitMergeIcon />
-                Open in merge tool
-              </ContextMenuItem>
+                <GitMergeIcon />{t("git.ui.open_in_merge_tool")}</ContextMenuItem>
             ) : null}
             <ContextMenuItem onClick={() => void revealRepoFile(file.kind === "deleted" ? folder : file.path)}>
-              <FolderOpenIcon />
-              Reveal in file manager
-            </ContextMenuItem>
+              <FolderOpenIcon />{t("git.ui.reveal_in_file_manager")}</ContextMenuItem>
             {tracked ? (
               <>
                 <ContextMenuItem onClick={() => showFile(file.path, "history")}>
-                  <HistoryIcon />
-                  File history
-                </ContextMenuItem>
+                  <HistoryIcon />{t("git.ui.file_history")}</ContextMenuItem>
                 {file.kind !== "deleted" ? (
                   <ContextMenuItem onClick={() => showFile(file.path, "browse")}>
-                    <FileSearchIcon />
-                    Blame
-                  </ContextMenuItem>
+                    <FileSearchIcon />{t("git.ui.blame")}</ContextMenuItem>
                 ) : null}
               </>
             ) : null}
             <ContextMenuSeparator />
             <ContextMenuItem onClick={() => void copyText(file.path)}>
-              <CopyIcon />
-              Copy relative path
-            </ContextMenuItem>
+              <CopyIcon />{t("git.ui.copy_relative_path")}</ContextMenuItem>
             {snapshot ? (
               <ContextMenuItem
                 onClick={() => void copyText(`${snapshot.repo.path.replace(/[\\/]+$/, "")}/${file.path}`)}
               >
-                <CopyIcon />
-                Copy full path
-              </ContextMenuItem>
+                <CopyIcon />{t("git.ui.copy_full_path")}</ContextMenuItem>
             ) : null}
           </>
         )}
@@ -545,35 +519,25 @@ export function ChangesPane() {
       <ContextMenuContent className="min-w-52">
         <ContextMenuItem onClick={() => primaryAction(row.section, row.paths)}>
           {row.section === "staged" ? <MinusIcon /> : <PlusIcon />}
-          {row.section === "staged" ? "Unstage folder" : "Stage folder"}
+          {row.section === "staged" ? t("git.ui.unstage_folder") : t("git.ui.stage_folder")}
         </ContextMenuItem>
         {row.section === "unstaged" ? (
           <>
             <ContextMenuItem onClick={() => setStashTarget(row.paths)}>
-              <ArchiveIcon />
-              Stash folder…
-            </ContextMenuItem>
+              <ArchiveIcon />{t("git.ui.stash_folder")}</ContextMenuItem>
             <ContextMenuItem variant="destructive" onClick={() => setDiscardTarget(row.paths)}>
-              <Trash2Icon />
-              Discard folder…
-            </ContextMenuItem>
+              <Trash2Icon />{t("git.ui.discard_folder")}</ContextMenuItem>
             {allUntracked ? (
               <ContextMenuItem onClick={() => void ignorePaths([ignorePathPattern(row.path, true)])}>
-                <FileXIcon />
-                Add folder to .gitignore
-              </ContextMenuItem>
+                <FileXIcon />{t("git.ui.add_folder_to_gitignore")}</ContextMenuItem>
             ) : null}
           </>
         ) : null}
         <ContextMenuSeparator />
         <ContextMenuItem onClick={() => void revealRepoFile(row.path)}>
-          <FolderOpenIcon />
-          Reveal in file manager
-        </ContextMenuItem>
+          <FolderOpenIcon />{t("git.ui.reveal_in_file_manager")}</ContextMenuItem>
         <ContextMenuItem onClick={() => void copyText(row.path)}>
-          <CopyIcon />
-          Copy relative path
-        </ContextMenuItem>
+          <CopyIcon />{t("git.ui.copy_relative_path")}</ContextMenuItem>
       </ContextMenuContent>
     );
   }
@@ -581,7 +545,7 @@ export function ChangesPane() {
   function renderRow(row: ListRow) {
     if (row.kind === "section") {
       const count = row.count;
-      const label = row.section === "staged" ? "Unstage all" : "Stage all";
+      const label = row.section === "staged" ? t("git.ui.unstage_all") : t("git.ui.stage_all");
       return (
         <div className="flex h-7 items-center gap-1 px-2">
           <button
@@ -595,7 +559,7 @@ export function ChangesPane() {
             <ChevronDownIcon
               className={cn("size-3.5 text-muted-foreground transition-transform", !row.open && "-rotate-90")}
             />
-            <span className="text-xs font-medium">{SECTION_TITLE[row.section]}</span>
+            <span className="text-xs font-medium">{t(SECTION_TITLE[row.section])}</span>
             <span className="tabular-nums text-xs text-muted-foreground">{count}</span>
           </button>
           {count > 0 ? (
@@ -613,7 +577,7 @@ export function ChangesPane() {
     if (row.kind === "empty") {
       return (
         <p className="flex h-7 items-center px-4 text-xs text-muted-foreground">
-          {row.section === "staged" ? "No staged files" : "Working tree is clean"}
+          {row.section === "staged" ? t("git.ui.no_staged_files") : t("git.ui.working_tree_is_clean")}
         </p>
       );
     }
@@ -644,7 +608,7 @@ export function ChangesPane() {
                 size="icon-xs"
                 className="opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 focus-visible:opacity-100"
                 onClick={() => primaryAction(row.section, row.paths)}
-                aria-label={row.section === "staged" ? `Unstage ${row.path}` : `Stage ${row.path}`}
+                aria-label={t(row.section === "staged" ? "git.dynamic.unstageFolder" : "git.dynamic.stageFolder", { path: row.path })}
               >
                 {row.section === "staged" ? <MinusIcon /> : <PlusIcon />}
               </Button>
@@ -693,7 +657,7 @@ export function ChangesPane() {
               tabIndex={-1}
               className="opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 focus-visible:opacity-100"
               onClick={() => primaryAction(section, targetsFor(section, file.path))}
-              aria-label={section === "staged" ? "Unstage" : "Stage"}
+              aria-label={section === "staged" ? t("git.ui.unstage") : t("git.ui.stage")}
             >
               {section === "staged" ? <MinusIcon /> : <PlusIcon />}
             </Button>
@@ -714,11 +678,11 @@ export function ChangesPane() {
       <div className="flex h-9 shrink-0 items-center gap-1 border-b px-3">
         <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
           {totalSelected > 1
-            ? `${totalSelected} selected`
+            ? t("git.dynamic.selectedCount", { count: totalSelected })
             : plural(new Set([...files.unstaged, ...files.staged].map((file) => file.path)).size, "changed file")}
         </span>
         <SegmentedControl
-          label="Changed files layout"
+          label={t("git.ui.changed_files_layout")}
           dense
           value={tree ? "tree" : "list"}
           onChange={(value) => {
@@ -726,8 +690,8 @@ export function ChangesPane() {
             if (next !== tree) void updatePrefs({ ...prefs, changesTree: next });
           }}
           options={[
-            { value: "list", label: <ListIcon />, tip: "Show as list" },
-            { value: "tree", label: <FolderTreeIcon />, tip: "Group by folder" },
+            { value: "list", label: <ListIcon />, tip: t("git.ui.show_as_list") },
+            { value: "tree", label: <FolderTreeIcon />, tip: t("git.ui.group_by_folder") },
           ]}
         />
       </div>
@@ -735,7 +699,7 @@ export function ChangesPane() {
         <div
           role="listbox"
           aria-multiselectable
-          aria-label="Changed files"
+          aria-label={t("git.ui.changed_files")}
           tabIndex={0}
           className="py-1 outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset"
           onKeyDown={onListKeyDown}
@@ -758,7 +722,7 @@ export function ChangesPane() {
         <Textarea
           value={message}
           onChange={(event) => setMessage(event.target.value)}
-          placeholder="Commit message"
+          placeholder={t("git.ui.commit_message")}
           className="min-h-20 resize-none"
           onKeyDown={(event) => {
             if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
@@ -775,11 +739,9 @@ export function ChangesPane() {
             disabled={!files.unstaged.length}
             onClick={() => setDiscardTarget(files.unstaged.map((file) => file.path))}
           >
-            <Undo2Icon data-icon="inline-start" />
-            Discard all
-          </Button>
+            <Undo2Icon data-icon="inline-start" />{t("git.ui.discard_all")}</Button>
           <div className="inline-flex overflow-hidden rounded-lg">
-            <HoverTip label={operation && conflicted ? "Resolve every conflict first" : undefined}>
+            <HoverTip label={operation && conflicted ? t("git.ui.resolve_every_conflict_first") : undefined}>
               <span className="inline-flex">
                 <Button type="submit" disabled={!canCommit} className="rounded-none">
                   {primaryLabel}
@@ -792,7 +754,7 @@ export function ChangesPane() {
                   <Button
                     type="button"
                     disabled={!canOpenCommitMenu}
-                    aria-label="Commit options"
+                    aria-label={t("git.ui.commit_options")}
                     className="rounded-none border-l border-primary-foreground/20 px-1.5"
                   >
                     <ChevronDownIcon />
@@ -803,17 +765,13 @@ export function ChangesPane() {
                     className="whitespace-nowrap"
                     disabled={!canCommitAndPush}
                     onClick={submitCommitAndPush}
-                  >
-                    Commit and push
-                  </DropdownMenuItem>
+                  >{t("git.ui.commit_and_push")}</DropdownMenuItem>
                   <DropdownMenuCheckboxItem
                     checked={amend}
                     disabled={!canAmend}
                     className="whitespace-nowrap"
                     onCheckedChange={(checked) => toggleAmend(checked === true)}
-                  >
-                    Amend last commit
-                  </DropdownMenuCheckboxItem>
+                  >{t("git.ui.amend_last_commit")}</DropdownMenuCheckboxItem>
                 </DropdownMenuContent>
               </DropdownMenu>
             )}
@@ -826,27 +784,20 @@ export function ChangesPane() {
           <DialogHeader>
             <DialogTitle>
               {discardTarget && discardTarget.length === 1
-                ? `Discard changes to ${fileName(discardTarget[0])}?`
-                : `Discard changes to ${plural(discardTarget?.length ?? 0, "file")}?`}
+                ? t("git.dynamic.discardFile", { name: fileName(discardTarget[0]) })
+                : t("git.dynamic.discardFiles", { count: discardTarget?.length ?? 0 })}
             </DialogTitle>
-            <DialogDescription>
-              This restores the selected files to HEAD and deletes untracked files. This cannot be
-              undone.
-            </DialogDescription>
+            <DialogDescription>{t("git.ui.this_restores_the_selected_files_to_head_and_deletes_untracked_files_this_cannot_be_undone")}</DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDiscardTarget(null)}>
-              Cancel
-            </Button>
+            <Button variant="outline" onClick={() => setDiscardTarget(null)}>{t("git.ui.cancel")}</Button>
             <Button
               variant="destructive"
               onClick={() => {
                 if (discardTarget) void discard(discardTarget);
                 setDiscardTarget(null);
               }}
-            >
-              Discard
-            </Button>
+            >{t("git.ui.discard")}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -881,6 +832,7 @@ function StashPathsForm({
   onCancel: () => void;
   onStash: (message: string) => Promise<void>;
 }) {
+  useTranslation();
   const [stashMessage, setStashMessage] = useState("");
   const [saving, setSaving] = useState(false);
   return (
@@ -892,26 +844,20 @@ function StashPathsForm({
       }}
     >
       <DialogHeader>
-        <DialogTitle>Stash {plural(count, "file")}</DialogTitle>
-        <DialogDescription>
-          Saves the changes to these files in a new stash and restores them to HEAD.
-          {includesUntracked ? " Untracked files are included." : ""}
+        <DialogTitle>{t("git.dynamic.stashFilesTitle", { count })}</DialogTitle>
+        <DialogDescription>{t("git.ui.saves_the_changes_to_these_files_in_a_new_stash_and_restores_them_to_head")}{includesUntracked ? t("git.dynamic.untrackedIncluded") : ""}
         </DialogDescription>
       </DialogHeader>
       <Input
         className="mt-3"
         autoFocus
-        placeholder="Stash message (optional)"
+        placeholder={t("git.ui.stash_message_optional")}
         value={stashMessage}
         onChange={(event) => setStashMessage(event.target.value)}
       />
       <DialogFooter className="mt-4">
-        <Button type="button" variant="outline" onClick={onCancel}>
-          Cancel
-        </Button>
-        <Button type="submit" disabled={saving}>
-          Stash
-        </Button>
+        <Button type="button" variant="outline" onClick={onCancel}>{t("git.ui.cancel")}</Button>
+        <Button type="submit" disabled={saving}>{t("git.ui.stash")}</Button>
       </DialogFooter>
     </form>
   );

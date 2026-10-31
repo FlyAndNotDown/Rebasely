@@ -628,6 +628,32 @@ async fn create_branch(
 }
 
 #[tauri::command]
+async fn rename_branch(
+    repo_path: String,
+    name: String,
+    new_name: String,
+) -> AppResult<WorkspaceSnapshot> {
+    with_repo_async(repo_path, move |repo| {
+        git::rename_branch(repo, &name, &new_name)?;
+        git::snapshot(repo)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn set_branch_upstream(
+    repo_path: String,
+    name: String,
+    upstream: Option<String>,
+) -> AppResult<WorkspaceSnapshot> {
+    with_repo_async(repo_path, move |repo| {
+        git::set_branch_upstream(repo, &name, upstream.as_deref())?;
+        git::snapshot(repo)
+    })
+    .await
+}
+
+#[tauri::command]
 async fn delete_branch(
     repo_path: String,
     name: String,
@@ -1722,6 +1748,8 @@ pub fn run() {
             pull_remote,
             push_remote,
             create_branch,
+            rename_branch,
+            set_branch_upstream,
             create_tag,
             delete_tag,
             push_tag,
