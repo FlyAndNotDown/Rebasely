@@ -597,15 +597,17 @@ function SettingsForm() {
                     }}
                   />
                 </FieldGroup>
-                <FieldGroup title={t("analytics.title")} hint={t("analytics.disclosure")}>
+                <FieldGroup title={t("analytics.title")}>
                   <label className="flex items-center gap-2 text-sm">
                     <Checkbox
                       checked={prefs.analyticsEnabled && analyticsAllowed}
                       disabled={analyticsSaving}
+                      aria-describedby="analytics-disclosure"
                       onCheckedChange={(checked) => { void changeAnalytics(checked === true); }}
                     />
                     <span>{t("analytics.enabled")}</span>
                   </label>
+                  <p id="analytics-disclosure" className="text-xs leading-relaxed text-muted-foreground">{t("analytics.disclosure")}</p>
                   {analyticsSaving ? <p className="text-xs text-muted-foreground" role="status">{t("analytics.saving")}</p> : null}
                   {analyticsSaveFailed ? <p className="text-sm text-destructive" role="alert">{t("analytics.saveFailed")}</p> : null}
                 </FieldGroup>
