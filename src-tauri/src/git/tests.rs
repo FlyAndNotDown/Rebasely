@@ -1764,6 +1764,31 @@ fn submodule_status_lines_are_parsed() {
 
 #[test]
 fn submodules_are_listed_and_updated() {
+    const CHILD_ENV: &str = "REBASELY_SUBMODULE_TEST_CHILD";
+    if std::env::var_os(CHILD_ENV).as_deref() != Some(std::ffi::OsStr::new("1")) {
+        // Set inherited Git configuration before the child starts so parallel
+        // tests cannot observe an incomplete GIT_CONFIG_COUNT/KEY/VALUE tuple.
+        let output = crate::platform::background_command(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "git::tests::submodules_are_listed_and_updated",
+                "--nocapture",
+            ])
+            .env(CHILD_ENV, "1")
+            .env("GIT_CONFIG_COUNT", "1")
+            .env("GIT_CONFIG_KEY_0", "protocol.file.allow")
+            .env("GIT_CONFIG_VALUE_0", "always")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "isolated submodule test failed:\n{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
+
     let (sub_root, sub) = temp_repo();
     commit_file(&sub, &sub_root, "lib.txt", "lib\n", "lib");
     let (root, mut repo) = temp_repo();
@@ -1790,14 +1815,10 @@ fn submodules_are_listed_and_updated() {
 
     run_git_stdout(&root, &["submodule", "deinit", "-q", "--force", "libs/sub"]).unwrap();
     assert_eq!(list_submodules(&repo).unwrap()[0].state, "uninitialized");
-    unsafe {
-        std::env::set_var("GIT_CONFIG_COUNT", "1");
-        std::env::set_var("GIT_CONFIG_KEY_0", "protocol.file.allow");
-        std::env::set_var("GIT_CONFIG_VALUE_0", "always");
-    }
-    let result = update_submodules(&mut repo, &[], |_| {});
-    unsafe { std::env::remove_var("GIT_CONFIG_COUNT") };
-    result.unwrap();
+    // Require a fresh clone so the update exercises inherited file transport
+    // configuration rather than reusing the first checkout's object cache.
+    fs::remove_dir_all(repo.path().join("modules/libs/sub")).unwrap();
+    update_submodules(&mut repo, &[], |_| {}).unwrap();
     assert_eq!(list_submodules(&repo).unwrap()[0].state, "clean");
     assert!(root.join("libs/sub/lib.txt").is_file());
     let _ = fs::remove_dir_all(&root);
