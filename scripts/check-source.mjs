@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
-const extensions = new Set([".rs", ".ts", ".tsx", ".js", ".mjs", ".cjs", ".css", ".html", ".json", ".toml", ".yml", ".yaml", ".svg", ".md", ".lock"]);
+const extensions = new Set([".rs", ".ts", ".tsx", ".js", ".mjs", ".cjs", ".css", ".html", ".json", ".toml", ".yml", ".yaml", ".xml", ".svg", ".md", ".lock"]);
 const directories = ["src", "src-tauri/src", "src-tauri/capabilities", "scripts", ".github", "docs", "site"];
 const ignoredDirectories = new Set(["dist", "dist-ssr", "node_modules"]);
 const files = [];
