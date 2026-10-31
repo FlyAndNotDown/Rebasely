@@ -13,7 +13,9 @@ open an issue first so we can agree on the problem and scope.
    `dev` to `master`.
 
 Use [Conventional Commits](https://www.conventionalcommits.org/), for example
-`fix(diff): preserve the final newline`. Keep code, comments, and copy in English.
+`fix(diff): preserve the final newline`. Keep code, comments, fixtures, and
+development documentation in English. UI translations belong in the designated
+locale JSON resources; localized README files are welcome.
 Preserve the behavior of the underlying command-line tools and keep large
 repositories responsive.
 

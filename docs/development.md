@@ -21,11 +21,6 @@ npm run build
 
 Bundles are written to `src-tauri/target/release/bundle/`.
 
-To build a tagged version, check out its tag and run
-`npm run version:set -- vX.Y.Z` with that tag's version before building. Release
-builds stamp their version in an isolated checkout, so the tag's source version
-can differ from the version embedded in its published bundles.
-
 ## Checks
 
 ```sh
@@ -54,6 +49,7 @@ check on one operating system does not establish support on the others.
 | Path | Responsibility |
 | --- | --- |
 | `src/components/` | Workspace panes, dialogs, and shared UI primitives |
+| `src/i18n/` | Application language selection and UI resources |
 | `src/components/ui/` | Shared controls |
 | `src/components/p4/` | Perforce workspace interface |
 | `src/state/` | Repository sessions, async actions, refreshes, and selection |
@@ -90,3 +86,15 @@ npm run site:preview
 
 `check:site` typechecks, builds, and checks the website assets. Vite writes
 `site/dist/`.
+
+## Localization
+
+The app and website use i18next and react-i18next with English fallback.
+Keep translated text in `src/i18n/locales/` for the application and
+`site/src/locales/` for the website. Reuse existing keys and interpolation for
+dynamic values; keep code, repository fixtures, and developer comments in English.
+
+The website prerenders a language-neutral entry page and separate `/en/` and
+`/zh-CN/` pages. Language pages must work without JavaScript and include matching
+canonical, alternate-language, and structured metadata. Browser preferences only
+select the initial homepage language; explicit locale links stay stable.
