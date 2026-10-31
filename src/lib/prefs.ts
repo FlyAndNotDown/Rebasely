@@ -18,6 +18,7 @@ export const DEFAULT_PANEL_LAYOUTS: PanelLayouts = {
 
 export const defaultPrefs: AppPrefs = {
   language: "system",
+  analyticsEnabled: true,
   httpProxy: { mode: "system", url: "" },
   avatarProvider: "builtin",
   terminalId: "auto",
@@ -192,6 +193,7 @@ function normalizeCharset(value: unknown): string {
 export function normalizePrefs(prefs: Partial<AppPrefs> | null | undefined): AppPrefs {
   return {
     language: normalizeLanguage(prefs?.language),
+    analyticsEnabled: prefs?.analyticsEnabled !== false,
     httpProxy: normalizeHttpProxy(prefs?.httpProxy),
     avatarProvider: prefs?.avatarProvider === "github" || prefs?.avatarProvider === "gitlab" ? prefs.avatarProvider : "builtin",
     terminalId: prefs?.terminalId || "auto",

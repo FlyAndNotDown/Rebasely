@@ -136,6 +136,7 @@ interface P4ContextValue {
 }
 
 const P4Context = createContext<P4ContextValue | null>(null);
+const P4ViewContext = createContext<P4View | null>(null);
 
 export function P4Provider({ children }: { children: ReactNode }) {
   const language = useTranslation().i18n.resolvedLanguage;
@@ -1379,16 +1380,18 @@ export function P4Provider({ children }: { children: ReactNode }) {
 
   return (
     <P4Context.Provider value={value}>
-      {children}
-      <P4ConnectionDialog />
-      <P4WorkspaceDialog />
-      <P4LoginDialog
-        open={loginOpen}
-        client={loginTarget.client}
-        port={loginTarget.port}
-        onCancel={() => finishLogin(null)}
-        onSubmit={(password) => finishLogin(password)}
-      />
+      <P4ViewContext.Provider value={value.view}>
+        {children}
+        <P4ConnectionDialog />
+        <P4WorkspaceDialog />
+        <P4LoginDialog
+          open={loginOpen}
+          client={loginTarget.client}
+          port={loginTarget.port}
+          onCancel={() => finishLogin(null)}
+          onSubmit={(password) => finishLogin(password)}
+        />
+      </P4ViewContext.Provider>
     </P4Context.Provider>
   );
 }
@@ -1397,6 +1400,12 @@ export function useP4() {
   const value = useContext(P4Context);
   if (!value) throw new Error("useP4 must be used within P4Provider");
   return value;
+}
+
+export function useP4View() {
+  const view = useContext(P4ViewContext);
+  if (view === null) throw new Error("useP4View must be used within P4Provider");
+  return view;
 }
 
 function groupPaths(files: { change: string; path: string }[]) {

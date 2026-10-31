@@ -47,8 +47,13 @@ The app supports English and Simplified Chinese, follows your system language
 by default, and lets you choose a language in Settings. The website follows
 your browser language and includes a language switcher. English is the fallback.
 
-Your local files stay on your device. Remote operations connect to the servers
-you configure. Diagnostics are stored locally and are not uploaded automatically.
+Usage analytics is enabled by default. Google Analytics receives a random
+installation ID, coarse app usage and foreground time, and basic device
+information. Repository content, paths, and credentials are excluded. Turn it
+off in **Settings → General → Share usage analytics**.
+
+Diagnostic files stay on your device and are not uploaded automatically.
+Remote repository operations connect to the servers you configure.
 
 ## Build from source
 

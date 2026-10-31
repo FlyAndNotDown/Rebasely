@@ -1,4 +1,11 @@
 {
+  "analytics": {
+    "title": "Usage analytics",
+    "enabled": "Share usage analytics",
+    "saving": "Saving…",
+    "disclosure": "Enabled by default. Google Analytics receives a random installation ID, basic device information and coarse app usage. Repository content, paths and credentials are excluded. You can turn this off at any time.",
+    "saveFailed": "Could not save your choice. Analytics remains off for this session."
+  },
   "validation": {
     "proxy": {
       "validUrl": "Enter a valid proxy URL.",
@@ -338,7 +345,7 @@
       "manual_proxy": "Manual proxy",
       "could_not_save_the_proxy_your_entries_are": "Could not save the proxy. Your entries are preserved; try again.",
       "client_network": "Client network",
-      "applies_to_application_http_requests_git_and_perforce": "Applies to application HTTP requests. Git and Perforce use their own settings. System uses static HTTP/HTTPS proxies; for PAC or SOCKS-only configurations, choose Manual.",
+      "applies_to_application_http_requests_git_and_perforce": "Applies to built-in HTTP requests such as update checks and avatars. Git and Perforce use their own settings. Usage analytics runs in an isolated webview and follows operating system and webview network settings. System mode uses static HTTP/HTTPS proxies; for PAC or SOCKS-only configurations, choose Manual.",
       "about_client_network_settings": "About client network settings",
       "proxy": "Proxy",
       "proxy_url": "Proxy URL",
