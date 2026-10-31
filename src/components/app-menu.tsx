@@ -1,8 +1,8 @@
 import { useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { ClockIcon, DownloadIcon, FolderOpenIcon, InfoIcon, LogOutIcon, MenuIcon, SettingsIcon } from "lucide-react";
+import { ClockIcon, DownloadIcon, FolderOpenIcon, InfoIcon, LogOutIcon, MenuIcon, PlusIcon, SettingsIcon } from "lucide-react";
 import { AboutDialog } from "@/components/about-dialog";
-import { CloneRepositoryDialog } from "@/components/lazy-dialogs";
+import { CloneRepositoryDialog, InitializeRepositoryDialog } from "@/components/lazy-dialogs";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -30,6 +30,7 @@ export function AppMenu() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [tooltipOpen, setTooltipOpen] = useState(false);
   const [cloneOpen, setCloneOpen] = useState(false);
+  const [initializeOpen, setInitializeOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
   const hovering = useRef(false);
   const menuOpenRef = useRef(false);
@@ -118,6 +119,7 @@ export function AppMenu() {
             <DownloadIcon />
             Open remote repository
           </DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => setInitializeOpen(true)}><PlusIcon />Create Git repository</DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={() => setOpenPanel("settings")}>
             <SettingsIcon />
@@ -135,6 +137,7 @@ export function AppMenu() {
         </DropdownMenuContent>
       </DropdownMenu>
       <CloneRepositoryDialog open={cloneOpen} onOpenChange={setCloneOpen} />
+      <InitializeRepositoryDialog open={initializeOpen} onOpenChange={setInitializeOpen} />
       <AboutDialog open={aboutOpen} onOpenChange={setAboutOpen} />
     </div>
   );

@@ -7,6 +7,7 @@ import {
   CopyIcon,
   DownloadIcon,
   FolderGit2Icon,
+  InfoIcon,
   LinkIcon,
   PlusIcon,
   RefreshCwIcon,
@@ -35,6 +36,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { errorMessage, gitApi } from "@/lib/git";
+import { createExclusiveAction } from "@/lib/async-scope";
+import { pathsIgnoreCase } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useGitPick } from "@/state/git-context";
 import type { SubmoduleInfo, WorktreeInfo } from "@/types/git";
@@ -46,7 +49,7 @@ const STATE_LABEL: Record<string, string> = {
 };
 
 function joinPath(root: string, relative: string) {
-  return `${root.replace(/[\\/]+$/, "")}/${relative}`;
+  return `${root.replace(pathsIgnoreCase() ? /[\\/]+$/ : /\/+$/, "")}/${relative}`;
 }
 
 /** Submodule and worktree sections for the branches sidebar. */
@@ -59,6 +62,7 @@ export function RepoStructure({ onReady }: { onReady?: (repoPath: string) => voi
     "endActivity",
   ]);
   const repoPath = snapshot?.repo.path ?? "";
+  const canAddWorktree = Boolean(snapshot?.repo.headId) || Boolean(snapshot?.branches.local.some((branch) => !branch.isHead));
   const [submodules, setSubmodules] = useState<SubmoduleInfo[]>([]);
   const [worktrees, setWorktrees] = useState<WorktreeInfo[]>([]);
   const [reload, setReload] = useState(0);
@@ -66,22 +70,24 @@ export function RepoStructure({ onReady }: { onReady?: (repoPath: string) => voi
   const [adding, setAdding] = useState(false);
   const [removing, setRemoving] = useState<WorktreeInfo | null>(null);
   const [loadedFor, setLoadedFor] = useState("");
+  const [errors, setErrors] = useState<{ submodules: string | null; worktrees: string | null }>({ submodules: null, worktrees: null });
+  const [busy, setBusy] = useState(false);
+  const [mutation] = useState(createExclusiveAction);
   const structureReady = loadedFor === repoPath && repoPath !== "";
 
   // Any repository change can move a submodule or a worktree's branch.
   useEffect(() => {
     if (!repoPath) return;
     let live = true;
-    void Promise.all([gitApi.listSubmodules(repoPath), gitApi.listWorktrees(repoPath)])
+    void Promise.allSettled([gitApi.listSubmodules(repoPath), gitApi.listWorktrees(repoPath)])
       .then(([modules, trees]) => {
         if (!live) return;
-        setSubmodules(modules);
-        setWorktrees(trees);
-        setLoadedFor(repoPath);
-        onReady?.(repoPath);
-      })
-      .catch(() => {
-        if (!live) return;
+        if (modules.status === "fulfilled") setSubmodules(modules.value);
+        if (trees.status === "fulfilled") setWorktrees(trees.value);
+        setErrors({
+          submodules: modules.status === "rejected" ? errorMessage(modules.reason) : null,
+          worktrees: trees.status === "rejected" ? errorMessage(trees.reason) : null,
+        });
         setLoadedFor(repoPath);
         onReady?.(repoPath);
       });
@@ -99,32 +105,52 @@ export function RepoStructure({ onReady }: { onReady?: (repoPath: string) => voi
     }
   }
 
+  async function update(paths: string[]) {
+    await mutation.run(async () => {
+      setBusy(true);
+      try { await updateSubmodules(paths); }
+      finally { setBusy(false); }
+    });
+  }
+
   async function prune() {
-    try {
-      await gitApi.pruneWorktrees(repoPath);
-      setReload((value) => value + 1);
-      toast.success("Pruned missing worktrees");
-    } catch (error) {
-      toast.error(errorMessage(error));
-    }
+    await mutation.run(async () => {
+      setBusy(true);
+      const activity = beginActivity("Pruning worktrees");
+      try {
+        await gitApi.pruneWorktrees(repoPath);
+        setReload((value) => value + 1);
+        toast.success("Pruned missing worktrees");
+      } catch (error) {
+        toast.error(errorMessage(error));
+      } finally {
+        endActivity(activity);
+        setBusy(false);
+      }
+    });
   }
 
   async function remove(tree: WorktreeInfo, force: boolean) {
-    const activity = beginActivity("Removing worktree", tree.path);
-    try {
-      await gitApi.removeWorktree(repoPath, tree.path, force);
-      setReload((value) => value + 1);
-      toast.success("Removed worktree");
-    } catch (error) {
-      toast.error(errorMessage(error));
-    } finally {
-      endActivity(activity);
-    }
+    let removed = false;
+    await mutation.run(async () => {
+      setBusy(true);
+      const activity = beginActivity("Removing worktree", tree.path);
+      try {
+        await gitApi.removeWorktree(repoPath, tree.path, force);
+        setReload((value) => value + 1);
+        toast.success("Removed worktree");
+        removed = true;
+      } finally {
+        endActivity(activity);
+        setBusy(false);
+      }
+    });
+    return removed;
   }
 
   return (
     <>
-      {structureReady && submodules.length > 0 ? (
+      {structureReady && (submodules.length > 0 || errors.submodules) ? (
         <section>
           <SectionHeader
             label="Submodules"
@@ -138,14 +164,16 @@ export function RepoStructure({ onReady }: { onReady?: (repoPath: string) => voi
                   aria-label="Update all submodules"
                   type="button"
                   className="flex size-6 shrink-0 items-center justify-center rounded-sm hover:bg-muted hover:text-foreground"
-                  onClick={() => void updateSubmodules([])}
+                  disabled={busy}
+                  onClick={() => void update([])}
                 >
                   <RefreshCwIcon className="size-3.5" />
                 </Button>
               </HoverTip>
             }
           />
-          {openSections.submodules
+          {errors.submodules ? <StructureError message={errors.submodules} busy={busy} onRetry={() => setReload((value) => value + 1)} /> : null}
+          {openSections.submodules && !errors.submodules
             ? submodules.map((module) => (
                 <ContextMenu key={module.path}>
                   <HoverTip label={module.url ?? module.path}>
@@ -183,7 +211,7 @@ export function RepoStructure({ onReady }: { onReady?: (repoPath: string) => voi
                         Open in a new tab
                       </ContextMenuItem>
                     ) : null}
-                    <ContextMenuItem onClick={() => void updateSubmodules([module.path])}>
+                    <ContextMenuItem disabled={busy} onClick={() => void update([module.path])}>
                       {module.state === "uninitialized" ? <DownloadIcon /> : <RefreshCwIcon />}
                       {module.state === "uninitialized" ? "Check out" : "Update to recorded commit"}
                     </ContextMenuItem>
@@ -214,34 +242,42 @@ export function RepoStructure({ onReady }: { onReady?: (repoPath: string) => voi
                 open={openSections.worktrees}
                 onToggle={() => setOpenSections((current) => ({ ...current, worktrees: !current.worktrees }))}
                 action={
-                  <HoverTip label="New worktree">
-                    <Button
-                      variant="ghost"
-                      size="icon-xs"
-                      aria-label="New worktree"
-                      type="button"
-                      className="flex size-6 shrink-0 items-center justify-center rounded-sm hover:bg-muted hover:text-foreground"
-                      onClick={() => setAdding(true)}
-                    >
-                      <PlusIcon className="size-3.5" />
-                    </Button>
+                  <HoverTip label={canAddWorktree ? "New worktree" : "Create a commit first"}>
+                    <span className="inline-flex shrink-0" tabIndex={canAddWorktree ? undefined : 0}>
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        aria-label="New worktree"
+                        type="button"
+                        className="flex size-6 shrink-0 items-center justify-center rounded-sm hover:bg-muted hover:text-foreground"
+                        disabled={busy || !canAddWorktree}
+                        onClick={() => setAdding(true)}
+                      >
+                        <PlusIcon className="size-3.5" />
+                      </Button>
+                    </span>
                   </HoverTip>
                 }
               />
             </div>
           </ContextMenuTrigger>
           <ContextMenuContent className="w-44">
-            <ContextMenuItem onClick={() => setAdding(true)}>
-              <PlusIcon />
-              New worktree…
-            </ContextMenuItem>
-            <ContextMenuItem onClick={() => void prune()}>
+            <HoverTip label={canAddWorktree ? undefined : "Create a commit first"}>
+              <span className="block">
+                <ContextMenuItem disabled={busy || !canAddWorktree} aria-description={canAddWorktree ? undefined : "Create a commit first"} onClick={() => setAdding(true)}>
+                  <PlusIcon />
+                  New worktree…
+                </ContextMenuItem>
+              </span>
+            </HoverTip>
+            <ContextMenuItem disabled={busy} onClick={() => void prune()}>
               <ScissorsIcon />
               Prune missing
             </ContextMenuItem>
           </ContextMenuContent>
         </ContextMenu>
-        {openSections.worktrees
+        {errors.worktrees ? <StructureError message={errors.worktrees} busy={busy} onRetry={() => setReload((value) => value + 1)} /> : null}
+        {openSections.worktrees && !errors.worktrees
           ? worktrees.map((tree) => (
               <ContextMenu key={tree.path}>
                 <HoverTip label={tree.path}>
@@ -278,7 +314,7 @@ export function RepoStructure({ onReady }: { onReady?: (repoPath: string) => voi
                   {!tree.main && !tree.current ? (
                     <>
                       <ContextMenuSeparator />
-                      <ContextMenuItem variant="destructive" onClick={() => setRemoving(tree)}>
+                      <ContextMenuItem disabled={busy} variant="destructive" onClick={() => setRemoving(tree)}>
                         <Trash2Icon />
                         Remove…
                       </ContextMenuItem>
@@ -301,10 +337,14 @@ export function RepoStructure({ onReady }: { onReady?: (repoPath: string) => voi
       <RemoveWorktreeDialog
         tree={removing}
         onClose={() => setRemoving(null)}
-        onRemove={(tree, force) => void remove(tree, force)}
+        onRemove={remove}
       />
     </>
   );
+}
+
+function StructureError({ message, busy, onRetry }: { message: string; busy: boolean; onRetry: () => void }) {
+  return <div role="alert" className="grid gap-1 px-3 py-2 text-xs text-destructive"><p className="break-words">{message}</p><Button variant="outline" size="xs" className="w-fit" disabled={busy} onClick={onRetry}>Retry</Button></div>;
 }
 
 function SectionHeader({
@@ -338,16 +378,17 @@ function AddWorktreeDialog({
   onOpenChange: (open: boolean) => void;
   onCreated: (path: string) => void;
 }) {
+  const [mutation] = useState(createExclusiveAction);
   return (
-    <Dialog open={isOpen} onOpenChange={onOpenChange}>
+    <Dialog open={isOpen} onOpenChange={(next) => { if (!mutation.busy) onOpenChange(next); }}>
       <DialogContent className="sm:max-w-md">
-        {isOpen ? <AddWorktreeForm onClose={() => onOpenChange(false)} onCreated={onCreated} /> : null}
+        {isOpen ? <AddWorktreeForm mutation={mutation} onClose={() => onOpenChange(false)} onCreated={onCreated} /> : null}
       </DialogContent>
     </Dialog>
   );
 }
 
-function AddWorktreeForm({ onClose, onCreated }: { onClose: () => void; onCreated: (path: string) => void }) {
+function AddWorktreeForm({ mutation, onClose, onCreated }: { mutation: ReturnType<typeof createExclusiveAction>; onClose: () => void; onCreated: (path: string) => void }) {
   const { snapshot } = useGitPick(["snapshot"]);
   const repoPath = snapshot?.repo.path ?? "";
   const branches = (snapshot?.branches.local ?? []).filter((branch) => !branch.isHead);
@@ -356,7 +397,9 @@ function AddWorktreeForm({ onClose, onCreated }: { onClose: () => void; onCreate
   const [branch, setBranch] = useState(branches[0]?.name ?? "");
   const [newBranch, setNewBranch] = useState("");
   const [saving, setSaving] = useState(false);
-  const canSave = Boolean(folder.trim()) && (mode === "existing" ? Boolean(branch) : Boolean(newBranch.trim())) && !saving;
+  const [error, setError] = useState<string | null>(null);
+  const hasHead = Boolean(snapshot?.repo.headId);
+  const canSave = Boolean(folder.trim()) && (mode === "existing" ? Boolean(branch) : hasHead && Boolean(newBranch.trim())) && !saving;
 
   async function browse() {
     const picked = await open({ directory: true, multiple: false, title: "Folder for the new worktree" });
@@ -365,19 +408,22 @@ function AddWorktreeForm({ onClose, onCreated }: { onClose: () => void; onCreate
 
   async function submit() {
     if (!canSave) return;
-    setSaving(true);
-    try {
-      const path = await gitApi.addWorktree(repoPath, folder.trim(), {
-        branch: mode === "existing" ? branch : undefined,
-        newBranch: mode === "new" ? newBranch.trim() : undefined,
-      });
-      onCreated(path);
-      onClose();
-    } catch (error) {
-      toast.error(errorMessage(error));
-    } finally {
-      setSaving(false);
-    }
+    await mutation.run(async () => {
+      setSaving(true);
+      setError(null);
+      try {
+        const path = await gitApi.addWorktree(repoPath, folder, {
+          branch: mode === "existing" ? branch : undefined,
+          newBranch: mode === "new" ? newBranch.trim() : undefined,
+        });
+        onCreated(path);
+        onClose();
+      } catch (error) {
+        setError(errorMessage(error));
+      } finally {
+        setSaving(false);
+      }
+    });
   }
 
   return (
@@ -399,11 +445,12 @@ function AddWorktreeForm({ onClose, onCreated }: { onClose: () => void; onCreate
           <div className="flex gap-2">
             <Input
               id="worktree-folder"
+              disabled={saving}
               className="font-mono"
               value={folder}
               onChange={(event) => setFolder(event.target.value)}
             />
-            <Button type="button" variant="outline" onClick={() => void browse()}>
+            <Button type="button" variant="outline" disabled={saving} onClick={() => void browse()}>
               Browse
             </Button>
           </div>
@@ -411,22 +458,26 @@ function AddWorktreeForm({ onClose, onCreated }: { onClose: () => void; onCreate
         <div className="grid gap-2">
           <div className="flex gap-1 rounded-md bg-muted p-0.5">
             {(["existing", "new"] as const).map((item) => (
-              <Button
-                key={item}
-                type="button"
-                size="xs"
-                className="flex-1"
-                variant={mode === item ? "secondary" : "ghost"}
-                disabled={item === "existing" && branches.length === 0}
-                onClick={() => setMode(item)}
-              >
-                {item === "existing" ? "Existing branch" : "New branch"}
-              </Button>
+              <HoverTip key={item} label={item === "new" && !hasHead ? "Create a commit first" : undefined}>
+                <span className="flex flex-1" tabIndex={item === "new" && !hasHead ? 0 : undefined}>
+                  <Button
+                    type="button"
+                    size="xs"
+                    className="flex-1"
+                    variant={mode === item ? "secondary" : "ghost"}
+                    disabled={saving || (item === "existing" ? branches.length === 0 : !hasHead)}
+                    onClick={() => setMode(item)}
+                  >
+                    {item === "existing" ? "Existing branch" : "New branch"}
+                  </Button>
+                </span>
+              </HoverTip>
             ))}
           </div>
           {mode === "existing" ? (
             <select
               aria-label="Branch"
+              disabled={saving}
               className="h-8 rounded-md border bg-transparent px-2 font-mono text-sm"
               value={branch}
               onChange={(event) => setBranch(event.target.value)}
@@ -440,6 +491,7 @@ function AddWorktreeForm({ onClose, onCreated }: { onClose: () => void; onCreate
           ) : (
             <Input
               aria-label="New branch name"
+              disabled={saving}
               className="font-mono"
               placeholder="feature/name"
               value={newBranch}
@@ -451,12 +503,13 @@ function AddWorktreeForm({ onClose, onCreated }: { onClose: () => void; onCreate
           ) : null}
         </div>
       </div>
+      {error ? <p role="alert" className="mt-3 break-words text-xs text-destructive">{error}</p> : null}
       <DialogFooter className="mt-4">
-        <Button type="button" variant="outline" onClick={onClose}>
+        <Button type="button" variant="outline" disabled={saving} onClick={onClose}>
           Cancel
         </Button>
         <Button type="submit" disabled={!canSave}>
-          Create
+          {saving ? "Creating…" : "Create"}
         </Button>
       </DialogFooter>
     </form>
@@ -470,17 +523,38 @@ function RemoveWorktreeDialog({
 }: {
   tree: WorktreeInfo | null;
   onClose: () => void;
-  onRemove: (tree: WorktreeInfo, force: boolean) => void;
+  onRemove: (tree: WorktreeInfo, force: boolean) => Promise<boolean>;
 }) {
   const [force, setForce] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [mutation] = useState(createExclusiveAction);
+  function close() {
+    if (mutation.busy) return;
+    setForce(false);
+    setError(null);
+    onClose();
+  }
+  async function submit() {
+    if (!tree) return;
+    await mutation.run(async () => {
+      setSaving(true);
+      setError(null);
+      try {
+        if (await onRemove(tree, force)) {
+          setForce(false);
+          onClose();
+        }
+      } catch (error) {
+        setError(errorMessage(error));
+      } finally { setSaving(false); }
+    });
+  }
   return (
     <Dialog
       open={tree !== null}
       onOpenChange={(next) => {
-        if (!next) {
-          setForce(false);
-          onClose();
-        }
+        if (!next) close();
       }}
     >
       <DialogContent>
@@ -491,23 +565,26 @@ function RemoveWorktreeDialog({
             {tree?.branch ? ` ${tree.branch}` : ""} stays in this repository.
           </DialogDescription>
         </DialogHeader>
-        <label className="flex items-center gap-2 text-sm">
-          <Checkbox checked={force} onCheckedChange={(checked) => setForce(checked === true)} />
-          Remove even with uncommitted changes
-        </label>
+        <div className="flex items-center gap-1">
+          <label className="flex items-center gap-2 text-sm">
+            <Checkbox checked={force} disabled={saving} onCheckedChange={(checked) => setForce(checked === true)} />
+            Force removal
+          </label>
+          <HoverTip label="Deletes uncommitted files and checked-out submodules in this worktree. Required when the worktree contains submodules.">
+            <Button variant="ghost" size="icon-xs" aria-label="About force removal"><InfoIcon /></Button>
+          </HoverTip>
+        </div>
+        {error ? <p role="alert" className="break-words text-xs text-destructive">{error}</p> : null}
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>
+          <Button variant="outline" disabled={saving} onClick={close}>
             Cancel
           </Button>
           <Button
             variant="destructive"
-            onClick={() => {
-              if (tree) onRemove(tree, force);
-              setForce(false);
-              onClose();
-            }}
+            disabled={saving}
+            onClick={() => void submit()}
           >
-            Remove
+            {saving ? "Removing…" : "Remove"}
           </Button>
         </DialogFooter>
       </DialogContent>

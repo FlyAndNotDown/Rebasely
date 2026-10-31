@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { ChevronDownIcon, FolderOpenIcon, Loader2Icon } from "lucide-react";
 import { toast } from "sonner";
+import { ActivityBar } from "@/components/activity-meter";
 import { Button } from "@/components/ui/button";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { HoverTip } from "@/components/ui/tooltip";
@@ -22,10 +23,11 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { errorMessage } from "@/lib/git";
+import { errorMessage, gitApi } from "@/lib/git";
+import { createExclusiveAction, createLatestRequest } from "@/lib/async-scope";
 import { P4_LOGIN, p4Api } from "@/lib/p4";
 import type { P4Auth, P4ClientOption, P4DepotEntry, P4StreamOption } from "@/types/p4";
-import { useGitPick } from "@/state/git-context";
+import { useActivities, useGitPick } from "@/state/git-context";
 
 function repoNameFromUrl(url: string) {
   const trimmed = url.trim().replace(/[\\/]+$/, "");
@@ -66,9 +68,9 @@ export function CloneRepositoryDialog({
         onOpenChange(next);
       }}
     >
-      <DialogContent className="sm:max-w-xl">
+      <DialogContent className="sm:max-w-xl" showCloseButton={!cloning}>
         {/* The form unmounts when the dialog closes, so every open starts empty. */}
-        <CloneForm cloning={cloning} setCloning={setCloning} onOpenChange={onOpenChange} />
+        {isOpen ? <CloneForm cloning={cloning} setCloning={setCloning} onOpenChange={onOpenChange} /> : null}
       </DialogContent>
     </Dialog>
   );
@@ -120,6 +122,9 @@ function GitCloneForm({
   const [parent, setParent] = useState("");
   const [folder, setFolder] = useState("");
   const [folderEdited, setFolderEdited] = useState(false);
+  const [mutation] = useState(createExclusiveAction);
+  const [activityId, setActivityId] = useState<string | null>(null);
+  const [incomplete, setIncomplete] = useState(false);
 
   const folderOk = isFolderName(folder);
   const destination = parent && folderOk ? joinPath(parent, folder) : "";
@@ -141,10 +146,19 @@ function GitCloneForm({
 
   async function submit() {
     if (!canClone) return;
-    setCloning(true);
-    const ok = await cloneRepository(url.trim(), destination);
-    setCloning(false);
-    if (ok) onOpenChange(false);
+    await mutation.run(async () => {
+      setActivityId(null);
+      setIncomplete(false);
+      setCloning(true);
+      try {
+        const ok = await cloneRepository(url.trim(), destination, setActivityId);
+        if (ok) onOpenChange(false);
+        else setIncomplete(true);
+      } finally {
+        setActivityId(null);
+        setCloning(false);
+      }
+    });
   }
 
   return (
@@ -221,16 +235,92 @@ function GitCloneForm({
           ) : null}
         </div>
       </div>
+      <GitCloneActivity activityId={activityId} cloning={cloning} canClone={canClone} incomplete={incomplete} onClose={() => onOpenChange(false)} />
+    </form>
+  );
+}
+
+function GitCloneActivity({ activityId, cloning, canClone, incomplete, onClose }: {
+  activityId: string | null;
+  cloning: boolean;
+  canClone: boolean;
+  incomplete: boolean;
+  onClose: () => void;
+}) {
+  const activity = useActivities().find((item) => item.id === activityId);
+  const latest = useRef(activity);
+  const liveId = useRef(activityId);
+  const cancellingRequest = useRef<string | null>(null);
+  const [snapshot, setSnapshot] = useState(activity);
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
+  const [cancelError, setCancelError] = useState<{ id: string; message: string } | null>(null);
+  const cancelling = cloning && activityId !== null && cancellingId === activityId;
+  const shown = activity ? snapshot?.id === activityId ? snapshot : activity : undefined;
+  const progress = shown?.progress === undefined || !Number.isFinite(shown.progress)
+    ? undefined
+    : Math.max(0, Math.min(100, Math.round(shown.progress)));
+
+  useLayoutEffect(() => { latest.current = activity; }, [activity]);
+  useLayoutEffect(() => {
+    liveId.current = activityId;
+    cancellingRequest.current = null;
+    return () => { liveId.current = null; };
+  }, [activityId]);
+  useEffect(() => {
+    if (!cloning) return;
+    const timer = window.setInterval(() => {
+      setSnapshot((current) => current === latest.current ? current : latest.current);
+    }, 150);
+    return () => window.clearInterval(timer);
+  }, [cloning]);
+
+  async function cancel() {
+    if (!cloning || !activityId || !activity?.cancellable || cancellingRequest.current === activityId) return;
+    const id = activityId;
+    cancellingRequest.current = id;
+    setCancellingId(id);
+    setCancelError(null);
+    let accepted = false;
+    try {
+      accepted = await gitApi.cancelActivity(id);
+      if (liveId.current !== id) return;
+      if (!accepted) {
+        setCancellingId(null);
+        setCancelError({ id, message: "Cancellation is not available yet. Try again shortly." });
+      }
+    } catch {
+      if (liveId.current === id) {
+        setCancellingId(null);
+        setCancelError({ id, message: "Could not cancel cloning. Try again." });
+      }
+    } finally {
+      if (!accepted && cancellingRequest.current === id) cancellingRequest.current = null;
+    }
+  }
+
+  return (
+    <>
+      {cloning ? (
+        <div className="mt-4 grid gap-2 rounded-lg border p-3">
+          <div className="flex items-center justify-between gap-3 text-xs">
+            <p role="status">{cancelling ? "Cancelling clone…" : activity ? "Cloning repository…" : activityId ? "Opening repository…" : "Preparing clone…"}</p>
+            {progress !== undefined && !cancelling ? <span className="shrink-0 tabular-nums text-muted-foreground">{progress}%</span> : null}
+          </div>
+          {shown ? <div role="progressbar" aria-label="Clone progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress}><ActivityBar activity={{ ...shown, progress }} /></div> : null}
+          {shown?.detail ? <p className="truncate font-mono text-[11px] text-muted-foreground">{shown.detail}</p> : null}
+          {activity && cancelError?.id === activityId ? <p role="alert" className="text-xs text-destructive">{cancelError.message}</p> : null}
+        </div>
+      ) : incomplete ? <p role="status" className="mt-4 text-xs text-muted-foreground">Clone did not complete. Check the details and retry.</p> : null}
       <DialogFooter className="mt-4">
-        <Button type="button" variant="outline" disabled={cloning} onClick={() => onOpenChange(false)}>
-          Cancel
+        <Button type="button" variant="outline" disabled={cloning && (!activity?.cancellable || cancelling)} onClick={() => { if (cloning) void cancel(); else onClose(); }}>
+          {cancelling ? "Cancelling…" : cloning ? "Cancel clone" : "Cancel"}
         </Button>
         <Button type="submit" disabled={!canClone}>
-          {cloning ? <Loader2Icon className="animate-spin" /> : null}
+          {cloning ? <Loader2Icon className="animate-spin motion-reduce:animate-none" /> : null}
           Clone
         </Button>
       </DialogFooter>
-    </form>
+    </>
   );
 }
 
@@ -258,13 +348,20 @@ function P4CloneForm({
   const [clients, setClients] = useState<P4ClientOption[] | null>(null);
   const [client, setClient] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
-  const [streams, setStreams] = useState<P4StreamOption[] | null>(null);
+  const mounted = useRef(false);
+  const latestPrefs = useRef(prefs);
+  const [connectionCheck] = useState(createExclusiveAction);
+  const [mutation] = useState(createExclusiveAction);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+  useEffect(() => { latestPrefs.current = prefs; }, [prefs]);
 
   function forgetCheck() {
     setServer("");
     setClients(null);
     setClient("");
-    setStreams(null);
   }
 
   function auth(): P4Auth {
@@ -274,49 +371,47 @@ function P4CloneForm({
   const selected = clients?.find((item) => item.name === client) ?? null;
 
   async function check() {
-    if (!port.trim() || !user.trim() || checking) return;
-    setChecking(true);
-    forgetCheck();
-    try {
-      const checked = await p4Api.checkConnection(auth());
-      setServer(checked.server);
-      setClients(checked.clients);
-      void updatePrefs({ ...prefs, p4Port: port.trim(), p4User: user.trim() });
-    } catch (error) {
-      const message = errorMessage(error);
-      toast.error(message === P4_LOGIN ? "Enter the password for this user and try again." : message);
-    } finally {
-      setChecking(false);
-    }
+    if (!port.trim() || !user.trim()) return;
+    await connectionCheck.run(async () => {
+      setChecking(true);
+      forgetCheck();
+      const credentials = auth();
+      try {
+        const checked = await p4Api.checkConnection(credentials);
+        if (!mounted.current) return;
+        setServer(checked.server);
+        setClients(checked.clients);
+        await updatePrefs({ ...latestPrefs.current, p4Port: credentials.port, p4User: credentials.user });
+      } catch (error) {
+        if (!mounted.current) return;
+        const message = errorMessage(error);
+        toast.error(message === P4_LOGIN ? "Enter the password for this user and try again." : message);
+      } finally {
+        if (mounted.current) setChecking(false);
+      }
+    });
   }
 
   async function openClient() {
-    if (!selected || cloning) return;
-    setCloning(true);
-    const id = beginActivity("Opening workspace", selected.name);
-    try {
-      const root = await p4Api.prepareClient(auth(), selected.name);
-      await openPath(root, "perforce");
-      onOpenChange(false);
-    } catch (error) {
-      const message = errorMessage(error);
-      toast.error(message === P4_LOGIN ? "Enter the password for this user and try again." : message);
-    } finally {
-      endActivity(id);
-      setCloning(false);
-    }
+    if (!selected || checking) return;
+    await mutation.run(async () => {
+      setCloning(true);
+      const id = beginActivity("Opening workspace", selected.name);
+      try {
+        const root = await p4Api.prepareClient(auth(), selected.name);
+        await openPath(root, "perforce");
+        onOpenChange(false);
+      } catch (error) {
+        const message = errorMessage(error);
+        toast.error(message === P4_LOGIN ? "Enter the password for this user and try again." : message);
+      } finally {
+        endActivity(id);
+        setCloning(false);
+      }
+    });
   }
 
-  async function startCreate() {
-    setCreateOpen(true);
-    if (streams) return;
-    try {
-      setStreams(await p4Api.listStreams(auth()));
-    } catch (error) {
-      setStreams([]);
-      toast.error(errorMessage(error));
-    }
-  }
+  function startCreate() { setCreateOpen(true); }
 
   return (
     <>
@@ -428,54 +523,48 @@ function P4CloneForm({
       <CreateClientDialog
         open={createOpen}
         auth={auth()}
-        streams={streams}
         cloning={cloning}
         onOpenChange={setCreateOpen}
         onCreate={async (request) => {
-          setCloning(true);
-          const id = beginActivity("Creating workspace", request.client);
-          try {
-            const connection = await p4Api.createWorkspace(request, id);
-            await openPath(connection.root, "perforce");
-            setCreateOpen(false);
-            onOpenChange(false);
-          } catch (error) {
-            const message = errorMessage(error);
-            toast.error(message === P4_LOGIN ? "Enter the password for this user and try again." : message);
-          } finally {
-            endActivity(id);
-            setCloning(false);
-          }
+          await mutation.run(async () => {
+            setCloning(true);
+            const id = beginActivity("Creating workspace", request.client);
+            try {
+              const connection = await p4Api.createWorkspace(request, id);
+              await openPath(connection.root, "perforce");
+              setCreateOpen(false);
+              onOpenChange(false);
+            } catch (error) {
+              const message = errorMessage(error);
+              toast.error(message === P4_LOGIN ? "Enter the password for this user and try again." : message);
+            } finally {
+              endActivity(id);
+              setCloning(false);
+            }
+          });
         }}
       />
     </>
   );
 }
 
-function CreateClientDialog({
-  open: isOpen,
-  auth,
-  streams,
-  cloning,
-  onOpenChange,
-  onCreate,
-}: {
+interface CreateClientDialogProps {
   open: boolean;
   auth: P4Auth;
-  streams: P4StreamOption[] | null;
   cloning: boolean;
   onOpenChange: (open: boolean) => void;
-  onCreate: (request: {
-    port: string;
-    user: string;
-    password: string;
-    client: string;
-    root: string;
-    stream: string;
-    depotPath: string;
-    charset: string;
-  }) => Promise<void>;
-}) {
+  onCreate: (request: { port: string; user: string; password: string; client: string; root: string; stream: string; depotPath: string; charset: string }) => Promise<void>;
+}
+
+function CreateClientDialog(props: CreateClientDialogProps) {
+  return <Dialog open={props.open} onOpenChange={(next) => !props.cloning && props.onOpenChange(next)}>
+    <DialogContent className="sm:max-w-lg">
+      {props.open ? <CreateClientForm {...props} /> : null}
+    </DialogContent>
+  </Dialog>;
+}
+
+function CreateClientForm({ auth, cloning, onOpenChange, onCreate }: CreateClientDialogProps) {
   const [client, setClient] = useState("");
   const [mapping, setMapping] = useState<"stream" | "depot">("stream");
   const [stream, setStream] = useState("");
@@ -483,6 +572,18 @@ function CreateClientDialog({
   const [depotPath, setDepotPath] = useState("");
   const [depotOpen, setDepotOpen] = useState(false);
   const [root, setRoot] = useState("");
+  const [retry, setRetry] = useState(0);
+  const [request] = useState(createLatestRequest);
+  const { port, user, password, charset } = auth;
+  const scope = useMemo(() => ({ auth: { port, user, password, charset }, retry }), [port, user, password, charset, retry]);
+  const [streamResult, setStreamResult] = useState<{ scope: typeof scope; streams: P4StreamOption[] | null; error: string | null } | null>(null);
+  useEffect(() => {
+    return request.run(() => p4Api.listStreams(scope.auth),
+      (streams) => setStreamResult({ scope, streams, error: null }),
+      (error) => setStreamResult({ scope, streams: null, error: errorMessage(error) }));
+  }, [request, scope]);
+  const currentStreams = streamResult?.scope === scope ? streamResult : null;
+  const streams = currentStreams?.streams ?? null;
   const target = mapping === "stream" ? stream.trim() : depotPath.trim();
   const canCreate = isClientName(client) && isDepotPath(target) && isAbsolutePath(root) && !cloning;
   const visibleStreams = (streams ?? [])
@@ -495,8 +596,7 @@ function CreateClientDialog({
   }
 
   return (
-    <Dialog open={isOpen} onOpenChange={(next) => !cloning && onOpenChange(next)}>
-      <DialogContent className="sm:max-w-lg">
+    <>
         <DialogHeader>
           <DialogTitle>Create client</DialogTitle>
           <DialogDescription>Creates a client, syncs it, and opens the workspace.</DialogDescription>
@@ -535,8 +635,10 @@ function CreateClientDialog({
                   placeholder={streams ? "Filter streams" : "Loading streams"}
                 />
                 <div className="max-h-40 overflow-auto rounded-md border">
-                  {streams === null ? (
-                    <p className="px-3 py-2 text-xs text-muted-foreground">Loading streams</p>
+                  {currentStreams?.error ? (
+                    <div role="alert" className="grid gap-2 px-3 py-2 text-xs text-destructive"><p className="break-words">{currentStreams.error}</p><Button variant="outline" size="xs" className="w-fit" onClick={() => setRetry((value) => value + 1)}>Retry</Button></div>
+                  ) : streams === null ? (
+                    <p role="status" className="px-3 py-2 text-xs text-muted-foreground">Loading streams…</p>
                   ) : visibleStreams.length === 0 ? (
                     <p className="px-3 py-2 text-xs text-muted-foreground">No matching streams</p>
                   ) : (
@@ -608,84 +710,64 @@ function CreateClientDialog({
             setDepotOpen(false);
           }}
         />
-      </DialogContent>
-    </Dialog>
+    </>
   );
 }
 
-function DepotPicker({
-  open: isOpen,
-  auth,
-  onOpenChange,
-  onPick,
-}: {
+function DepotPicker({ open: isOpen, auth, onOpenChange, onPick }: {
   open: boolean;
   auth: P4Auth;
   onOpenChange: (open: boolean) => void;
   onPick: (path: string) => void;
 }) {
+  return <Dialog open={isOpen} onOpenChange={onOpenChange}>
+    <DialogContent className="sm:max-w-md">
+      {isOpen ? <DepotPickerForm auth={auth} onClose={() => onOpenChange(false)} onPick={onPick} /> : null}
+    </DialogContent>
+  </Dialog>;
+}
+
+function DepotPickerForm({ auth, onClose, onPick }: {
+  auth: P4Auth;
+  onClose: () => void;
+  onPick: (path: string) => void;
+}) {
   const [path, setPath] = useState("//");
-  const [entries, setEntries] = useState<P4DepotEntry[] | null>(null);
-  const [loaded, setLoaded] = useState("");
-  if (isOpen && loaded !== path) {
-    setLoaded(path);
-    setEntries(null);
-    void p4Api
-      .listDepotDirs(auth, path === "//" ? "" : path)
-      .then((next) => {
-        setEntries(next);
-      })
-      .catch((error) => {
-        setEntries([]);
-        toast.error(errorMessage(error));
-      });
-  }
-  if (!isOpen && loaded) {
-    setLoaded("");
-    setPath("//");
-    setEntries(null);
-  }
+  const [retry, setRetry] = useState(0);
+  const [request] = useState(createLatestRequest);
+  const { port, user, password, charset } = auth;
+  const scope = useMemo(() => ({ auth: { port, user, password, charset }, path, retry }), [port, user, password, charset, path, retry]);
+  const [result, setResult] = useState<{ scope: typeof scope; entries: P4DepotEntry[] | null; error: string | null } | null>(null);
+  useEffect(() => request.run(
+    () => p4Api.listDepotDirs(scope.auth, scope.path === "//" ? "" : scope.path),
+    (entries) => setResult({ scope, entries, error: null }),
+    (error) => setResult({ scope, entries: null, error: errorMessage(error) }),
+  ), [request, scope]);
+  const current = result?.scope === scope ? result : null;
   const parent = depotParent(path);
 
-  return (
-    <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Depot path</DialogTitle>
-          <DialogDescription className="truncate font-mono">{path === "//" ? "//" : path}</DialogDescription>
-        </DialogHeader>
-        <div className="max-h-72 overflow-auto rounded-md border">
-          {parent ? (
-            <button type="button" className="block w-full px-3 py-1.5 text-left font-mono text-xs hover:bg-muted/70" onClick={() => setPath(parent)}>
-              ..
-            </button>
-          ) : null}
-          {entries === null ? (
-            <p className="px-3 py-2 text-xs text-muted-foreground">Loading</p>
-          ) : (
-            entries.map((entry) => (
-              <button
-                key={entry.path}
-                type="button"
-                className="block w-full truncate px-3 py-1.5 text-left font-mono text-xs hover:bg-muted/70"
-                onClick={() => setPath(entry.path)}
-              >
-                {entry.path}
-              </button>
-            ))
-          )}
-        </div>
-        <DialogFooter>
-          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button type="button" disabled={path === "//"} onClick={() => onPick(path)}>
-            Use this path
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
+  return <>
+    <DialogHeader>
+      <DialogTitle>Depot path</DialogTitle>
+      <DialogDescription className="truncate font-mono">{path}</DialogDescription>
+    </DialogHeader>
+    <div className="max-h-72 overflow-auto rounded-md border">
+      {parent ? <Button variant="ghost" className="w-full justify-start rounded-none font-mono font-normal" onClick={() => setPath(parent)}>..</Button> : null}
+      {current?.error ? (
+        <div role="alert" className="grid gap-2 px-3 py-2 text-xs text-destructive"><p className="break-words">{current.error}</p><Button variant="outline" size="xs" className="w-fit" onClick={() => setRetry((value) => value + 1)}>Retry</Button></div>
+      ) : current?.entries === undefined || current.entries === null ? (
+        <p role="status" className="px-3 py-2 text-xs text-muted-foreground">Loading depot folders…</p>
+      ) : current.entries.length === 0 ? (
+        <p className="px-3 py-2 text-xs text-muted-foreground">No subfolders</p>
+      ) : current.entries.map((entry) => (
+        <Button key={entry.path} variant="ghost" className="w-full justify-start rounded-none font-mono text-xs font-normal" onClick={() => setPath(entry.path)}><span className="truncate">{entry.path}</span></Button>
+      ))}
+    </div>
+    <DialogFooter>
+      <Button variant="outline" onClick={onClose}>Cancel</Button>
+      <Button disabled={path === "//" || !current?.entries || Boolean(current.error)} onClick={() => onPick(path)}>Use this path</Button>
+    </DialogFooter>
+  </>;
 }
 
 function depotParent(path: string) {

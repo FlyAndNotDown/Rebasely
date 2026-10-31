@@ -119,7 +119,7 @@ export function CommandCenter() {
           run: () => void git.pullRemote(undefined, !prefs.pullRebase),
         },
         { id: "push", label: "Push", group: "Remote", shortcut: "push", run: () => void git.pushRemote() },
-        { id: "new-branch", label: "New branch…", group: "Branch", shortcut: "newBranch", run: () => setOpenPanel("new-branch") },
+        ...(snapshot?.repo.headId ? [{ id: "new-branch", label: "New branch…", group: "Branch", shortcut: "newBranch" as const, run: () => setOpenPanel("new-branch") }] : []),
         { id: "stash-all", label: "Stash all changes", group: "Changes", shortcut: "stashAll", run: () => void git.stashSave("", true) },
         { id: "undo-commit", label: "Undo last commit", group: "Changes", run: () => void git.undoLastCommit() },
         { id: "apply-patch", label: "Apply patch…", group: "Changes", run: () => void git.applyPatch() },

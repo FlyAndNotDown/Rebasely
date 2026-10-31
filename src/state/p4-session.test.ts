@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { emptyBinaryDiff } from "@/lib/git";
 import type { P4Changelist, P4File } from "@/types/p4";
-import { fileKey, refreshPendingSession, sameP4Connection, updateP4Session, usableP4Session, type P4Session } from "./p4-session";
+import { defaultChange, fileKey, refreshPendingSession, sameP4Connection, shownFile, updateP4Session, usableP4Session, type P4Session } from "./p4-session";
 
 function file(name: string): P4File {
   return {
@@ -29,7 +29,52 @@ function session(tabId = "p4:client-a"): P4Session {
 beforeEach(() => vi.stubGlobal("navigator", { userAgent: "Windows" }));
 afterEach(() => vi.unstubAllGlobals());
 
+describe("initial pending changelist selection", () => {
+  it("prefers a nonempty default changelist even when another change comes first", () => {
+    expect(defaultChange([change(), change("default")])).toBe("default");
+    expect(defaultChange([change(), { ...change("default", "", []), shelved: true }])).toBe("default");
+  });
+
+  it("skips an empty default and other empty changelists for the first opened files", () => {
+    expect(defaultChange([change("default", "", []), change("41", "Empty", []), change()])).toBe("42");
+  });
+
+  it("includes shelf-only changes and selects their shelved file", () => {
+    const shelf = { ...change("43", "Shelved", [{ ...file("shelf.txt"), shelved: true }]), shelved: true };
+    const pending = [change("default", "", []), shelf];
+    const selected = pending.find((item) => item.id === defaultChange(pending));
+    expect(selected?.id).toBe("43");
+    expect(shownFile(selected?.files ?? [])).toEqual({ path: "//depot/main/shelf.txt", shelved: true });
+    expect(defaultChange([change("default", "", []), { ...shelf, files: [] }])).toBe("43");
+  });
+
+  it("falls back to the empty default, first change, or default identifier", () => {
+    expect(defaultChange([change("42", "Empty", []), change("default", "", [])])).toBe("default");
+    expect(defaultChange([change("42", "Empty", []), change("43", "Empty", [])])).toBe("42");
+    expect(defaultChange([])).toBe("default");
+  });
+});
+
 describe("pending workspace refreshes", () => {
+  it("preserves a user's valid empty selection when other changelists have content", () => {
+    const empty = change("default", "", []);
+    const current = { ...session(), pending: [empty, change()], selectedChange: "default", selectedFile: null, description: "", diff: null };
+    expect(refreshPendingSession(current, [empty, change()]).selectedChange).toBe("default");
+    const numbered = change("43", "Empty", []);
+    const selected = { ...current, selectedChange: "43", pending: [numbered], description: "Empty" };
+    expect(refreshPendingSession(selected, [change("default"), numbered]).selectedChange).toBe("43");
+  });
+
+  it("retains the selected shelf path when the default gains opened files", () => {
+    const shelf = change("42", "Shelved", [{ ...file("b.txt"), shelved: true }]);
+    const current = { ...session(), pending: [shelf], selectedShelved: true, description: "Shelved" };
+    const refreshed = refreshPendingSession(current, [change("default"), shelf]);
+    expect(refreshed.selectedChange).toBe("42");
+    expect(refreshed.selectedFile).toBe("//depot/main/b.txt");
+    expect(refreshed.selectedShelved).toBe(true);
+    expect(refreshed.diff).toBe(current.diff);
+  });
+
   it("retains an edited description and the latest file selection", () => {
     const current = { ...session(), description: "An unsaved description" };
     const refreshed = refreshPendingSession(current, [change("42", "A server-side edit")]);

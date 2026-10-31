@@ -32,6 +32,11 @@ export const CloneRepositoryDialog = lazyDialog(
   (props) => props.open,
 );
 
+export const InitializeRepositoryDialog = lazyDialog(
+  () => import("@/components/initialize-repository-dialog").then((module) => module.InitializeRepositoryDialog),
+  (props) => props.open,
+);
+
 export const RepoSettingsDialog = lazyDialog(
   () => import("@/components/repo-settings-dialog").then((module) => module.RepoSettingsDialog),
   (props) => props.open,

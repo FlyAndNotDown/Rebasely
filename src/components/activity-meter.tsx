@@ -111,7 +111,7 @@ export function ActivityMeter() {
   );
 }
 
-function ActivityBar({ activity }: { activity: Activity }) {
+export function ActivityBar({ activity }: { activity: Activity }) {
   const progress = activity.progress;
   return (
     <span className="relative block h-1 min-w-0 flex-1 overflow-hidden rounded-full bg-muted">

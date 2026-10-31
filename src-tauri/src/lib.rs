@@ -69,6 +69,11 @@ where
 }
 
 #[tauri::command]
+async fn initialize_repository(path: String, branch: String) -> AppResult<String> {
+    blocking(move || git::initialize_repository(&path, &branch)).await
+}
+
+#[tauri::command]
 async fn list_recents(app: AppHandle) -> AppResult<Vec<RecentRepo>> {
     blocking(move || recents::load_recents(&app)).await
 }
@@ -1666,6 +1671,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            initialize_repository,
             get_author_avatar,
             get_diagnostic_summary,
             export_diagnostic_logs,
