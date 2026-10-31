@@ -15,6 +15,3 @@ response window.
 
 Security fixes target the latest release. Please update before reporting a
 problem, or state why the latest release cannot be used.
-
-See [security boundaries and dependency findings](docs/security.md) for the
-application's trust model and known upstream constraints.

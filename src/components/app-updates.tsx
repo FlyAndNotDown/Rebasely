@@ -1,16 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { isTauri } from "@tauri-apps/api/core";
 import { ArrowDownToLineIcon, CheckIcon, RefreshCwIcon } from "lucide-react";
+import { toast } from "sonner";
 import { version } from "../../package.json";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
-} from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { HoverTip } from "@/components/ui/tooltip";
 import { updateBusy, type UpdateSnapshot } from "@/state/app-updates";
 import { appUpdates, useAppUpdates } from "@/state/use-app-updates";
-import { useGitPick } from "@/state/git-context";
 
 function versionLabel(value: string) {
   return `v${value.replace(/^v/, "")}`;
@@ -37,24 +34,51 @@ function statusLabel(state: UpdateSnapshot) {
 
 export function AppUpdateBanner() {
   const state = useAppUpdates();
-  const { setOpenPanel } = useGitPick(["setOpenPanel"]);
   useEffect(() => {
     if (isTauri()) void appUpdates.start();
   }, []);
-  if (!state.update || !["available", "downloading", "installing", "installed"].includes(state.status)) return null;
-  return (
-    <div role="status" className="flex shrink-0 items-center gap-3 border-b bg-muted/50 px-4 py-2 text-sm">
-      <ArrowDownToLineIcon className="size-4 shrink-0 text-muted-foreground" />
-      <p className="min-w-0 flex-1">{statusLabel(state)}</p>
-      <Button variant="outline" size="sm" onClick={() => setOpenPanel("settings")}>View update</Button>
-    </div>
-  );
+  useEffect(() => {
+    const notice = state.notice;
+    if (!notice) return;
+    if (notice.kind === "available") {
+      toast(`Rebasely ${versionLabel(notice.version)} is available`, {
+        id: "app-update", duration: Infinity,
+        action: { label: "Update", onClick: () => { void appUpdates.install(notice.version); } },
+        cancel: { label: "Later", onClick: () => {} },
+      });
+    } else if (notice.kind === "installed") {
+      toast.success("Update installed", {
+        id: "app-update", duration: Infinity, description: "Restart when your work is saved.",
+        action: { label: "Restart", onClick: () => { void appUpdates.restart(); } },
+        cancel: { label: "Later", onClick: () => {} },
+      });
+    } else {
+      toast.error("Update could not be completed", {
+        id: "app-update", description: notice.message, duration: 10_000,
+        action: { label: "Retry", onClick: () => {
+          const current = appUpdates.getSnapshot();
+          if (notice.request === "restart") void appUpdates.restart();
+          else if (notice.request === "install" && current.update) void appUpdates.install(current.update.version);
+          else void appUpdates.check();
+        } },
+      });
+    }
+    appUpdates.dismissNotice(notice.id);
+  }, [state.notice]);
+  useEffect(() => {
+    if (state.request === "install" || state.status === "downloading" || state.status === "installing") {
+      toast.dismiss("app-update");
+      toast.loading(statusLabel(state), { id: "app-update-progress", duration: Infinity });
+    } else {
+      toast.dismiss("app-update-progress");
+      if (state.request === "check" || state.status === "checking") toast.dismiss("app-update");
+    }
+  }, [state]);
+  return null;
 }
 
 export function UpdatesSettings() {
   const state = useAppUpdates();
-  const [confirm, setConfirm] = useState(false);
-  const [restartConfirm, setRestartConfirm] = useState(false);
   const busy = updateBusy(state);
   const update = state.update;
   const canInstall = update && ["available", "error"].includes(state.status);
@@ -104,44 +128,19 @@ export function UpdatesSettings() {
         ) : null}
       </div>
       {update?.notes ? (
-        <ScrollArea className="rounded-md border bg-muted/30" viewportClassName="max-h-32" scrollbars="vertical">
-          <p className="whitespace-pre-wrap break-words p-3 text-xs text-muted-foreground">{update.notes}</p>
-        </ScrollArea>
+        <details className="text-xs text-muted-foreground">
+          <summary className="w-fit cursor-pointer rounded-sm focus-visible:outline-2 focus-visible:outline-ring">Release notes</summary>
+          <ScrollArea className="mt-2 rounded-md border bg-muted/30" viewportClassName="max-h-32" scrollbars="vertical">
+            <p className="whitespace-pre-wrap break-words p-3 text-xs">{update.notes}</p>
+          </ScrollArea>
+        </details>
       ) : null}
       {canInstall ? (
-        <div><Button size="sm" disabled={busy} onClick={() => setConfirm(true)}><ArrowDownToLineIcon />Download and install {versionLabel(update.version)}</Button></div>
+        <div><Button size="sm" disabled={busy} onClick={() => void appUpdates.install(update.version)}><ArrowDownToLineIcon />Update to {versionLabel(update.version)}</Button></div>
       ) : null}
       {state.status === "installed" ? (
-        <div><Button size="sm" disabled={busy} onClick={() => setRestartConfirm(true)}>Restart Rebasely</Button></div>
+        <div><Button size="sm" disabled={busy} onClick={() => void appUpdates.restart()}>Restart Rebasely</Button></div>
       ) : null}
-      <Dialog open={confirm} onOpenChange={setConfirm}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Install {versionLabel(update?.version ?? "")}?</DialogTitle>
-            <DialogDescription>Save your work first. Rebasely may close during installation.</DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setConfirm(false)}>Cancel</Button>
-            <Button disabled={busy || !canInstall} onClick={() => {
-              if (!update) return;
-              setConfirm(false);
-              void appUpdates.install(update.version);
-            }}>Download and install</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-      <Dialog open={restartConfirm} onOpenChange={setRestartConfirm}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Restart Rebasely?</DialogTitle>
-            <DialogDescription>Save any unfinished work first. Rebasely will close and reopen to finish the update.</DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setRestartConfirm(false)}>Cancel</Button>
-            <Button disabled={busy} onClick={() => { setRestartConfirm(false); void appUpdates.restart(); }}>Restart Rebasely</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </section>
   );
 }

@@ -389,7 +389,14 @@ pub fn run_p4(env: &P4Env, args: &[&str], input: Option<&str>) -> AppResult<std:
 }
 
 pub fn run_p4_ok(env: &P4Env, args: &[&str], input: Option<&str>) -> AppResult<String> {
-    finish(run_p4(env, args, input)?)
+    let started = std::time::Instant::now();
+    let result = run_p4(env, args, input).and_then(finish);
+    crate::diagnostics::record_slow_or_failed(
+        crate::diagnostics::Code::PerforceOperation,
+        started,
+        &result,
+    );
+    result
 }
 
 /// `p4 diff` can exit non-zero when the files differ. A diff body is still a result.

@@ -132,6 +132,7 @@ export function HistoryPane() {
     createPatch,
     openComparison,
     setOpenPanel,
+    setView,
     undoLastCommit,
   } = useGitPick([
     "activeTabId",
@@ -150,6 +151,7 @@ export function HistoryPane() {
     "createPatch",
     "openComparison",
     "setOpenPanel",
+    "setView",
     "undoLastCommit",
   ]);
   const [query, setQuery] = useState("");
@@ -418,8 +420,13 @@ export function HistoryPane() {
           loading ? (
             <HistorySkeleton fill label={searchingMode ? "Searching" : "Loading history"} />
           ) : (
-            <div className="flex h-full items-center justify-center p-4 text-sm text-muted-foreground">
-              {searchingMode ? "No matching commits" : "No commits yet"}
+            <div className="flex h-full flex-col items-center justify-center gap-2 p-4 text-sm text-muted-foreground">
+              <p role="status">{searchingMode ? "No matching commits" : "No commits yet"}</p>
+              {searchingMode ? (
+                <Button variant="outline" size="sm" onClick={() => { setQuery(""); setApplied(""); }}>Clear filter</Button>
+              ) : (
+                <Button variant="outline" size="sm" onClick={() => setView("changes")}>Review changes</Button>
+              )}
             </div>
           )
         ) : (

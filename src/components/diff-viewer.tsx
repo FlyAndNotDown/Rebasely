@@ -309,7 +309,7 @@ export function DiffViewer({ source }: { source: DiffSource }) {
           rebasing={snapshot?.repo.operation?.kind === "rebase"}
         />
       ) : imageSource ? (
-        <ImageDiff source={imageSource} />
+        <ImageDiff repoPath={snapshot?.repo.path ?? ""} source={imageSource} refreshIdentity={diff} />
       ) : diff?.binary ? (
         <p className="p-4 text-sm text-muted-foreground">Binary file</p>
       ) : !diff ? (

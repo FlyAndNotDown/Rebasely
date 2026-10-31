@@ -1,10 +1,12 @@
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useState, useSyncExternalStore, type CSSProperties } from "react";
+import { RefreshCwIcon } from "lucide-react";
 import { DiffSkeleton } from "@/components/skeletons";
 import { Button } from "@/components/ui/button";
+import { HoverTip } from "@/components/ui/tooltip";
 import { errorMessage, gitApi } from "@/lib/git";
 import { cn } from "@/lib/utils";
-import { useGitSelect } from "@/state/git-context";
-import type { ImagePair, ImageSide, FileSource } from "@/types/git";
+import { createImageLoader, imageLoadKey } from "@/lib/image-load";
+import type { FileDiff, ImageSide, FileSource } from "@/types/git";
 
 const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "avif"]);
 
@@ -29,54 +31,44 @@ function formatBytes(bytes: number) {
 }
 
 /** Before and after views of a changed image, side by side or overlaid. */
-export function ImageDiff({ source }: { source: FileSource }) {
-  const repoPath = useGitSelect((state) => state.snapshot?.repo.path ?? "");
-  const key = JSON.stringify(source);
-  const [loaded, setLoaded] = useState<{ key: string; pair: ImagePair | null; error: string | null } | null>(
-    null,
-  );
+export function ImageDiff({ repoPath, source, refreshIdentity }: {
+  repoPath: string;
+  source: FileSource;
+  refreshIdentity: FileDiff | null;
+}) {
+  const sourceKey = JSON.stringify(source);
+  const key = imageLoadKey(repoPath, source);
+  const [loader] = useState(() => createImageLoader(gitApi.getImagePair, errorMessage));
+  const loaded = useSyncExternalStore(loader.subscribe, loader.getSnapshot, loader.getSnapshot);
+  const [attempt, setAttempt] = useState(0);
   const [mode, setMode] = useState<Mode>("split");
   const [amount, setAmount] = useState(50);
-  const [sizes, setSizes] = useState<{ before?: Size; after?: Size }>({});
+  const [sizes, setSizes] = useState<Partial<Record<"before" | "after", { key: string; url: string; size: Size }>>>({});
 
   useEffect(() => {
     if (!repoPath) return;
-    let live = true;
-    gitApi
-      .getImagePair(repoPath, JSON.parse(key) as FileSource)
-      .then((pair) => {
-        if (live) setLoaded({ key, pair, error: null });
-      })
-      .catch((error) => {
-        if (live) setLoaded({ key, pair: null, error: errorMessage(error) });
-      });
-    return () => {
-      live = false;
-    };
-  }, [key, repoPath]);
+    return loader.start(repoPath, JSON.parse(sourceKey) as FileSource, refreshIdentity, attempt);
+  }, [loader, sourceKey, repoPath, refreshIdentity, attempt]);
 
-  if (!loaded || loaded.key !== key) {
-    return (
-      <div className="relative min-h-0 flex-1">
-        <DiffSkeleton fill label="Loading image" />
-      </div>
-    );
-  }
-  if (loaded.error || !loaded.pair) {
-    return <p className="p-4 text-sm text-muted-foreground">{loaded.error ?? "Could not load the image"}</p>;
-  }
-  const { before, after } = loaded.pair;
+  const pair = loaded.key === key ? loaded.pair : null;
+  const current = loaded.key === key && loaded.identity === refreshIdentity && loaded.attempt === attempt;
+  const busy = Boolean(repoPath) && (!current || loaded.busy);
+  const error = current ? loaded.error : null;
+  const before = pair?.before ?? null;
+  const after = pair?.after ?? null;
+  const beforeSize = sizes.before?.key === key && sizes.before.url === before?.dataUrl ? sizes.before.size : undefined;
+  const afterSize = sizes.after?.key === key && sizes.after.url === after?.dataUrl ? sizes.after.size : undefined;
   const comparable = Boolean(before?.dataUrl && after?.dataUrl);
   const shownMode = comparable ? mode : "split";
   const measure = (side: "before" | "after") => (event: React.SyntheticEvent<HTMLImageElement>) => {
     const image = event.currentTarget;
-    setSizes((current) => ({ ...current, [side]: { width: image.naturalWidth, height: image.naturalHeight } }));
+    setSizes((current) => ({ ...current, [side]: { key, url: image.currentSrc || image.src, size: { width: image.naturalWidth, height: image.naturalHeight } } }));
   };
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      {comparable ? (
-        <div className="flex h-9 shrink-0 items-center gap-1 border-b px-3">
+    <div className="flex min-h-0 flex-1 flex-col" aria-busy={busy}>
+      <div className="flex h-9 shrink-0 items-center gap-1 border-b px-3">
+        {comparable ? <>
           {(["split", "swipe", "fade"] as const).map((item) => (
             <Button
               key={item}
@@ -95,16 +87,23 @@ export function ImageDiff({ source }: { source: FileSource }) {
               max={100}
               value={amount}
               aria-label={shownMode === "swipe" ? "Swipe position" : "After opacity"}
-              className="ml-3 w-40 accent-foreground"
+              className="ml-2 min-w-12 max-w-40 flex-1 accent-foreground"
               onChange={(event) => setAmount(Number(event.target.value))}
             />
           ) : null}
-        </div>
-      ) : null}
-      {shownMode === "split" ? (
+        </> : null}
+        <HoverTip label={busy ? "Loading image" : error ? "Retry loading image" : "Reload image"}>
+          <Button variant="ghost" size={comparable ? "icon-xs" : "xs"} className="ml-auto" aria-label={busy ? "Loading image" : error ? "Retry loading image" : "Reload image"} disabled={busy || !repoPath} onClick={() => setAttempt((value) => value + 1)}>
+            <RefreshCwIcon className={busy ? "motion-safe:animate-spin" : ""} />
+            {!comparable ? busy ? "Loading…" : error ? "Retry" : "Reload image" : null}
+          </Button>
+        </HoverTip>
+      </div>
+      {error ? <p role="alert" className="break-words px-3 py-2 text-xs text-destructive">{error}</p> : null}
+      {!pair ? (error ? null : <div className="relative min-h-0 flex-1"><DiffSkeleton fill label="Loading image" /></div>) : shownMode === "split" ? (
         <div className="grid min-h-0 flex-1 grid-cols-2 gap-3 p-3">
-          <ImagePanel label="Before" side={before} size={sizes.before} missing="Not in the older version" onLoad={measure("before")} />
-          <ImagePanel label="After" side={after} size={sizes.after} missing="Deleted" onLoad={measure("after")} />
+          <ImagePanel label="Before" side={before} size={beforeSize} missing="Not in the older version" onLoad={measure("before")} />
+          <ImagePanel label="After" side={after} size={afterSize} missing="Deleted" onLoad={measure("after")} />
         </div>
       ) : (
         <div className="flex min-h-0 flex-1 flex-col gap-2 p-3">
@@ -134,8 +133,8 @@ export function ImageDiff({ source }: { source: FileSource }) {
             ) : null}
           </div>
           <div className="flex justify-between text-[11px] text-muted-foreground">
-            <span>Before · {describe(before, sizes.before)}</span>
-            <span>After · {describe(after, sizes.after)}</span>
+            <span>Before · {describe(before, beforeSize)}</span>
+            <span>After · {describe(after, afterSize)}</span>
           </div>
         </div>
       )}

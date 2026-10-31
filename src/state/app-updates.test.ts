@@ -133,4 +133,75 @@ describe("application update lifecycle", () => {
     expect(client.install).toHaveBeenCalledTimes(2);
     expect(store.getSnapshot().status).toBe("installed");
   });
+
+  it("keeps background failures quiet and allows an interactive retry", async () => {
+    const { client, store } = fixture();
+    client.check.mockResolvedValueOnce({ ...state(2, "error"), error: "Connection failed" });
+    await store.start();
+    expect(store.getSnapshot()).toMatchObject({ status: "error", error: "Connection failed", notice: null });
+    client.check.mockResolvedValueOnce({ ...state(4, "error"), error: "Try another connection" });
+    await store.check();
+    expect(store.getSnapshot().notice).toMatchObject({ kind: "error", request: "check", message: "Try another connection" });
+  });
+
+  it("announces a startup update once and does not restore a dismissed notice", async () => {
+    const { client, store, emit } = fixture();
+    client.check.mockResolvedValue(state(2, "available"));
+    await store.start();
+    const notice = store.getSnapshot().notice!;
+    expect(notice).toMatchObject({ kind: "available", version: "0.0.2" });
+    store.dismissNotice(notice.id + 1);
+    expect(store.getSnapshot().notice).toBe(notice);
+    store.dismissNotice(notice.id);
+    emit(state(3, "available"));
+    expect(store.getSnapshot().notice).toBeNull();
+    await store.start();
+    expect(client.check).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports a shared startup check failure if the user explicitly requests it", async () => {
+    const { client, store } = fixture();
+    const result = deferred<UpdateState>();
+    client.check.mockReturnValue(result.promise);
+    const background = store.start();
+    await vi.waitFor(() => expect(client.check).toHaveBeenCalledTimes(1));
+    expect(store.check()).toBe(background);
+    result.resolve({ ...state(2, "error"), error: "Connection failed" });
+    await background;
+    expect(store.getSnapshot().notice).toMatchObject({ kind: "error", request: "check" });
+  });
+
+  it("releases a completed request before subscribers start installation", async () => {
+    const { client, store } = fixture();
+    client.check.mockResolvedValue(state(2, "available"));
+    const download = deferred<UpdateState>();
+    client.install.mockReturnValue(download.promise);
+    let installed = false;
+    store.subscribe(() => {
+      if (!installed && store.getSnapshot().notice?.kind === "available") {
+        installed = true;
+        void store.install("0.0.2");
+      }
+    });
+    await store.start();
+    await vi.waitFor(() => expect(client.install).toHaveBeenCalledTimes(1));
+    expect(store.getSnapshot().request).toBe("install");
+    download.resolve(state(5, "installed"));
+    await vi.waitFor(() => expect(store.getSnapshot().notice?.kind).toBe("installed"));
+  });
+
+  it("prevents reentrant restart and preserves a failed restart decision for retry", async () => {
+    const { client, store, emit } = fixture();
+    await store.start();
+    emit(state(5, "installed"));
+    client.restart.mockRejectedValueOnce(new Error("Restart failed"));
+    store.subscribe(() => {
+      if (store.getSnapshot().request === "restart") void store.restart();
+    });
+    await store.restart();
+    expect(client.restart).toHaveBeenCalledTimes(1);
+    expect(store.getSnapshot()).toMatchObject({ status: "installed", request: null, notice: { kind: "error", request: "restart" } });
+    await store.restart();
+    expect(client.restart).toHaveBeenCalledTimes(2);
+  });
 });

@@ -345,6 +345,7 @@ export function HistoryBranches() {
             onFetchRemote={(name) => void fetchRemote(name)}
             onAddRemote={() => setAddOpen(true)}
             onCreateTag={() => setCreatingTag(true)}
+            createTagDisabled={!snapshot?.repo.headId}
             onDeleteTag={setDeletingTag}
             onPushTag={(remote, name) => void pushTag(remote, name)}
             remotes={snapshot?.remotes.map((remote) => remote.name) ?? []}
@@ -667,6 +668,7 @@ function TreeRows({
   onFetchRemote,
   onAddRemote,
   onCreateTag,
+  createTagDisabled,
   onDeleteTag,
   onPushTag,
   remotes,
@@ -693,6 +695,7 @@ function TreeRows({
   onFetchRemote?: (name: string) => void;
   onAddRemote?: () => void;
   onCreateTag?: () => void;
+  createTagDisabled?: boolean;
   onDeleteTag?: (name: string) => void;
   onPushTag?: (remote: string, name: string) => void;
   remotes?: string[];
@@ -907,17 +910,20 @@ function TreeRows({
               </HoverTip>
             ) : null}
             {tags && onCreateTag ? (
-              <HoverTip label="Create tag">
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  aria-label="Create tag"
-                  type="button"
-                  className="flex size-6 shrink-0 items-center justify-center rounded-sm hover:bg-muted hover:text-foreground"
-                  onClick={onCreateTag}
-                >
-                  <PlusIcon className="size-3.5" />
-                </Button>
+              <HoverTip label={createTagDisabled ? "Create a commit first" : "Create tag"}>
+                <span className="inline-flex shrink-0" tabIndex={createTagDisabled ? 0 : undefined}>
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    aria-label="Create tag"
+                    type="button"
+                    className="flex size-6 shrink-0 items-center justify-center rounded-sm hover:bg-muted hover:text-foreground"
+                    disabled={createTagDisabled}
+                    onClick={onCreateTag}
+                  >
+                    <PlusIcon className="size-3.5" />
+                  </Button>
+                </span>
               </HoverTip>
             ) : null}
           </div>
@@ -962,6 +968,7 @@ function TreeRows({
                 onFetchRemote={onFetchRemote}
                 onAddRemote={onAddRemote}
                 onCreateTag={onCreateTag}
+                createTagDisabled={createTagDisabled}
                 onDeleteTag={onDeleteTag}
                 onPushTag={onPushTag}
                 remotes={remotes}

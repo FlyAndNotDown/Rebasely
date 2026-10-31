@@ -123,11 +123,14 @@ fn require_git_path(root: &Path, flag: &str) -> AppResult<PathBuf> {
         if !output.status.success() {
             continue;
         }
-        let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let text = String::from_utf8_lossy(&output.stdout);
+        let text = text.strip_suffix('\n').unwrap_or(&text);
+        #[cfg(windows)]
+        let text = text.strip_suffix('\r').unwrap_or(text);
         if text.is_empty() {
             continue;
         }
-        let path = PathBuf::from(strip_verbatim_prefix(&text));
+        let path = PathBuf::from(strip_verbatim_prefix(text));
         return Ok(if path.is_absolute() {
             path
         } else {

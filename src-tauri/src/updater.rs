@@ -1,11 +1,13 @@
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
-use tauri_plugin_updater::{Update, UpdaterExt};
+use tauri_plugin_updater::{Update, UpdaterBuilder, UpdaterExt};
 
+use crate::diagnostics::{self, Code, Status};
 use crate::error::{redact_credentials, AppError, AppResult};
+use crate::network::HttpPolicy;
 
 const UPDATE_ENDPOINT: &str =
     "https://github.com/FlyAndNotDown/Rebasely/releases/latest/download/latest.json";
@@ -59,7 +61,22 @@ struct Inner {
     snapshot: UpdateState,
     // Only an update checked by the native plugin can be installed. The webview
     // cannot provide a download URL, signature, public key, or installer bytes.
-    pending: Option<Update>,
+    pending: Option<PendingUpdate>,
+}
+
+#[derive(Clone)]
+struct PendingUpdate {
+    update: Update,
+    routing: Arc<Mutex<HttpPolicy>>,
+}
+
+fn configure_routing(builder: UpdaterBuilder, routing: Arc<Mutex<HttpPolicy>>) -> UpdaterBuilder {
+    builder.configure_client(move |builder| {
+        routing
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .apply(builder)
+    })
 }
 
 impl Inner {
@@ -210,14 +227,24 @@ pub async fn check_for_update(app: AppHandle) -> UpdateState {
         }
         UpdateManager::publish(&app, &mut inner);
     }
+    let started = Instant::now();
     let result = async {
+        let prefs_app = app.clone();
+        let preferences = crate::blocking(move || crate::prefs::load_prefs(&prefs_app))
+            .await
+            .map_err(|error| error.to_string())?;
+        let routing = Arc::new(Mutex::new(
+            crate::network::policy_from_preferences(&preferences)
+                .map_err(|error| error.to_string())?,
+        ));
         let updater = app
             .updater_builder()
             .endpoints(vec![
                 url::Url::parse(UPDATE_ENDPOINT).expect("valid release endpoint")
             ])
             .map_err(|error| check_error(&error))?
-            .timeout(Duration::from_secs(25))
+            .timeout(Duration::from_secs(25));
+        let updater = configure_routing(updater, routing.clone())
             .build()
             .map_err(|error| check_error(&error))?;
         let mut update = updater.check().await.map_err(|error| check_error(&error))?;
@@ -233,11 +260,12 @@ pub async fn check_for_update(app: AppHandle) -> UpdateState {
             // manifest's other platforms or arbitrary extra response fields.
             update.raw_json = serde_json::Value::Null;
         }
-        Ok::<_, String>((update, info))
+        Ok::<_, String>((update.map(|update| PendingUpdate { update, routing }), info))
     }
     .await;
     match result {
         Ok((update, info)) => {
+            diagnostics::record(Code::UpdateCheck, Status::Success, Some(started.elapsed()));
             let mut inner = manager.lock();
             inner.pending = update;
             inner.snapshot.status = if info.is_some() {
@@ -248,17 +276,20 @@ pub async fn check_for_update(app: AppHandle) -> UpdateState {
             inner.snapshot.update = info;
             UpdateManager::publish(&app, &mut inner)
         }
-        Err(message) => manager.fail(&app, &message),
+        Err(message) => {
+            diagnostics::record(Code::UpdateCheck, Status::Failure, Some(started.elapsed()));
+            manager.fail(&app, &message)
+        }
     }
 }
 
 #[tauri::command]
 pub async fn install_update(version: String, app: AppHandle) -> AppResult<UpdateState> {
     let manager = app.state::<UpdateManager>();
-    let update = {
+    let pending = {
         let mut inner = manager.lock();
         validate_install(&inner.snapshot, &version, inner.pending.is_some())?;
-        let update = inner
+        let pending = inner
             .pending
             .as_ref()
             .expect("validated pending update")
@@ -268,10 +299,32 @@ pub async fn install_update(version: String, app: AppHandle) -> AppResult<Update
         inner.snapshot.downloaded_bytes = 0;
         inner.snapshot.total_bytes = None;
         UpdateManager::publish(&app, &mut inner);
-        // On Windows installation closes the app. The confirmation in Settings
-        // names this effect; the installer must not trigger another relaunch.
-        update.restart_after_install(false)
+        pending
     };
+    let download_started = Instant::now();
+    // A proxy corrected in Settings also applies to a retry of an already checked update.
+    let prefs_app = app.clone();
+    let routing = crate::blocking(move || crate::prefs::load_prefs(&prefs_app))
+        .await
+        .and_then(|prefs| crate::network::policy_from_preferences(&prefs));
+    match routing {
+        Ok(routing) => {
+            *pending
+                .routing
+                .lock()
+                .unwrap_or_else(|error| error.into_inner()) = routing
+        }
+        Err(error) => {
+            diagnostics::record(
+                Code::UpdateDownload,
+                Status::Failure,
+                Some(download_started.elapsed()),
+            );
+            return Ok(manager.fail(&app, &error.to_string()));
+        }
+    }
+    // Windows installation closes the app; the explicit Update action starts it.
+    let update = pending.update.restart_after_install(false);
     let mut last_progress = Instant::now();
     let download = update
         .download(
@@ -291,6 +344,11 @@ pub async fn install_update(version: String, app: AppHandle) -> AppResult<Update
     let bytes = match download {
         Ok(bytes) => bytes,
         Err(error) => {
+            diagnostics::record(
+                Code::UpdateDownload,
+                Status::Failure,
+                Some(download_started.elapsed()),
+            );
             let message = operation_error(
                 "Could not download or verify the update. Retry the installation or check for updates again.",
                 &error,
@@ -298,11 +356,17 @@ pub async fn install_update(version: String, app: AppHandle) -> AppResult<Update
             return Ok(manager.fail(&app, &message));
         }
     };
+    diagnostics::record(
+        Code::UpdateDownload,
+        Status::Success,
+        Some(download_started.elapsed()),
+    );
     {
         let mut inner = manager.lock();
         inner.snapshot.status = UpdateStatus::Installing;
         UpdateManager::publish(&app, &mut inner);
     }
+    let install_started = Instant::now();
     let result = crate::blocking(move || {
         update
             .install(bytes)
@@ -311,18 +375,26 @@ pub async fn install_update(version: String, app: AppHandle) -> AppResult<Update
     .await;
     match result {
         Ok(()) => {
+            diagnostics::record(
+                Code::UpdateInstall,
+                Status::Success,
+                Some(install_started.elapsed()),
+            );
             let mut inner = manager.lock();
             inner.pending = None;
             inner.snapshot.status = UpdateStatus::Installed;
             Ok(UpdateManager::publish(&app, &mut inner))
         }
-        Err(error) => Ok(manager.fail(
-            &app,
-            &operation_error(
-                "Could not install the update. Retry the installation or download the release from GitHub.",
-                &error,
-            ),
-        )),
+        Err(error) => {
+            diagnostics::record(
+                Code::UpdateInstall,
+                Status::Failure,
+                Some(install_started.elapsed()),
+            );
+            Ok(manager.fail(&app, &operation_error(
+                "Could not install the update. Retry the installation or download the release from GitHub.", &error,
+            )))
+        }
     }
 }
 
@@ -333,6 +405,7 @@ pub fn restart_after_update(app: AppHandle) -> AppResult<()> {
             "Install the update before restarting Rebasely.",
         ));
     }
+    diagnostics::record(Code::UpdateRestart, Status::Success, None);
     app.restart();
 }
 
@@ -422,5 +495,85 @@ mod tests {
         assert!(state["update"]["publishedAt"].is_null());
         assert!(state["totalBytes"].is_null());
         assert_eq!(state["downloadedBytes"], 0);
+    }
+
+    #[test]
+    fn native_update_check_and_retry_use_the_selected_http_route() {
+        use crate::network::tests::HttpFixture;
+        use crate::network::{HttpProxy, ProxyMode};
+        use crate::prefs::AppPrefs;
+
+        tauri::async_runtime::block_on(async {
+            let manifest = serde_json::json!({
+                "version": "9.9.9",
+                "notes": "Fixture update",
+                "platforms": {
+                    "fixture-target": {
+                        "url": "https://github.com/FlyAndNotDown/Rebasely/releases/download/v9.9.9/fixture.tar.gz",
+                        "signature": "not-a-real-signature"
+                    }
+                }
+            }).to_string();
+            let check_proxy = HttpFixture::new(&manifest);
+            let mut context = tauri::test::mock_context(tauri::test::noop_assets());
+            context.config_mut().plugins.0.insert(
+                "updater".to_string(),
+                serde_json::json!({
+                    "dangerousInsecureTransportProtocol": true,
+                    "pubkey": "not-a-real-key"
+                }),
+            );
+            let app = tauri::test::mock_builder()
+                .plugin(tauri_plugin_updater::Builder::new().build())
+                .build(context)
+                .unwrap();
+            let preferences = AppPrefs {
+                http_proxy: HttpProxy {
+                    mode: ProxyMode::Manual,
+                    url: check_proxy.url.clone(),
+                },
+                ..AppPrefs::default()
+            };
+            let routing = Arc::new(Mutex::new(
+                crate::network::policy_from_preferences(&preferences).unwrap(),
+            ));
+            let builder = app
+                .updater_builder()
+                .target("fixture-target")
+                .executable_path(std::env::temp_dir().join("rebasely-fixture-app"))
+                .timeout(Duration::from_secs(3))
+                .endpoints(vec![url::Url::parse(
+                    "http://release.example.test/latest.json",
+                )
+                .unwrap()])
+                .unwrap();
+            let updater = configure_routing(builder, routing.clone()).build().unwrap();
+            let mut update = updater.check().await.unwrap().unwrap();
+            assert_eq!(update_info(&update).unwrap().version, "9.9.9");
+            assert_eq!(
+                check_proxy.request(),
+                "GET http://release.example.test/latest.json HTTP/1.1"
+            );
+
+            // A retry of the checked update must use a newly saved proxy, not its old route.
+            let download_proxy = HttpFixture::new("unsigned fixture bytes");
+            let preferences = AppPrefs {
+                http_proxy: HttpProxy {
+                    mode: ProxyMode::Manual,
+                    url: download_proxy.url.clone(),
+                },
+                ..AppPrefs::default()
+            };
+            *routing.lock().unwrap() =
+                crate::network::policy_from_preferences(&preferences).unwrap();
+            update.download_url =
+                url::Url::parse("http://artifact.example.test/fixture.tar.gz").unwrap();
+            assert!(update.download(|_, _| {}, || {}).await.is_err());
+            assert_eq!(
+                download_proxy.request(),
+                "GET http://artifact.example.test/fixture.tar.gz HTTP/1.1"
+            );
+            // Deliberately invalid fixture signatures are rejected; installation is never invoked.
+        });
     }
 }

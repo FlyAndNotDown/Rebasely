@@ -30,6 +30,10 @@ pub struct PanelLayouts {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppPrefs {
+    #[serde(default)]
+    pub http_proxy: crate::network::HttpProxy,
+    #[serde(default)]
+    pub avatar_provider: AvatarProvider,
     #[serde(default = "default_terminal_id")]
     pub terminal_id: String,
     #[serde(default = "default_editor_id")]
@@ -77,6 +81,15 @@ pub struct AppPrefs {
     pub p4_refresh_minutes: u32,
 }
 
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub enum AvatarProvider {
+    #[default]
+    Builtin,
+    Github,
+    Gitlab,
+}
+
 fn default_p4_refresh_minutes() -> u32 {
     60
 }
@@ -105,6 +118,8 @@ fn default_sidebar_order() -> Vec<String> {
 impl Default for AppPrefs {
     fn default() -> Self {
         Self {
+            http_proxy: crate::network::HttpProxy::default(),
+            avatar_provider: AvatarProvider::default(),
             terminal_id: default_terminal_id(),
             editor_id: default_editor_id(),
             sidebar_order: default_sidebar_order(),
@@ -144,7 +159,8 @@ pub fn load_prefs(app: &AppHandle) -> AppResult<AppPrefs> {
     Ok(serde_json::from_str(&data).unwrap_or_default())
 }
 
-pub fn save_prefs(app: &AppHandle, prefs: AppPrefs) -> AppResult<AppPrefs> {
+pub fn save_prefs(app: &AppHandle, mut prefs: AppPrefs) -> AppResult<AppPrefs> {
+    prefs.http_proxy = crate::network::normalize_proxy(prefs.http_proxy)?;
     let path = prefs_path(app)?;
     crate::fsutil::write_atomic(
         &path,

@@ -1,16 +1,10 @@
-import { StrictMode } from "react";
-import { createRoot } from "react-dom/client";
-import { SiteThemeProvider } from "./theme";
-import { TooltipProvider } from "@/components/ui/tooltip";
-import { Site } from "./app";
+import { createRoot, hydrateRoot } from "react-dom/client";
+import { IDENTIFIER_PREFIX, SiteRoot } from "./app-root";
 import "./styles.css";
 
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <SiteThemeProvider>
-      <TooltipProvider>
-        <Site />
-      </TooltipProvider>
-    </SiteThemeProvider>
-  </StrictMode>,
-);
+const root = document.getElementById("root")!;
+if (root.dataset.prerendered === "true") {
+  hydrateRoot(root, <SiteRoot />, { identifierPrefix: IDENTIFIER_PREFIX });
+} else {
+  createRoot(root, { identifierPrefix: IDENTIFIER_PREFIX }).render(<SiteRoot />);
+}

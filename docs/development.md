@@ -21,6 +21,11 @@ npm run build
 
 Bundles are written to `src-tauri/target/release/bundle/`.
 
+To build a tagged version, check out its tag and run
+`npm run version:set -- vX.Y.Z` with that tag's version before building. Release
+builds stamp their version in an isolated checkout, so the tag's source version
+can differ from the version embedded in its published bundles.
+
 ## Checks
 
 ```sh
@@ -59,7 +64,7 @@ check on one operating system does not establish support on the others.
 | `src-tauri/icons/` | Application icon source and desktop assets |
 | `scripts/` | Source checks and release tooling |
 | `site/` | GitHub Pages website source and brand artwork |
-| `docs/` | Development, release, and security references |
+| `docs/` | Development guide |
 
 Frontend files use kebab-case, with React entry points `App.tsx` and `main.tsx`.
 Rust modules use snake_case. Tests live beside pure frontend helpers or with
@@ -84,12 +89,4 @@ npm run site:preview
 ```
 
 `check:site` typechecks, builds, and checks the website assets. Vite writes
-`site/dist/`; GitHub Pages deploys that output after a successful release or
-an owner-started website workflow. The [release guide](releasing.md) covers
-publishing.
-
-## Further reading
-
-- [Contributing](../CONTRIBUTING.md)
-- [Release guide](releasing.md)
-- [Security and dependency findings](security.md)
+`site/dist/`.

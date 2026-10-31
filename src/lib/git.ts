@@ -98,6 +98,8 @@ export const gitApi = {
   saveSession: (session: AppSession) => call<AppSession>("save_session", { session }),
   openRepository: (path: string) =>
     call<WorkspaceSnapshot>("open_repository", { path }),
+  initializeRepository: (path: string, branch = "main") =>
+    call<string>("initialize_repository", { path, branch }),
   cloneRepository: (url: string, destination: string, activityId?: string) =>
     call<string>("clone_repository", {
       url,

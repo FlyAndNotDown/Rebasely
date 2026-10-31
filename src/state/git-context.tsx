@@ -46,6 +46,7 @@ import {
   type VcsKind,
   type View,
 } from "@/state/session";
+import { reconcileChangeSelection } from "@/state/change-selection";
 import {
   historyGraphChanged,
   keepRemoteBranches,
@@ -55,6 +56,7 @@ import {
   sameRevs,
   sameSnapshot,
   shouldReloadWorkdirDiff,
+  shouldRefreshBinaryDiff,
   type RefreshHint,
 } from "@/state/snapshot-compare";
 import type {
@@ -163,7 +165,7 @@ interface GitContextValue {
   dismissRepoKind: () => void;
   setTabMeta: (id: string, name: string) => void;
   retargetRepoTab: (id: string, path: string, name: string) => void;
-  cloneRepository: (url: string, destination: string) => Promise<boolean>;
+  cloneRepository: (url: string, destination: string, onActivity?: (id: string) => void) => Promise<boolean>;
   revealRepo: () => Promise<void>;
   openTerminal: () => Promise<void>;
   /** Reloads status, branches, and the open working-tree diff for the active repository. */
@@ -829,12 +831,15 @@ export function GitProvider({ children }: { children: ReactNode }) {
   }, [openPath]);
 
   const cloneRepository = useCallback(
-    async (url: string, destination: string) => {
+    async (url: string, destination: string, onActivity?: (id: string) => void) => {
       try {
         const path = await runActivity(
           "Cloning repository",
           url.trim(),
-          (activityId) => gitApi.cloneRepository(url, destination, activityId),
+          (activityId) => {
+            onActivity?.(activityId);
+            return gitApi.cloneRepository(url, destination, activityId);
+          },
           true,
         );
         await openPath(path, "git");
@@ -1112,9 +1117,12 @@ export function GitProvider({ children }: { children: ReactNode }) {
             try {
               const snapshot = keepRemoteBranches(current?.snapshot, await gitApi.refreshWorkspace(path));
               const graphChanged = historyGraphChanged(current?.snapshot, snapshot);
-              let changeDiff = current?.changeDiff ?? null;
-              const selection = current?.changeSelection;
-              if (selection && shouldReloadWorkdirDiff(job, path, selection.path)) {
+              const previousSelection = current?.changeSelection ?? null;
+              const selection = reconcileChangeSelection(previousSelection, snapshot.status);
+              const scopeChanged = selection !== previousSelection;
+              let changeDiff = selection ? current?.changeDiff ?? null : null;
+              let diffReloaded = false;
+              if (selection && (scopeChanged || shouldReloadWorkdirDiff(job, path, selection.path))) {
                 try {
                   changeDiff = await gitApi.getWorkdirDiff(
                     path,
@@ -1122,21 +1130,24 @@ export function GitProvider({ children }: { children: ReactNode }) {
                     selection.staged,
                     prefsRef.current.diffIgnoreWhitespace,
                   );
+                  diffReloaded = true;
                 } catch {
-                  changeDiff = null;
+                  if (scopeChanged) changeDiff = null;
                 }
               }
               const snapshotSame = sameSnapshot(current?.snapshot, snapshot);
               const selectionMoved = readGen(changeLoadGen.current, tab.id) !== changeGeneration;
+              const binaryRefreshed = diffReloaded && Boolean(changeDiff?.binary) && selection
+                && shouldRefreshBinaryDiff(job, path, selection.path);
               const diffSame =
-                selectionMoved ||
-                sameDiff(changeDiff, sessionsRef.current[tab.id]?.changeDiff ?? null);
+                selectionMoved || (!scopeChanged && !binaryRefreshed &&
+                sameDiff(changeDiff, sessionsRef.current[tab.id]?.changeDiff ?? null));
               if (!diffSame) bumpGen(changeLoadGen.current, tab.id);
               if (!snapshotSame || !diffSame) {
                 const stashPatch = snapshotSame ? {} : stashPatchFor(tab.id, snapshot.stashes);
                 const patch = {
                   ...(snapshotSame ? {} : { snapshot, ...stashPatch }),
-                  ...(diffSame ? {} : { changeDiff }),
+                  ...(diffSame ? {} : { changeDiff, changeSelection: selection }),
                 };
                 startTransition(() => {
                   patchSession(tab.id, patch);
@@ -1181,14 +1192,14 @@ export function GitProvider({ children }: { children: ReactNode }) {
             current?.snapshot,
             await gitApi.refreshWorkspace(repoPath),
           );
-          let changeDiff = current?.changeDiff ?? null;
-          let nextSelection = changeSelection;
-          if (changeSelection) {
+          let nextSelection = reconcileChangeSelection(changeSelection, snapshot.status);
+          let changeDiff = nextSelection ? current?.changeDiff ?? null : null;
+          if (nextSelection) {
             try {
               changeDiff = await gitApi.getWorkdirDiff(
                 repoPath,
-                changeSelection.path,
-                changeSelection.staged,
+                nextSelection.path,
+                nextSelection.staged,
                 prefsRef.current.diffIgnoreWhitespace,
               );
             } catch {
@@ -1759,14 +1770,14 @@ export function GitProvider({ children }: { children: ReactNode }) {
       try {
         const next = await runActivity(label, current?.snapshot?.repo.name, async (activityId) => {
           const snapshot = keepRemoteBranches(current?.snapshot, await action(repoPath, activityId));
-          let changeDiff = current?.changeDiff ?? null;
-          let nextSelection = changeSelection;
-          if (changeSelection) {
+          let nextSelection = reconcileChangeSelection(changeSelection, snapshot.status);
+          let changeDiff = nextSelection ? current?.changeDiff ?? null : null;
+          if (nextSelection) {
             try {
               changeDiff = await gitApi.getWorkdirDiff(
                 repoPath,
-                changeSelection.path,
-                changeSelection.staged,
+                nextSelection.path,
+                nextSelection.staged,
                 prefsRef.current.diffIgnoreWhitespace,
               );
             } catch {
@@ -1878,13 +1889,12 @@ export function GitProvider({ children }: { children: ReactNode }) {
         gitApi.commit(repoPath, message, amend),
       );
       if (ok) {
-        patchSession(tabId, { changeSelection: null, changeDiff: null });
         if (amend) toast.success("Amended commit");
         else toast.success("Created commit", { action: repositoryUndoAction(tabId, undoLastCommit) });
       }
       return ok;
     },
-    [patchSession, runMutation, undoLastCommit],
+    [runMutation, undoLastCommit],
   );
 
   const updateSubmodules = useCallback(

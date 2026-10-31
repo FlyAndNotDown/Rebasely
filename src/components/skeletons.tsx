@@ -28,7 +28,7 @@ export function HistorySkeleton({
 }) {
   return (
     <div
-      role="status"
+      data-loading-placeholder="" role="status"
       aria-label={label}
       className={fill ? "absolute inset-0 overflow-hidden pe-4" : "w-full py-1"}
     >
@@ -53,7 +53,7 @@ const branchRowWidths = ["w-3/5", "w-2/5", "w-4/5", "w-1/2", "w-2/3"];
 export function BranchSidebarSkeleton() {
   const sections = [5, 4, 3, 2, 5, 4, 3];
   return (
-    <div role="status" aria-label="Loading branches" className="absolute inset-0 overflow-hidden py-1">
+    <div data-loading-placeholder="" role="status" aria-label="Loading branches" className="absolute inset-0 overflow-hidden py-1">
       {sections.map((rows, section) => (
         <div key={section}>
           <div className="flex h-7 items-center px-2">
@@ -85,7 +85,7 @@ export function FileTreeSkeleton({
 }) {
   return (
     <div
-      role="status"
+      data-loading-placeholder="" role="status"
       aria-label={label}
       className={fill ? "absolute inset-0 overflow-hidden py-1" : "py-1"}
     >
@@ -112,7 +112,7 @@ export function FileRowsSkeleton({
 }) {
   return (
     <div
-      role="status"
+      data-loading-placeholder="" role="status"
       aria-label={label}
       className={fill ? "absolute inset-0 overflow-hidden px-1 py-1" : "px-1 py-1"}
     >
@@ -128,7 +128,7 @@ export function FileRowsSkeleton({
 
 export function CommitFilesSkeleton() {
   return (
-    <div role="status" aria-label="Loading files" className="flex min-h-0 flex-1 flex-col">
+    <div data-loading-placeholder="" role="status" aria-label="Loading files" className="flex min-h-0 flex-1 flex-col">
       <div className="shrink-0 space-y-2 px-3 py-2">
         <Skeleton className="h-4 w-2/3" />
         <div className="flex items-center gap-2">
@@ -176,7 +176,7 @@ export function DiffSkeleton({
   if (fill) {
     return (
       <div
-        role={status ? "status" : undefined}
+        data-loading-placeholder="" role={status ? "status" : undefined}
         aria-label={status ? label : undefined}
         className="absolute inset-0 overflow-hidden py-2"
       >
@@ -185,7 +185,7 @@ export function DiffSkeleton({
     );
   }
   return (
-    <div role={status ? "status" : undefined} aria-label={status ? label : undefined} className="py-2">
+    <div data-loading-placeholder="" role={status ? "status" : undefined} aria-label={status ? label : undefined} className="py-2">
       {rows}
     </div>
   );
@@ -193,7 +193,7 @@ export function DiffSkeleton({
 
 export function WorkspaceSkeleton() {
   return (
-    <div role="status" aria-label="Opening repository" className="flex h-full min-h-0">
+    <div data-loading-placeholder="" role="status" aria-label="Opening repository" className="flex h-full min-h-0">
       <div className="flex w-[36%] min-w-56 flex-col border-r">
         <div className="min-h-0 flex-1 space-y-2 px-3 py-3">
           <Skeleton className="h-3 w-16" />

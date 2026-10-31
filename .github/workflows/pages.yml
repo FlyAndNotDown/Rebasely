@@ -2,6 +2,11 @@ name: Website
 
 on:
   workflow_call:
+    secrets:
+      GOOGLE_WORKLOAD_IDENTITY_PROVIDER:
+        required: false
+      GOOGLE_SEARCH_CONSOLE_SERVICE_ACCOUNT:
+        required: false
   workflow_dispatch:
 
 permissions:
@@ -19,6 +24,8 @@ jobs:
       github.triggering_actor == github.repository_owner
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    outputs:
+      page_url: ${{ steps.deploy.outputs.page_url }}
     permissions:
       contents: read
       pages: write
@@ -50,3 +57,58 @@ jobs:
       - name: Deploy
         id: deploy
         uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
+
+  index:
+    name: Submit sitemap
+    needs: deploy
+    if: >-
+      github.actor == github.repository_owner &&
+      github.triggering_actor == github.repository_owner
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Configuration
+        id: configuration
+        env:
+          IDENTITY_PROVIDER: ${{ secrets.GOOGLE_WORKLOAD_IDENTITY_PROVIDER }}
+          SERVICE_ACCOUNT: ${{ secrets.GOOGLE_SEARCH_CONSOLE_SERVICE_ACCOUNT }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { appendFileSync } from 'node:fs';
+          const provider = Boolean(process.env.IDENTITY_PROVIDER);
+          const account = Boolean(process.env.SERVICE_ACCOUNT);
+          if (provider !== account) throw new Error('Search Console configuration is incomplete.');
+          appendFileSync(process.env.GITHUB_OUTPUT, `enabled=${provider && account}\n`);
+          if (!provider) console.log('::notice::Sitemap submission is not configured; skipping.');
+          NODE
+      - name: Google authentication
+        if: steps.configuration.outputs.enabled == 'true'
+        id: google
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ secrets.GOOGLE_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GOOGLE_SEARCH_CONSOLE_SERVICE_ACCOUNT }}
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/webmasters
+          access_token_lifetime: 300s
+          create_credentials_file: false
+          export_environment_variables: false
+      - name: Submit
+        if: steps.configuration.outputs.enabled == 'true'
+        env:
+          GOOGLE_ACCESS_TOKEN: ${{ steps.google.outputs.access_token }}
+          SITE_URL: ${{ needs.deploy.outputs.page_url }}
+        run: node scripts/submit-sitemap.mjs

@@ -453,7 +453,7 @@ function FileHistoryPane({ repoPath, path, pin }: { repoPath: string; path: stri
       </ResizablePanel>
       <ResizableHandle withHandle />
       <ResizablePanel id="file-diff" defaultSize="58%" minSize="20%">
-        <FileCommitDiff diff={diff} commitId={selectedId} loading={Boolean(selectedId) && !diff} />
+        <FileCommitDiff repoPath={repoPath} diff={diff} commitId={selectedId} loading={Boolean(selectedId) && !diff} />
       </ResizablePanel>
     </ResizablePanelGroup>
   );
@@ -871,10 +871,12 @@ function FileHistory({
 }
 
 function FileCommitDiff({
+  repoPath,
   diff,
   commitId,
   loading,
 }: {
+  repoPath: string;
   diff: FileDiff | null;
   commitId: string | null;
   loading: boolean;
@@ -890,7 +892,7 @@ function FileCommitDiff({
   if (diff.binary && commitId && isImagePath(diff.path)) {
     return (
       <div className="absolute inset-0 flex min-h-0 flex-col">
-        <ImageDiff source={{ kind: "commit", oid: commitId, path: diff.path, oldPath: diff.oldPath }} />
+        <ImageDiff repoPath={repoPath} source={{ kind: "commit", oid: commitId, path: diff.path, oldPath: diff.oldPath }} refreshIdentity={diff} />
       </div>
     );
   }

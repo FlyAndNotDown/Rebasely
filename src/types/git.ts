@@ -282,6 +282,8 @@ export interface ToolConfig {
 }
 
 export interface AppPrefs {
+  httpProxy: { mode: "none" | "system" | "manual"; url: string };
+  avatarProvider: "builtin" | "github" | "gitlab";
   terminalId: string;
   /** "system", or an id from `list_editors`. */
   editorId: string;

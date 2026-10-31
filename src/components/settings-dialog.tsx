@@ -4,6 +4,8 @@ import {
   CheckIcon,
   ChevronDownIcon,
   CircleAlertIcon,
+  ActivityIcon,
+  GlobeIcon,
   InfoIcon,
   KeyRoundIcon,
   ListIcon,
@@ -40,17 +42,21 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Label } from "@/components/ui/label";
 import { SshKeysSettings } from "@/components/ssh-keys-settings";
 import { UpdatesSettings } from "@/components/app-updates";
+import { NetworkSettings } from "@/components/network-settings";
+import { DiagnosticsSettings } from "@/components/diagnostics-settings";
+import { AvatarSettings } from "@/components/avatar-settings";
 import { GitLogo, PerforceMark } from "@/components/vcs-icon";
 import { errorMessage, gitApi } from "@/lib/git";
 import { p4Api } from "@/lib/p4";
 import { loadSettingsData } from "@/lib/settings-data";
+import { createSettingsWriter } from "@/lib/settings-writes";
 import { displayPath } from "@/lib/format";
 import { AUTO_FETCH_CHOICES, isGitFileName, isP4FileName, normalizePrefs, sameGitPath, sameP4Path } from "@/lib/prefs";
 import { cn } from "@/lib/utils";
 import { useGitPick } from "@/state/git-context";
 import type { AppPrefs, TerminalOption, ToolConfig } from "@/types/git";
 
-type SettingsSection = "git" | "perforce" | "ssh" | "general";
+type SettingsSection = "git" | "perforce" | "ssh" | "general" | "network" | "diagnostics";
 type GuiTool = { id: string; name: string; installed: boolean };
 type ThemeChoice = "dark" | "light" | "system";
 
@@ -111,9 +117,7 @@ function SettingsForm() {
   const [themeChoice, setThemeChoice] = useState<ThemeChoice>(() =>
     theme === "light" || theme === "dark" || theme === "system" ? theme : "dark",
   );
-  const prefsNow = useRef(prefs);
-  const prefsWrite = useRef(0);
-  const prefsRevision = useRef(0);
+  const prefsWriter = useRef(createSettingsWriter(prefs));
   const identityReadyRef = useRef(false);
   const savedIdentity = useRef({ name: "", email: "" });
   const nameRef = useRef(name);
@@ -126,7 +130,7 @@ function SettingsForm() {
 
   useEffect(() => {
     let live = true;
-    const revision = prefsRevision.current;
+    const revision = prefsWriter.current.revision;
     const identityAtStart = { name: nameRef.current, email: emailRef.current };
     const toolsAtStart = toolsRef.current;
     void loadSettingsData()
@@ -135,10 +139,10 @@ function SettingsForm() {
         const { identity, tools: toolConfig, gitExecutables: executables, p4Executables } = data;
         const options = data.terminals ?? [];
         const editorOptions = data.editors ?? [];
-        const prefs = normalizePrefs(data.prefs ?? prefsNow.current);
+        const prefs = normalizePrefs(data.prefs ?? prefsWriter.current.value);
         const visibleEditors = editorOptions.filter((editor) => editor.available);
         const visibleTerminals = options.filter((terminal) => terminal.available);
-        const applyPrefs = data.prefs !== null && revision === prefsRevision.current;
+        const applyPrefs = data.prefs !== null && revision === prefsWriter.current.revision;
         if (identity && nameRef.current === identityAtStart.name && emailRef.current === identityAtStart.email) {
           setName(identity.name);
           setEmail(identity.email);
@@ -194,7 +198,7 @@ function SettingsForm() {
   }, [reload]);
 
   useEffect(() => {
-    if (prefsWrite.current === 0) prefsNow.current = prefs;
+    prefsWriter.current.sync(prefs);
   }, [prefs]);
 
   useEffect(() => {
@@ -209,20 +213,13 @@ function SettingsForm() {
   }, []);
 
   async function persistPrefs(patch: Partial<AppPrefs>) {
-    prefsRevision.current += 1;
-    const generation = ++prefsWrite.current;
-    const next = { ...prefsNow.current, ...patch };
-    prefsNow.current = next;
     try {
-      const saved = await updatePrefs(next);
-      if (prefsWrite.current === generation) {
-        prefsWrite.current = 0;
-        prefsNow.current = saved;
-      }
+      await prefsWriter.current.save(patch, updatePrefs);
       if ("gitPath" in patch || "p4Path" in patch) setReload((value) => value + 1);
+      return true;
     } catch (error) {
-      if (prefsWrite.current === generation) prefsWrite.current = 0;
       toast.error(errorMessage(error));
+      return false;
     }
   }
 
@@ -356,6 +353,9 @@ function SettingsForm() {
           <NavButton active={section === "general"} icon={<SlidersHorizontalIcon />} onClick={() => setSection("general")}>
             General
           </NavButton>
+          <NavButton active={section === "network"} icon={<GlobeIcon />} onClick={() => setSection("network")}>
+            Network
+          </NavButton>
           <NavButton active={section === "git"} icon={<GitLogo />} onClick={() => setSection("git")}>
             Git
           </NavButton>
@@ -365,8 +365,11 @@ function SettingsForm() {
           <NavButton active={section === "ssh"} icon={<KeyRoundIcon />} onClick={() => setSection("ssh")}>
             SSH
           </NavButton>
+          <NavButton active={section === "diagnostics"} icon={<ActivityIcon />} onClick={() => setSection("diagnostics")}>
+            Diagnostics
+          </NavButton>
         </aside>
-        <ScrollArea className="min-w-0 flex-1" scrollbars="vertical">
+        <ScrollArea key={section} className="min-w-0 flex-1" scrollbars="vertical">
         <div className="p-6">
           {incomplete ? (
             <div role="alert" className="mb-4 flex items-center gap-3 rounded-lg border border-destructive/30 px-3 py-2 text-sm">
@@ -524,6 +527,16 @@ function SettingsForm() {
             </>
           ) : section === "ssh" ? (
             <SshKeysSettings email={email} />
+          ) : section === "network" ? (
+            <>
+              <DialogHeader><DialogTitle>Network</DialogTitle><DialogDescription>Client connection settings.</DialogDescription></DialogHeader>
+              <div className="mt-6"><NetworkSettings value={prefs.httpProxy} onSave={(httpProxy) => persistPrefs({ httpProxy })} /></div>
+            </>
+          ) : section === "diagnostics" ? (
+            <>
+              <DialogHeader><DialogTitle>Diagnostics</DialogTitle><DialogDescription>Inspect and export local diagnostics.</DialogDescription></DialogHeader>
+              <div className="mt-6"><DiagnosticsSettings /></div>
+            </>
           ) : (
             <>
               <DialogHeader>
@@ -543,6 +556,12 @@ function SettingsForm() {
                     onChange={(value) => {
                       setThemeChoice(value);
                       setTheme(value);
+                    }}
+                  />
+                  <AvatarSettings
+                    provider={prefs.avatarProvider}
+                    onSave={async (avatarProvider) => {
+                      if (!await persistPrefs({ avatarProvider })) throw new Error("Could not save the avatar provider.");
                     }}
                   />
                 </FieldGroup>
@@ -1086,6 +1105,7 @@ function NavButton({
   return (
     <button
       type="button"
+      aria-current={active ? "page" : undefined}
       className={cn(
         "flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm [&_svg]:size-4 [&_svg]:shrink-0",
         active ? "bg-muted text-foreground" : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",

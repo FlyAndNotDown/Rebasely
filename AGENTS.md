@@ -12,7 +12,7 @@ Rebasely is a unified version control client, built with React, TypeScript, Taur
 | `src/lib/` | Typed command clients and reusable, testable UI logic |
 | `src/types/` | TypeScript models for the Rust command boundary |
 | `site/` | Website sharing application UI components, deployed to GitHub Pages |
-| `docs/` | Development, release, and security guides |
+| `docs/` | Development guide |
 | `src-tauri/src/lib.rs` | Tauri commands, event wiring, and blocking-work dispatch |
 | `src-tauri/src/git/` | Git commands, parsers, history, diffs, and operations |
 | `src-tauri/src/p4/` | Perforce executable selection, parsing, and workspace operations |
@@ -40,12 +40,10 @@ The GitHub workflow checks Windows x64, macOS Apple Silicon, and Linux x64 nativ
 
 The Check workflow runs only when a pull request targeting `master` is opened, updated, or reopened. Do not add push, schedule, or manual triggers to Check. Ordinary branch pushes and merges must not start it. Preserve each successful native job's checked-source tree notice; owner-triggered releases use these notices to verify the merged source without repeating checks after a merge.
 
-## Dependency selection
+## Dependency updates
 
-- A newly selected direct Rust component must have at least 500 GitHub stars on its source repository when adopted. Verify the primary repository, maintenance status, license, platform support, and API fit before adding it; a download count is not a substitute for the star requirement.
-- Prefer maintained components from established projects over new platform-specific implementations. Keep operating-system integration behind `src-tauri/src/platform.rs` and executable discovery behind `locate.rs`.
 - Keep lockfiles committed, use locked Rust checks, and avoid unrelated dependency upgrades. Remove unused build tools rather than retaining their dependency trees. Do not use forced major-version audit fixes without reviewing compatibility.
-- Run dependency audits for security-related updates and review informational findings as well as the exit status. Track unresolved upstream constraints in `docs/security.md`; never silently suppress them.
+- Run dependency audits for security-related updates and review informational findings as well as the exit status. Report unresolved upstream constraints directly to the repository owner; keep audit reports out of the source tree and never silently suppress findings.
 
 ## Architecture and command boundary
 
@@ -81,6 +79,7 @@ The Check workflow runs only when a pull request targeting `master` is opened, u
 - Keep TypeScript strict and React Hooks lint rules enabled. Extract pure helpers into `src/lib/` or `src/state/` instead of growing components or suppressing diagnostics.
 - Reuse the Radix/shadcn primitives in `src/components/ui/`, Lucide icons, and theme tokens in `src/index.css`. Maintain light and dark themes, keyboard navigation, visible focus, and accessible names for icon buttons.
 - Keep all repository code, comments, fixtures, and user-facing copy in English, with no Han characters. `npm run check:source` enforces the text policy.
+- Keep public documentation focused on what users and contributors need to use, build, test, or modify the project. Keep maintainer account setup, service configuration, investigation notes, and task reports out of the source tree; communicate them directly to the repository owner.
 - Include loading, empty, error, and cancellation states when adding an asynchronous interaction. Missing optional tools must leave Settings accessible, explain which executable is needed, and offer a recovery action.
 - Use `useGitPick` or `useGitSelect` to subscribe to the state a component needs. Keep expensive parsing and row preparation out of render paths.
 - Follow the neighboring code's organization. Format Rust with rustfmt, keep repository text on LF, and avoid unrelated dependency, formatting, or generated-file churn.
@@ -120,6 +119,10 @@ Inspecting a live Git or Perforce workspace while debugging is allowed. Copying 
 - Use operating-system randomness for credential tokens and finite credential request lifetimes. Publish private keys without overwriting existing files, restrict permissions before publication, and never echo passphrases in failures.
 
 ## Commits
+
+The branch, pull-request authorization, identity, and release rules below apply
+to work delegated by the repository owner. External contributors follow
+[CONTRIBUTING.md](CONTRIBUTING.md) and use their own Git identity.
 
 - Make all development changes on `dev` or a topic branch based on `dev`. Commit and push routine work to `dev`; do not push directly to `master`.
 - Create a pull request only when the repository owner explicitly requests one. Permission to commit or push does not authorize creating a pull request, including a draft.
