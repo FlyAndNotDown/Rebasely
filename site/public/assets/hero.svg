@@ -1,34 +1,88 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="480" viewBox="0 0 1440 480" fill="none" role="img" aria-labelledby="title desc">
-  <title id="title">Rebasely</title>
-  <desc id="desc">A unified version control client. Luminous revision paths converge across a deep, dark grid.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="620" viewBox="0 0 1440 620" fill="none" role="img" aria-labelledby="title desc">
+  <title id="title">Rebasely — Git and Perforce, in one clear workspace</title>
+  <desc id="desc">The Rebasely branch mark and the words Every change. One clear view. sit beside an illustrated desktop workspace with Git and Perforce tabs, changed files, and a highlighted code diff.</desc>
   <defs>
-    <linearGradient id="surface" x1="0" y1="0" x2="1440" y2="480" gradientUnits="userSpaceOnUse"><stop stop-color="#202020"/><stop offset=".55" stop-color="#151515"/><stop offset="1" stop-color="#1B1B1B"/></linearGradient>
-    <radialGradient id="light"><stop stop-color="#71717A" stop-opacity=".13"/><stop offset="1" stop-color="#71717A" stop-opacity="0"/></radialGradient>
-    <linearGradient id="line" x1="650" y1="240" x2="1410" y2="240" gradientUnits="userSpaceOnUse"><stop stop-color="#3E6DA8" stop-opacity="0"/><stop offset=".3" stop-color="#79AEF2"/><stop offset=".8" stop-color="#A8CEFF"/><stop offset="1" stop-color="#79AEF2" stop-opacity="0"/></linearGradient>
-    <linearGradient id="fade"><stop stop-color="white" stop-opacity="0"/><stop offset=".2" stop-color="white"/><stop offset=".85" stop-color="white"/><stop offset="1" stop-color="white" stop-opacity="0"/></linearGradient>
-    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0H0V40" stroke="#A1A1AA" stroke-opacity=".06"/></pattern>
-    <filter id="glow" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur stdDeviation="5"/></filter>
-    <mask id="graph"><rect x="620" width="820" height="480" fill="url(#fade)"/></mask>
-    <clipPath id="clip"><rect width="1440" height="480" rx="16"/></clipPath>
+    <clipPath id="banner"><rect width="1440" height="620" rx="20"/></clipPath>
+    <clipPath id="workspace"><rect x="622" y="44" width="774" height="532" rx="12"/></clipPath>
   </defs>
-  <g clip-path="url(#clip)">
-    <rect width="1440" height="480" fill="url(#surface)"/>
-    <ellipse cx="1100" cy="250" rx="580" ry="370" fill="url(#light)"/>
-    <g mask="url(#graph)">
-      <rect x="620" width="820" height="480" fill="url(#grid)"/>
-      <path d="M620 240H1440" stroke="url(#line)" stroke-width="2"/>
-      <path d="M730 240C810 240 810 132 890 132H1440M946 132C1026 132 1026 240 1106 240" stroke="#88B7F4" stroke-width="1.5"/>
-      <path d="M826 240C906 240 906 350 986 350H1440" stroke="#9A9EC5" stroke-width="1.5"/>
-      <g fill="#18181B" stroke="#98C5FF" stroke-width="1.5"><circle cx="730" cy="240" r="6"/><circle cx="826" cy="240" r="6"/><circle cx="1106" cy="240" r="7"/><circle cx="1242" cy="240" r="6"/><circle cx="890" cy="132" r="6"/><circle cx="946" cy="132" r="6"/><circle cx="1192" cy="132" r="6"/><circle cx="986" cy="350" r="6"/><circle cx="1106" cy="350" r="6"/><circle cx="1336" cy="350" r="6"/></g>
-      <circle cx="1106" cy="240" r="3" fill="#DAECFF"/><circle cx="1192" cy="132" r="2" fill="#98C5FF"/>
-      <path d="M1106 214V204M1106 266V276M1080 240H1070M1132 240H1142" stroke="#A1C9FC" stroke-opacity=".45"/>
-      <g fill="#A1A1AA" font-family="'SFMono-Regular', Consolas, monospace" font-size="10" letter-spacing="2"><text x="1110" y="105">HISTORY</text><text x="1198" y="221">HEAD</text><text x="1160" y="382">WORKSPACE</text></g>
+  <g clip-path="url(#banner)">
+    <rect width="1440" height="620" fill="#1B1D1C"/>
+    <path d="M590 0V620" stroke="#353936"/>
+    <g font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif">
+      <rect x="56" y="56" width="56" height="56" rx="14" fill="#272A28" stroke="#4B514C"/>
+      <g transform="translate(69 69) scale(1.25)" stroke="#F3F2EC" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M6 3v12M18 6a6 6 0 0 1-6 6H6"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/>
+      </g>
+      <text x="130" y="101" fill="#F3F2EC" font-size="54" font-weight="600" letter-spacing="-2.6">Rebasely</text>
+      <text x="56" y="203" fill="#A9B6AC" font-size="16" font-weight="600" letter-spacing="2.1">GIT + PERFORCE</text>
+      <text x="53" y="279" fill="#F3F2EC" font-size="61" font-weight="500" letter-spacing="-2.8">Every change.</text>
+      <text x="53" y="349" fill="#F3F2EC" font-size="61" font-weight="500" letter-spacing="-2.8">One clear view.</text>
+      <text x="56" y="410" fill="#AEB5AF" font-size="23" letter-spacing="-.35">Review the details.</text>
+      <text x="56" y="444" fill="#AEB5AF" font-size="23" letter-spacing="-.35">Understand the history.</text>
+      <text x="56" y="478" fill="#AEB5AF" font-size="23" letter-spacing="-.35">Prepare your next change.</text>
+      <path d="M56 551H88" stroke="#A7D3BA" stroke-width="3"/>
+      <text x="102" y="557" fill="#BFC5BF" font-size="16" letter-spacing=".2">A unified version control client</text>
     </g>
-    <rect x="76" y="76" width="58" height="58" rx="14" fill="#18181B" stroke="#3F3F46"/>
-    <g transform="translate(89 89) scale(1.35)" stroke="#F4F4F5" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3v12M18 6a6 6 0 0 1-6 6H6"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/></g>
-    <text x="72" y="264" fill="#F4F4F5" font-family="Geist, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="92" font-weight="600" letter-spacing="-5">Rebasely</text>
-    <text x="78" y="316" fill="#A1A1AA" font-family="Geist, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="23" letter-spacing="-.3">A unified version control client.</text>
-    <path d="M78 383H110" stroke="#7DA8E0"/><text x="124" y="387" fill="#71717A" font-family="'SFMono-Regular', Consolas, monospace" font-size="10" letter-spacing="2.8">EVERY CHANGE. ONE CLEAR VIEW.</text>
-    <rect x=".5" y=".5" width="1439" height="479" rx="15.5" stroke="#3F3F46"/>
+    <g clip-path="url(#workspace)" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif">
+      <rect x="622" y="44" width="774" height="532" fill="#F6F5F0"/>
+      <path d="M622 106H1396M830 106V539M622 539H1396" stroke="#D9DCD5"/>
+      <rect x="622" y="44" width="774" height="62" fill="#E8EBE4"/>
+      <path d="M622 105H1396" stroke="#D0D5CC"/>
+      <path d="M638 57H950V106H638V57Z" fill="#F6F5F0"/>
+      <path d="M638 57H950V106H638V57Z" stroke="#D0D5CC"/>
+      <rect x="655" y="69" width="44" height="24" rx="5" fill="#DCEBE0"/>
+      <text x="677" y="86" text-anchor="middle" fill="#3B6750" font-size="15" font-weight="600">Git</text>
+      <text x="711" y="87" fill="#242B25" font-size="19" font-weight="500">studio-ui</text>
+      <path d="M919 76L929 86M929 76L919 86" stroke="#7F887D" stroke-width="1.5" stroke-linecap="round"/>
+      <rect x="972" y="69" width="85" height="24" rx="5" fill="#DDE5F0"/>
+      <text x="1014.5" y="86" text-anchor="middle" fill="#4B6589" font-size="14" font-weight="600">Perforce</text>
+      <text x="1070" y="87" fill="#687165" font-size="19">studio-assets</text>
+      <rect x="622" y="106" width="208" height="433" fill="#ECEEE7"/>
+      <path d="M830 106V539" stroke="#D9DCD5"/>
+      <text x="645" y="145" fill="#7A8477" font-size="13" font-weight="600" letter-spacing="1.4">WORKSPACE</text>
+      <g stroke="#667D6B" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M650 170V181M661 172Q661 178 650 178"/><circle cx="661" cy="170" r="2.5" fill="#ECEEE7"/><circle cx="650" cy="184" r="2.5" fill="#ECEEE7"/>
+      </g>
+      <text x="675" y="183" fill="#475846" font-size="17">feature/search</text>
+      <rect x="635" y="205" width="182" height="38" rx="5" fill="#D8E3D7"/>
+      <text x="649" y="230" fill="#293C2D" font-size="18" font-weight="600">Changes</text>
+      <text x="800" y="230" text-anchor="end" fill="#536B55" font-size="17">3</text>
+      <text x="649" y="275" fill="#697465" font-size="18">History</text>
+      <text x="649" y="317" fill="#697465" font-size="18">Stashes</text>
+      <path d="M645 345H807" stroke="#D6DBD0"/>
+      <text x="645" y="377" fill="#7A8477" font-size="13" font-weight="600" letter-spacing="1.4">CHANGED FILES</text>
+      <rect x="635" y="393" width="182" height="34" rx="4" fill="#DDE5DA"/>
+      <g font-size="16">
+        <text x="646" y="416" fill="#7D845A" font-weight="600">M</text><text x="670" y="416" fill="#364B38">search.ts</text>
+        <text x="646" y="452" fill="#4C805B" font-weight="600">A</text><text x="670" y="452" fill="#677361">search.test.ts</text>
+        <text x="646" y="488" fill="#7D845A" font-weight="600">M</text><text x="670" y="488" fill="#677361">palette.css</text>
+      </g>
+      <text x="855" y="147" fill="#283029" font-size="25" font-weight="600" letter-spacing="-.65">Review changes</text>
+      <text x="855" y="181" fill="#6F796B" font-size="17">src/search.ts</text>
+      <text x="1368" y="181" text-anchor="end" fill="#55785B" font-size="17" font-weight="500">+4 <tspan fill="#9D786A">−1</tspan></text>
+      <path d="M830 201H1396" stroke="#DFE2D9"/>
+      <rect x="831" y="202" width="565" height="39" fill="#E8ECF0"/>
+      <text x="855" y="228" fill="#6B7F94" font-family="'Cascadia Mono', Consolas, monospace" font-size="16">@@ −1,3 +1,6 @@</text>
+      <rect x="831" y="280" width="565" height="36" fill="#F2E4DD"/>
+      <rect x="831" y="316" width="565" height="144" fill="#E0EDDF"/>
+      <path d="M884 241V496" stroke="#D1DACD"/>
+      <g font-family="'Cascadia Mono', Consolas, monospace" font-size="17">
+        <g fill="#929D8C" text-anchor="end"><text x="870" y="266">1</text><text x="870" y="302">2</text><text x="870" y="338">2</text><text x="870" y="374">3</text><text x="870" y="410">4</text><text x="870" y="446">5</text><text x="870" y="482">6</text></g>
+        <text x="901" y="266" fill="#525D51"><tspan fill="#726297">export function</tspan> search(query) {</text>
+        <text x="898" y="302" fill="#986F61">−</text><text x="922" y="302" fill="#88695D">return items;</text>
+        <text x="898" y="338" fill="#56805C">+</text><text x="922" y="338" fill="#43694A">const term = query.trim();</text>
+        <text x="898" y="374" fill="#56805C">+</text><text x="922" y="374" fill="#43694A">return items.filter(item =&gt;</text>
+        <text x="898" y="410" fill="#56805C">+</text><text x="942" y="410" fill="#43694A">item.title.includes(term)</text>
+        <text x="898" y="446" fill="#56805C">+</text><text x="922" y="446" fill="#43694A">);</text>
+        <text x="901" y="482" fill="#525D51">}</text>
+      </g>
+      <path d="M830 510H1396" stroke="#DFE2D9"/>
+      <text x="855" y="530" fill="#83907D" font-size="12" letter-spacing=".4">WORKING TREE</text>
+      <circle cx="647" cy="558" r="4" fill="#6C9D79"/>
+      <text x="661" y="563" fill="#6E7C67" font-size="14">Your tools. Your workflow.</text>
+      <text x="1373" y="563" text-anchor="end" fill="#829079" font-size="14">3 files changed</text>
+    </g>
+    <rect x="622.5" y="44.5" width="773" height="531" rx="11.5" stroke="#4D574D"/>
+    <rect x=".5" y=".5" width="1439" height="619" rx="19.5" stroke="#3B413C"/>
   </g>
 </svg>
