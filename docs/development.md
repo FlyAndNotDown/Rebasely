@@ -64,7 +64,7 @@ check on one operating system does not establish support on the others.
 | `src-tauri/icons/` | Application icon source and desktop assets |
 | `scripts/` | Source checks and release tooling |
 | `site/` | GitHub Pages website source and brand artwork |
-| `docs/` | Development and security references |
+| `docs/` | Development guide |
 
 Frontend files use kebab-case, with React entry points `App.tsx` and `main.tsx`.
 Rust modules use snake_case. Tests live beside pure frontend helpers or with
@@ -90,8 +90,3 @@ npm run site:preview
 
 `check:site` typechecks, builds, and checks the website assets. Vite writes
 `site/dist/`.
-
-## Further reading
-
-- [Contributing](../CONTRIBUTING.md)
-- [Security and dependency findings](security.md)
