@@ -803,9 +803,10 @@ mod tests {
         let connection = connection(&workspace);
         let target = workspace.join(" target.txt ");
         fs::write(&target, b"keep\n").unwrap();
+        let expected = fs::canonicalize(&workspace).unwrap().join(" target.txt ");
         assert_eq!(
             workspace_target(&connection, &target.to_string_lossy()).unwrap(),
-            target
+            expected
         );
         let outside = temporary.path().join("outside");
         fs::create_dir(&outside).unwrap();
