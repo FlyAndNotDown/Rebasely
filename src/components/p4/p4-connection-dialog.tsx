@@ -1,3 +1,4 @@
+import { t, useTranslation } from "@/i18n";
 import { useState } from "react";
 import { ChevronDownIcon, Loader2Icon } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -19,8 +20,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useP4 } from "@/state/p4-context";
 
+
+
+export function P4ConnectionDialog() {
+  useTranslation();
 const charsets = [
-  { id: "", label: "Server default" },
+  { id: "", label: t("p4.serverDefault") },
   { id: "utf8", label: "utf8" },
   { id: "utf8-bom", label: "utf8-bom" },
   { id: "utf16", label: "utf16" },
@@ -29,8 +34,6 @@ const charsets = [
   { id: "utf32le", label: "utf32le" },
   { id: "utf32be", label: "utf32be" },
 ];
-
-export function P4ConnectionDialog() {
   const { connection, connectionOpen, setConnectionOpen, saveConnection } = useP4();
   const [port, setPort] = useState("");
   const [user, setUser] = useState("");
@@ -94,40 +97,40 @@ export function P4ConnectionDialog() {
         }}
       >
         <DialogHeader>
-          <DialogTitle>Edit connection</DialogTitle>
+          <DialogTitle>{t("p4.editConnection")}</DialogTitle>
           <DialogDescription>
             {connection?.stream
-              ? `Stream ${connection.stream}`
-              : "Server, user, and client for this workspace."}
+              ? t("p4.streamName", { name: connection.stream })
+              : t("p4.serverUserAndClientForThisWorkspace")}
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-3">
           <div className="grid gap-2">
-            <Label htmlFor="edit-p4-port">Server</Label>
+            <Label htmlFor="edit-p4-port">{t("p4.server")}</Label>
             <Input id="edit-p4-port" className="font-mono" value={port} onChange={(event) => setPort(event.target.value)} />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="grid gap-2">
-              <Label htmlFor="edit-p4-user">User</Label>
+              <Label htmlFor="edit-p4-user">{t("p4.user")}</Label>
               <Input id="edit-p4-user" className="font-mono" value={user} onChange={(event) => setUser(event.target.value)} />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="edit-p4-password">Password</Label>
+              <Label htmlFor="edit-p4-password">{t("p4.password")}</Label>
               <Input
                 id="edit-p4-password"
                 type="password"
                 value={password}
-                placeholder="Optional"
+                placeholder={t("p4.optional")}
                 onChange={(event) => setPassword(event.target.value)}
               />
             </div>
           </div>
           <div className="grid gap-2">
-            <Label htmlFor="edit-p4-client">Client</Label>
+            <Label htmlFor="edit-p4-client">{t("p4.client")}</Label>
             <Input id="edit-p4-client" className="font-mono" value={client} onChange={(event) => setClient(event.target.value)} />
           </div>
           <div className="grid gap-2">
-            <Label>Charset</Label>
+            <Label>{t("p4.charset")}</Label>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button type="button" variant="outline" className="justify-between font-normal">
@@ -146,13 +149,9 @@ export function P4ConnectionDialog() {
           </div>
         </div>
         <DialogFooter>
-          <Button type="button" variant="outline" disabled={saving} onClick={() => setConnectionOpen(false)}>
-            Cancel
-          </Button>
+          <Button type="button" variant="outline" disabled={saving} onClick={() => setConnectionOpen(false)}>{t("p4.cancel")}</Button>
           <Button type="button" disabled={saving || !port.trim() || !user.trim() || !client.trim()} onClick={() => void submit()}>
-            {saving ? <Loader2Icon className="animate-spin" /> : null}
-            Save
-          </Button>
+            {saving ? <Loader2Icon className="animate-spin" /> : null}{t("p4.save")}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -98,6 +98,35 @@ export interface P4GetRevision {
   preview: boolean;
 }
 
+export interface P4RevisionRange {
+  from: string;
+  to: string;
+}
+
+export interface P4IntegrateRequest {
+  source: string;
+  target: string;
+  range: P4RevisionRange | null;
+  changeId: string;
+}
+
+export type P4UndoSelector =
+  | { mode: "revision"; revision: string }
+  | { mode: "range"; from: string; to: string }
+  | { mode: "changelist"; change: string };
+
+export interface P4UndoRequest {
+  path: string;
+  selector: P4UndoSelector;
+  changeId: string;
+}
+
+export interface P4OperationPreview {
+  output: string;
+  fingerprint: string;
+  target: string;
+}
+
 export interface P4Auth {
   port: string;
   user: string;

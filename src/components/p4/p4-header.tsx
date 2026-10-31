@@ -1,3 +1,4 @@
+import { t, useTranslation } from "@/i18n";
 import type { ReactNode } from "react";
 import { CableIcon, DownloadIcon, FolderPenIcon, RefreshCwIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -9,6 +10,7 @@ const actionClass =
   "h-[calc(1.75rem-2px)]! w-[calc(1.75rem-2px)]! rounded-[6px] text-foreground hover:bg-background dark:hover:bg-background";
 
 export function P4Header() {
+  useTranslation();
   const { connection, busy, refresh, sync, setConnectionOpen, setWorkspaceOpen } = useP4();
   const client = connection?.client ?? "";
 
@@ -24,17 +26,17 @@ export function P4Header() {
         </HoverTip>
       ) : null}
       <div className="flex h-7 shrink-0 items-center gap-1.5 rounded-[min(var(--radius-md),12px)] border border-input bg-secondary px-0.5">
-        <HeaderButton label="Refresh" disabled={busy} onClick={() => void refresh()}>
+        <HeaderButton label={t("p4.refresh")} disabled={busy} onClick={() => void refresh()}>
           <RefreshCwIcon className="size-4" />
         </HeaderButton>
-        <HeaderButton label="Get latest" disabled={busy} onClick={() => void sync()}>
+        <HeaderButton label={t("p4.getLatest")} disabled={busy} onClick={() => void sync()}>
           <DownloadIcon className="size-4" />
         </HeaderButton>
         <span className="h-3.5 w-px self-center bg-foreground/20" />
-        <HeaderButton label="Edit connection" disabled={busy} onClick={() => setConnectionOpen(true)}>
+        <HeaderButton label={t("p4.editConnection")} disabled={busy} onClick={() => setConnectionOpen(true)}>
           <CableIcon className="size-4" />
         </HeaderButton>
-        <HeaderButton label="Edit workspace" disabled={busy} onClick={() => setWorkspaceOpen(true)}>
+        <HeaderButton label={t("p4.editWorkspace")} disabled={busy} onClick={() => setWorkspaceOpen(true)}>
           <FolderPenIcon className="size-4" />
         </HeaderButton>
       </div>
@@ -53,6 +55,7 @@ function HeaderButton({
   disabled: boolean;
   children: ReactNode;
 }) {
+  useTranslation();
   return (
     <Tooltip>
       <TooltipTrigger asChild>

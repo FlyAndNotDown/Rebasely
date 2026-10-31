@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { t } from "@/i18n";
 import type {
   P4Auth,
   P4ChangePage,
@@ -13,6 +14,9 @@ import type {
   P4EntryStatus,
   P4FileSearch,
   P4GetRevision,
+  P4IntegrateRequest,
+  P4UndoRequest,
+  P4OperationPreview,
   P4Location,
   P4Executables,
   P4OpenResult,
@@ -122,6 +126,10 @@ export const p4Api = {
     call<string>("p4_save_change", { connection, changeId, description }),
   newChange: (connection: P4Connection, description: string) =>
     call<string>("p4_new_change", { connection, description }),
+  deleteChange: (connection: P4Connection, changeId: string) =>
+    call<void>("p4_delete_change", { connection, changeId }),
+  moveFile: (connection: P4Connection, source: string, destination: string) =>
+    call<void>("p4_move_file", { connection, source, destination }),
   reopen: (connection: P4Connection, changeId: string, files: string[]) =>
     call<void>("p4_reopen", { connection, changeId, files }),
   revert: (connection: P4Connection, files: string[], wipe?: string[]) =>
@@ -141,10 +149,18 @@ export const p4Api = {
     call<string>("p4_sync", { connection, paths, activityId: activityId ?? null }),
   getRevision: (connection: P4Connection, request: P4GetRevision, activityId?: string) =>
     call<string>("p4_get_revision", { connection, request, activityId: activityId ?? null }),
+  previewIntegrate: (connection: P4Connection, request: P4IntegrateRequest) =>
+    call<P4OperationPreview>("p4_preview_integrate", { connection, request }),
+  applyIntegrate: (connection: P4Connection, request: P4IntegrateRequest, fingerprint: string) =>
+    call<string>("p4_apply_integrate", { connection, request, fingerprint }),
+  previewUndo: (connection: P4Connection, request: P4UndoRequest) =>
+    call<P4OperationPreview>("p4_preview_undo", { connection, request }),
+  applyUndo: (connection: P4Connection, request: P4UndoRequest, fingerprint: string) =>
+    call<string>("p4_apply_undo", { connection, request, fingerprint }),
   reconcile: (connection: P4Connection, activityId?: string) =>
     call<string>("p4_reconcile", { connection, activityId: activityId ?? null }),
-  fileAction: (connection: P4Connection, action: "edit" | "add" | "delete", paths: string[]) =>
-    call<void>("p4_file_action", { connection, action, paths }),
+  fileAction: (connection: P4Connection, action: "edit" | "add" | "delete" | "lock" | "unlock", paths: string[], changeId?: string) =>
+    call<void>("p4_file_action", { connection, action, paths, changeId: changeId ?? null }),
   login: (connection: P4Connection, password: string) =>
     call<void>("p4_login", { connection, password }),
   checkConnection: (auth: P4Auth) => call<P4CheckedConnection>("p4_check_connection", { auth }),
@@ -179,14 +195,14 @@ export function syncSummary(output: string): string {
       deleted += 1;
     }
   }
-  if (updated + added + deleted === 0) return "Up to date";
+  if (updated + added + deleted === 0) return t("p4.status.current");
   const parts: string[] = [];
-  if (updated > 0) parts.push(`Updated ${updated} ${updated === 1 ? "file" : "files"}`);
-  if (added > 0) parts.push(`added ${added} ${added === 1 ? "file" : "files"}`);
-  if (deleted > 0) parts.push(`deleted ${deleted} ${deleted === 1 ? "file" : "files"}`);
+  if (updated > 0) parts.push(t("p4.sync.updated", { count: updated }));
+  if (added > 0) parts.push(t("p4.sync.added", { count: added }));
+  if (deleted > 0) parts.push(t("p4.sync.deleted", { count: deleted }));
   const [first, ...rest] = parts;
   const head = first.charAt(0).toUpperCase() + first.slice(1);
-  return rest.length > 0 ? `${head}, ${rest.join(", ")}.` : `${head}.`;
+  return [head, ...rest].join(t("p4.sync.separator")) + t("p4.sync.punctuation");
 }
 
 export function changeSummary(description: string): string {

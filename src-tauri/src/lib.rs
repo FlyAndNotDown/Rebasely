@@ -1257,6 +1257,20 @@ async fn p4_new_change(connection: p4::P4Connection, description: String) -> App
 }
 
 #[tauri::command]
+async fn p4_delete_change(connection: p4::P4Connection, change_id: String) -> AppResult<()> {
+    blocking(move || p4::delete_change(&connection, &change_id)).await
+}
+
+#[tauri::command]
+async fn p4_move_file(
+    connection: p4::P4Connection,
+    source: String,
+    destination: String,
+) -> AppResult<()> {
+    blocking(move || p4::move_file(&connection, &source, &destination)).await
+}
+
+#[tauri::command]
 async fn p4_reopen(
     connection: p4::P4Connection,
     change_id: String,
@@ -1366,12 +1380,47 @@ async fn p4_reconcile(
 }
 
 #[tauri::command]
+async fn p4_preview_integrate(
+    connection: p4::P4Connection,
+    request: p4::P4IntegrateRequest,
+) -> AppResult<p4::P4OperationPreview> {
+    blocking(move || p4::preview_integrate(&connection, &request)).await
+}
+
+#[tauri::command]
+async fn p4_apply_integrate(
+    connection: p4::P4Connection,
+    request: p4::P4IntegrateRequest,
+    fingerprint: String,
+) -> AppResult<String> {
+    blocking(move || p4::apply_integrate(&connection, &request, &fingerprint)).await
+}
+
+#[tauri::command]
+async fn p4_preview_undo(
+    connection: p4::P4Connection,
+    request: p4::P4UndoRequest,
+) -> AppResult<p4::P4OperationPreview> {
+    blocking(move || p4::preview_undo(&connection, &request)).await
+}
+
+#[tauri::command]
+async fn p4_apply_undo(
+    connection: p4::P4Connection,
+    request: p4::P4UndoRequest,
+    fingerprint: String,
+) -> AppResult<String> {
+    blocking(move || p4::apply_undo(&connection, &request, &fingerprint)).await
+}
+
+#[tauri::command]
 async fn p4_file_action(
     connection: p4::P4Connection,
     action: String,
     paths: Vec<String>,
+    change_id: Option<String>,
 ) -> AppResult<()> {
-    blocking(move || p4::file_action(&connection, &action, &paths)).await
+    blocking(move || p4::file_action(&connection, &action, &paths, change_id.as_deref())).await
 }
 
 #[tauri::command]
@@ -1824,6 +1873,8 @@ pub fn run() {
             p4_submit,
             p4_save_change,
             p4_new_change,
+            p4_delete_change,
+            p4_move_file,
             p4_reopen,
             p4_revert,
             p4_revert_unchanged,
@@ -1836,6 +1887,10 @@ pub fn run() {
             p4_sync,
             p4_reconcile,
             p4_file_action,
+            p4_preview_integrate,
+            p4_apply_integrate,
+            p4_preview_undo,
+            p4_apply_undo,
             p4_login,
             p4_check_connection,
             p4_list_streams,

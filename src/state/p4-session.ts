@@ -4,6 +4,12 @@ import { sameRepoPath } from "@/lib/format";
 
 export type P4View = "pending" | "submitted" | "workspace";
 
+export interface P4ResolveRequest {
+  id: number;
+  change: string;
+  path: string;
+}
+
 export interface P4Session {
   tabId: string;
   connection: P4Connection;
@@ -22,6 +28,26 @@ export interface P4Session {
   submittedUser: string;
   submittedClient: string;
   view: P4View;
+  resolveRequest?: P4ResolveRequest | null;
+}
+
+/** Operation results select only their own target; unrelated conflicts stay untouched. */
+export function showP4OperationResult(current: P4Session, target: string, changeId: string, resolveId: number): P4Session {
+  const change = current.pending.find((item) => item.id === changeId);
+  if (!change) return { ...current, view: "pending", resolveRequest: null };
+  const file = change.files.find((item) => !item.shelved && sameRepoPath(item.localPath, target));
+  const shown = file ? { path: file.depotPath, shelved: false } : shownFile(change.files);
+  return {
+    ...current,
+    view: "pending",
+    selectedChange: changeId,
+    selectedFile: shown.path,
+    selectedShelved: shown.shelved,
+    description: current.selectedChange === changeId ? current.description : change.description,
+    diff: null,
+    diffFor: "",
+    resolveRequest: file?.status === "conflict" ? { id: resolveId, change: changeId, path: file.depotPath } : null,
+  };
 }
 
 export function sameP4Connection(left: P4Connection, right: P4Connection) {

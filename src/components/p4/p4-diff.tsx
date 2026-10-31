@@ -1,3 +1,4 @@
+import { t, useTranslation } from "@/i18n";
 import { useMemo } from "react";
 import { Columns2Icon } from "lucide-react";
 import { toast } from "sonner";
@@ -13,14 +14,14 @@ import type { DiffLine, FileDiff } from "@/types/git";
 
 async function copyPath(value: string) {
   if (!value) {
-    toast.error("Nothing to copy");
+    toast.error(t("p4.nothingToCopy"));
     return;
   }
   try {
     await navigator.clipboard.writeText(value);
-    toast.success("Copied path");
+    toast.success(t("p4.copiedPath"));
   } catch {
-    toast.error("Could not copy");
+    toast.error(t("p4.couldNotCopy"));
   }
 }
 
@@ -39,6 +40,7 @@ export function P4Diff({
   captions?: [string, string];
   chrome?: boolean;
 }) {
+  useTranslation();
   const { prefs, setDiffOptions } = useGitPick(["prefs", "setDiffOptions"]);
   const contentLines = useMemo(() => diff?.lines.filter((line) => line.kind !== "hunk") ?? [], [diff]);
   const sideBySide = split ?? prefs.diffSplit;
@@ -66,16 +68,16 @@ export function P4Diff({
             className="min-w-0 truncate text-left font-mono text-sm hover:underline"
             onClick={() => void copyPath(diff.path)}
           >
-            {diff.path || "Diff"}
+            {diff.path || t("p4.diff")}
           </button>
           {diff.binary ? null : (
-            <HoverTip label="Side by side">
+            <HoverTip label={t("p4.sideBySide")}>
               <Button
                 type="button"
                 size="icon-xs"
                 variant={sideBySide ? "secondary" : "ghost"}
                 aria-pressed={sideBySide}
-                aria-label="Side by side"
+                aria-label={t("p4.sideBySide")}
                 onClick={() => void setDiffOptions({ split: !sideBySide })}
               >
                 <Columns2Icon />
@@ -91,12 +93,10 @@ export function P4Diff({
         </div>
       ) : null}
       {diff.binary ? (
-        <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-          Binary file
-        </div>
+        <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">{t("p4.binaryFile")}</div>
       ) : contentLines.length === 0 ? (
         <div className="flex flex-1 items-center justify-center p-6 text-center text-sm text-muted-foreground">
-          {captions ? empty : "No differences against the have revision"}
+          {captions ? empty : t("p4.noDifferencesAgainstTheHaveRevision")}
         </div>
       ) : sideBySide ? (
         <SplitDiff lines={contentLines} />
@@ -104,15 +104,14 @@ export function P4Diff({
         <InlineDiff lines={contentLines} />
       )}
       {diff.truncated ? (
-        <div className="shrink-0 border-t px-3 py-1.5 text-[11px] text-muted-foreground">
-          Diff truncated
-        </div>
+        <div className="shrink-0 border-t px-3 py-1.5 text-[11px] text-muted-foreground">{t("p4.diffTruncated")}</div>
       ) : null}
     </div>
   );
 }
 
 function InlineDiff({ lines }: { lines: DiffLine[] }) {
+  useTranslation();
   const { viewportRef, start, end, before, after } = useWindowedRows(lines.length, 20);
   const widest = useMemo(() => lines.reduce((width, line) => Math.max(width, textColumns(line.content)), 0), [lines]);
   return (
@@ -129,6 +128,7 @@ function InlineDiff({ lines }: { lines: DiffLine[] }) {
 }
 
 function SplitDiff({ lines }: { lines: DiffLine[] }) {
+  useTranslation();
   const pairs = useMemo(() => splitRows(lines), [lines]);
   const { viewportRef, start, end, before, after } = useWindowedRows(pairs.length, 20);
   return (
@@ -151,6 +151,7 @@ function SplitDiff({ lines }: { lines: DiffLine[] }) {
 }
 
 function SplitCell({ line, side }: { line: DiffLine | undefined; side: "left" | "right" }) {
+  useTranslation();
   const blank = !line || line.kind === "hunk" || (side === "left" && line.kind === "add") || (side === "right" && line.kind === "delete");
   const lineno = blank || !line ? "" : side === "left" ? line.oldLineno : line.newLineno;
   return (
@@ -164,6 +165,7 @@ function SplitCell({ line, side }: { line: DiffLine | undefined; side: "left" | 
 }
 
 function DiffRow({ line }: { line: DiffLine }) {
+  useTranslation();
   const mark = line.kind === "add" ? "+" : line.kind === "delete" ? "−" : line.kind === "hunk" ? "" : " ";
   return (
     <div className={cn("flex h-5 min-w-0", lineClass(line.kind))}>

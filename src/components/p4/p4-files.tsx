@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
-import { DownloadIcon, FilePenIcon, FolderIcon, FolderOpenIcon, FolderSearchIcon, FolderTreeIcon, HistoryIcon, PlusIcon, Trash2Icon } from "lucide-react";
+import { ArrowRightLeftIcon, DownloadIcon, FilePenIcon, FolderIcon, FolderOpenIcon, FolderSearchIcon, FolderTreeIcon, GitMergeIcon, HistoryIcon, PlusIcon, Trash2Icon, Undo2Icon } from "lucide-react";
 import { toast } from "sonner";
 import { AuthorName, ExactTime, RevisionDot } from "@/components/revision-meta";
 import { FileTree, FileTreeFilter, FilteredFileTree, type FileTreeEntry } from "@/components/file-tree";
@@ -7,6 +7,10 @@ import { ChangeBadge } from "@/components/p4/change-badge";
 import { FileStatusIcon } from "@/components/p4/file-status-icon";
 import { FileStatusTip } from "@/components/p4/file-status-tip";
 import { P4GetRevisionDialog } from "@/components/p4/p4-get-revision-dialog";
+import { P4MoveDialog } from "@/components/p4/p4-move-dialog";
+import { P4OperationDialog } from "@/components/p4/p4-operation-dialog";
+import type { P4OperationKind } from "@/lib/p4-operation-preview";
+import { t, useTranslation } from "@/i18n";
 import { P4Diff } from "@/components/p4/p4-diff";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import {
@@ -24,6 +28,7 @@ import { normalizeRepoPath, pathsIgnoreCase } from "@/lib/format";
 import { errorMessage, gitApi, isCancelled } from "@/lib/git";
 import { joinRoot, type SearchNode } from "@/lib/file-search";
 import { changeSummary, p4Api, relativeToRoot } from "@/lib/p4";
+import { p4DisplayText } from "@/lib/p4-display";
 import { useFileQuery } from "@/lib/use-file-query";
 import { cn } from "@/lib/utils";
 import { useP4 } from "@/state/p4-context";
@@ -31,7 +36,10 @@ import type { FileDiff } from "@/types/git";
 import type { P4Connection, P4DirEntry, P4EntryStatus, P4Revision } from "@/types/p4";
 
 export function P4Files() {
+  const { t } = useTranslation();
   const p4 = useP4();
+  const [moving, setMoving] = useState<string | null>(null);
+  const [operation, setOperation] = useState<{ kind: P4OperationKind; path: string; depot: boolean } | null>(null);
   const root = p4.connection?.root ?? "";
   const [query, setQuery] = useState("");
   const [mode, setMode] = useState<"workspace" | "depot">("workspace");
@@ -144,7 +152,7 @@ export function P4Files() {
       const located = await p4Api.locate(connection, entry.path);
       const path = target === "depot" ? located.depot : located.local;
       if (!path) {
-        toast.error("That path is not in this workspace.");
+        toast.error(t("p4.thatPathIsNotInThisWorkspace"));
         return;
       }
       setQuery("");
@@ -172,7 +180,7 @@ export function P4Files() {
     try {
       const local = entry.path.startsWith("//") ? (await p4Api.locate(connection, entry.path)).local : entry.path;
       if (!local) {
-        toast.error("That path is not in this workspace.");
+        toast.error(t("p4.thatPathIsNotInThisWorkspace"));
         return;
       }
       if (entry.dir) await gitApi.openInFileManager(local);
@@ -186,50 +194,45 @@ export function P4Files() {
   function fileMenu(entry: FileTreeEntry) {
     const path = p4TreeTarget(entry.path, entry.dir);
     return (
-      <ContextMenuContent className="w-48">
+      <ContextMenuContent className="min-w-60">
         <ContextMenuItem disabled={p4.busy} onClick={() => void p4.sync([path])}>
-          <DownloadIcon />
-          Get latest
-        </ContextMenuItem>
+          <DownloadIcon />{t("p4.getLatest")}</ContextMenuItem>
         <ContextMenuItem disabled={p4.busy} onClick={() => setRevisionPath(path)}>
-          <HistoryIcon />
-          Get revision
-        </ContextMenuItem>
+          <HistoryIcon />{t("p4.getRevision")}</ContextMenuItem>
+        {!entry.dir ? <>
+          <ContextMenuItem disabled={p4.busy} onClick={() => setOperation({ kind: "integrate", path: entry.path, depot: mode === "depot" })}>
+            <GitMergeIcon />{t("p4-operations.integrate.title")}
+          </ContextMenuItem>
+          {mode === "workspace" ? <ContextMenuItem disabled={p4.busy} onClick={() => setOperation({ kind: "undo", path: entry.path, depot: false })}>
+            <Undo2Icon />{t("p4-operations.undo.title")}
+          </ContextMenuItem> : null}
+        </> : null}
         <ContextMenuSeparator />
         <ContextMenuItem disabled={p4.busy} onClick={() => void p4.fileAction("edit", [path])}>
-          <FilePenIcon />
-          Check out
-        </ContextMenuItem>
+          <FilePenIcon />{t("p4.checkOut")}</ContextMenuItem>
         <ContextMenuItem disabled={p4.busy} onClick={() => void p4.fileAction("add", [path])}>
-          <PlusIcon />
-          Mark for add
-        </ContextMenuItem>
+          <PlusIcon />{t("p4.markForAdd")}</ContextMenuItem>
+        {mode === "workspace" && !entry.dir ? (
+          <ContextMenuItem disabled={p4.busy} onClick={() => setMoving(entry.path)}>
+            <ArrowRightLeftIcon />{t("p4.move.title")}
+          </ContextMenuItem>
+        ) : null}
         <ContextMenuItem disabled={p4.busy} onClick={() => void p4.fileAction("delete", [path])}>
-          <Trash2Icon />
-          Mark for delete
-        </ContextMenuItem>
+          <Trash2Icon />{t("p4.markForDelete")}</ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuSub>
           <ContextMenuSubTrigger>
-            <FolderSearchIcon />
-            Show in
-          </ContextMenuSubTrigger>
+            <FolderSearchIcon />{t("p4.showIn")}</ContextMenuSubTrigger>
           <ContextMenuSubContent className="w-40">
             {mode === "workspace" ? (
               <ContextMenuItem onClick={() => void revealLocation(entry, "depot")}>
-                <FolderTreeIcon />
-                Depot
-              </ContextMenuItem>
+                <FolderTreeIcon />{t("p4.depot")}</ContextMenuItem>
             ) : (
               <ContextMenuItem onClick={() => void revealLocation(entry, "workspace")}>
-                <FolderIcon />
-                Workspace
-              </ContextMenuItem>
+                <FolderIcon />{t("p4.workspace")}</ContextMenuItem>
             )}
             <ContextMenuItem onClick={() => void showInExplorer(entry)}>
-              <FolderOpenIcon />
-              File Explorer
-            </ContextMenuItem>
+              <FolderOpenIcon />{t("p4.fileExplorer")}</ContextMenuItem>
           </ContextMenuSubContent>
         </ContextMenuSub>
       </ContextMenuContent>
@@ -238,14 +241,28 @@ export function P4Files() {
 
   return (
     <>
+      {moving ? <P4MoveDialog key={`${connectionKey}:${moving}`} source={moving} onClose={() => setMoving(null)} onMoved={(destination) => {
+        ++request.current;
+        ++diffRequest.current;
+        const path = joinRoot(root, pathsIgnoreCase() ? destination.replace(/\\/g, "/") : destination);
+        setQuery("");
+        setSelected(path);
+        setHistory([]);
+        setSelectedRev(null);
+        setRevisionDiff(null);
+        setHistoryLoading(false);
+        setRevisionLoading(false);
+        setReveal({ id: ++revealId.current, mode: "workspace", path, dir: false });
+      }} /> : null}
+      {operation ? <P4OperationDialog key={`${connectionKey}:${operation.kind}:${operation.path}`} operation={operation.kind} path={operation.path} depot={operation.depot} onClose={() => setOperation(null)} /> : null}
       <ResizablePanelGroup orientation="horizontal" className="min-h-0 min-w-0 flex-1">
       <ResizablePanel id="p4-tree" defaultSize="28%" minSize="18%" maxSize="46%">
         <div className="absolute inset-0 flex min-h-0 flex-col">
           <FileTreeFilter
-            title={mode === "depot" ? "Depot" : "Workspace"}
+            title={mode === "depot" ? t("p4.depot") : t("p4.workspace")}
             query={query}
             onQuery={setQuery}
-            placeholder={mode === "depot" ? "Name or //depot/name" : "Filter files"}
+            placeholder={mode === "depot" ? t("p4.nameOrDepotname") : t("p4.filterFiles")}
             leading={<TreeMode mode={mode} onMode={setMode} />}
           />
           <div className="relative min-h-0 flex-1 overflow-auto py-1">
@@ -277,18 +294,18 @@ export function P4Files() {
                 </div>
                 {fileQuery.active ? (
                     fileQuery.searching ? (
-                    <FileTreeSkeleton fill label="Searching files" />
+                    <FileTreeSkeleton fill label={t("p4.searchingFiles")} />
                   ) : (
                     <>
                       {fileQuery.result?.scope ? (
-                        <p className="px-3 py-1 text-[11px] text-muted-foreground">{fileQuery.result.scope}</p>
+                        <p className="px-3 py-1 text-[11px] text-muted-foreground">{p4DisplayText(fileQuery.result.scope)}</p>
                       ) : null}
                       {fileQuery.result?.truncated ? (
-                        <p className="px-3 py-1 text-[11px] text-muted-foreground">Showing the first 200 matches.</p>
+                        <p className="px-3 py-1 text-[11px] text-muted-foreground">{t("p4.showingTheFirst200Matches")}</p>
                       ) : null}
                       {fileQuery.result && fileQuery.result.hits.length === 0 ? (
                         !fileQuery.result.scope || fileQuery.result.scope.startsWith("In ") ? (
-                          <p className="px-3 py-2 text-xs text-muted-foreground">No matching files.</p>
+                          <p className="px-3 py-2 text-xs text-muted-foreground">{t("p4.noMatchingFiles")}</p>
                         ) : null
                       ) : (
                       <FilteredFileTree
@@ -338,7 +355,7 @@ export function P4Files() {
           <div className="flex h-10 shrink-0 items-center border-b px-3">
             <HoverTip label={selected ? shownPath(mode, root, selected) : ""}>
               <div className="min-w-0 flex-1 truncate font-mono text-xs">
-                {selected ? shownPath(mode, root, selected) : "Select a file"}
+                {selected ? shownPath(mode, root, selected) : t("p4.selectAFile")}
               </div>
             </HoverTip>
           </div>
@@ -347,9 +364,9 @@ export function P4Files() {
               <ResizablePanel id="p4-file-history" defaultSize="34%" minSize="16%">
                 <div className="absolute inset-0 overflow-auto px-1 py-1">
                   {historyLoading && !history ? (
-                    <HistorySkeleton fill label="Loading history" />
+                    <HistorySkeleton fill label={t("p4.loadingHistory")} />
                   ) : history && history.length === 0 ? (
-                    <p className="p-3 text-xs text-muted-foreground">No revisions.</p>
+                    <p className="p-3 text-xs text-muted-foreground">{t("p4.noRevisions")}</p>
                   ) : (
                     history?.map((revision) => (
                       <button
@@ -364,7 +381,7 @@ export function P4Files() {
                         <RevisionDot />
                         <ChangeBadge id={revision.rev} />
                         <span className="min-w-0 flex-1 truncate text-xs">
-                          {changeSummary(revision.description) || "No description"}
+                          {changeSummary(revision.description) || t("p4.noDescription")}
                         </span>
                         <AuthorName name={revision.user} />
                         <ExactTime time={revision.time} />
@@ -378,14 +395,12 @@ export function P4Files() {
                 <P4Diff
                   diff={revisionDiff}
                   loading={revisionLoading || (historyLoading && !revisionDiff)}
-                  empty="No revision to show"
+                  empty={t("p4.noRevisionToShow")}
                 />
               </ResizablePanel>
             </ResizablePanelGroup>
           ) : (
-            <div className="flex min-h-0 flex-1 items-center justify-center p-6 text-center text-sm text-muted-foreground">
-              Open a file to see its history.
-            </div>
+            <div className="flex min-h-0 flex-1 items-center justify-center p-6 text-center text-sm text-muted-foreground">{t("p4.openAFileToSeeItsHistory")}</div>
           )}
         </div>
       </ResizablePanel>
@@ -408,6 +423,7 @@ function WorkspaceTree({
   reveal: TreeReveal | null;
   menu: (entry: FileTreeEntry) => ReactNode;
 }) {
+  useTranslation();
   const { connection, listDir, filesEpoch } = useP4();
   const root = connection?.root ?? "";
   const cacheKey = treeCacheKey("workspace", connection);
@@ -502,9 +518,9 @@ function WorkspaceTree({
 
   if (!entries[""]) {
     if (failed) {
-      return <p className="px-3 py-2 text-xs text-muted-foreground">Could not read the workspace folder.</p>;
+      return <p className="px-3 py-2 text-xs text-muted-foreground">{t("p4.couldNotReadTheWorkspaceFolder")}</p>;
     }
-    return <FileTreeSkeleton fill label="Loading workspace" />;
+    return <FileTreeSkeleton fill label={t("p4.loadingWorkspace")} />;
   }
   return (
     <FileTree
@@ -533,6 +549,7 @@ function DepotTree({
   reveal: TreeReveal | null;
   menu: (entry: FileTreeEntry) => ReactNode;
 }) {
+  useTranslation();
   const { connection, listDepot, filesEpoch } = useP4();
   const cacheKey = treeCacheKey("depot", connection);
   const cached = cacheKey ? treeSnapshots.get(cacheKey) : undefined;
@@ -610,9 +627,9 @@ function DepotTree({
 
   if (!entries[""]) {
     if (failed) {
-      return <p className="px-3 py-2 text-xs text-muted-foreground">Could not read the depot.</p>;
+      return <p className="px-3 py-2 text-xs text-muted-foreground">{t("p4.couldNotReadTheDepot")}</p>;
     }
-    return <FileTreeSkeleton fill label="Loading depot" />;
+    return <FileTreeSkeleton fill label={t("p4.loadingDepot")} />;
   }
   return (
     <FileTree
@@ -642,14 +659,15 @@ function TreeMode({
   mode: "workspace" | "depot";
   onMode: (mode: "workspace" | "depot") => void;
 }) {
+  useTranslation();
   return (
     <SegmentedControl
-      label="File tree"
+      label={t("p4.fileTree")}
       value={mode}
       onChange={onMode}
       options={[
-        { value: "workspace", label: "Workspace" },
-        { value: "depot", label: "Depot" },
+        { value: "workspace", label: t("p4.workspace") },
+        { value: "depot", label: t("p4.depot") },
       ]}
     />
   );

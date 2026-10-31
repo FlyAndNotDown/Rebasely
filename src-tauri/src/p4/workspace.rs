@@ -626,6 +626,10 @@ pub fn list_dir(connection: &P4Connection, relative: &str) -> AppResult<Vec<P4Di
 
 fn workspace_directory(root: &Path, directory: &str) -> AppResult<PathBuf> {
     let directory = PathBuf::from(strip_verbatim_prefix(directory.trim()));
+    workspace_directory_path(root, directory)
+}
+
+pub(super) fn workspace_directory_path(root: &Path, directory: PathBuf) -> AppResult<PathBuf> {
     let dir = if directory.as_os_str().is_empty() {
         root.to_path_buf()
     } else if directory.is_absolute() {
@@ -1509,6 +1513,9 @@ fn status_of(record: &ZtagRecord) -> (String, String) {
             push_line(&mut lines, format!("Your changelist {change}"));
         }
     }
+    if record.contains_key("ourLock") {
+        push_line(&mut lines, "Locked by you".to_string());
+    }
     for opener in &openers {
         note_opener(&mut lines, opener);
     }
@@ -1648,6 +1655,34 @@ pub fn new_change(connection: &P4Connection, description: &str) -> AppResult<Str
     let spec = blank_change_spec(&connection.client, &connection.user, description);
     let output = run_ok(&env, &["change", "-i"], Some(&spec))?;
     created_change_id(&output).ok_or_else(|| AppError::msg(output.trim().to_string()))
+}
+
+pub fn delete_change(connection: &P4Connection, change_id: &str) -> AppResult<()> {
+    let env = env_for(connection);
+    delete_change_with(connection, change_id, |args| run_ok(&env, args, None))
+}
+
+fn delete_change_with(
+    connection: &P4Connection,
+    change_id: &str,
+    mut run: impl FnMut(&[&str]) -> AppResult<String>,
+) -> AppResult<()> {
+    let id = require_numbered(change_id)?;
+    if id.parse::<i64>().unwrap_or(0) <= 0 {
+        return Err(AppError::msg("Choose a numbered changelist."));
+    }
+    let spec = run(&["change", "-o", &id])?;
+    if spec_field(&spec, "Status") != "pending"
+        || spec_field(&spec, "Client") != connection.client
+        || spec_field(&spec, "User") != connection.user
+    {
+        return Err(AppError::msg(
+            "Choose your own pending changelist in this workspace.",
+        ));
+    }
+    // The server atomically refuses a changelist with opened files or a shelf.
+    run(&["change", "-d", &id])?;
+    Ok(())
 }
 
 pub fn reopen(connection: &P4Connection, change_id: &str, files: &[String]) -> AppResult<()> {
@@ -2283,7 +2318,7 @@ fn file_at(path: &str, suffix: &str) -> String {
     format!("{}{suffix}", file_spec(path))
 }
 
-fn workspace_file_spec(root: &str, path: &str) -> String {
+pub(super) fn workspace_file_spec(root: &str, path: &str) -> String {
     file_spec(&workspace_cli_path(root, path))
 }
 
@@ -2292,12 +2327,13 @@ fn workspace_file_at(root: &str, path: &str, suffix: &str) -> String {
 }
 
 fn workspace_cli_path(root: &str, path: &str) -> String {
+    let path = strip_verbatim_prefix(path);
     if cfg!(windows) {
-        if let Some(local) = local_unc_path(root, path) {
+        if let Some(local) = local_unc_path(root, &path) {
             return local;
         }
     }
-    path.to_string()
+    path
 }
 
 /// A forward-slash UNC path inside this workspace is local, even though it begins with //.
@@ -2461,16 +2497,59 @@ pub fn reconcile(connection: &P4Connection, mut progress: impl FnMut(&str)) -> A
     )
 }
 
-pub fn file_action(connection: &P4Connection, action: &str, paths: &[String]) -> AppResult<()> {
+pub fn file_action(
+    connection: &P4Connection,
+    action: &str,
+    paths: &[String],
+    change_id: Option<&str>,
+) -> AppResult<()> {
+    let args = file_action_args(connection, action, paths, change_id)?;
+    run_owned(&env_for(connection), &args, None)?;
+    Ok(())
+}
+
+fn file_action_args(
+    connection: &P4Connection,
+    action: &str,
+    paths: &[String],
+    change_id: Option<&str>,
+) -> AppResult<Vec<String>> {
     let command = match action {
-        "edit" | "add" | "delete" => action,
+        "edit" | "add" | "delete" | "lock" | "unlock" => action,
         _ => return Err(AppError::msg("Unsupported file action.")),
     };
     if paths.is_empty() {
         return Err(AppError::msg("Choose a file."));
     }
-    let env = env_for(connection);
     let mut args = vec![command.to_string()];
+    if matches!(command, "lock" | "unlock") {
+        let id = change_id.map(str::trim).unwrap_or_default();
+        if id != "default"
+            && (id.is_empty()
+                || !id.bytes().all(|byte| byte.is_ascii_digit())
+                || id.parse::<i64>().unwrap_or(0) <= 0)
+        {
+            return Err(AppError::msg(
+                "Choose a pending changelist to lock or unlock files.",
+            ));
+        }
+        for path in paths {
+            let depot = path.starts_with("//") && local_unc_path(&connection.root, path).is_none();
+            if path.is_empty()
+                || path.chars().any(|ch| matches!(ch, '\0' | '\n' | '\r'))
+                || path.contains("...")
+                || (depot && path.contains(['*', '#', '@']))
+                || (!depot && !Path::new(path).is_absolute())
+            {
+                return Err(AppError::msg(
+                    "Choose explicit opened files to lock or unlock.",
+                ));
+            }
+        }
+        // Numbered changelists need -c, especially for unlock. Always include
+        // the selected files; omitting them would affect the whole changelist.
+        args.extend(["-c".to_string(), id.to_string()]);
+    }
     if command == "add" {
         // Unlike other commands, add -f needs literal filenames, including wildcards.
         args.push("-f".into());
@@ -2486,8 +2565,103 @@ pub fn file_action(connection: &P4Connection, action: &str, paths: &[String]) ->
                 .map(|path| workspace_file_spec(&connection.root, path)),
         );
     }
-    run_owned(&env, &args, None)?;
+    Ok(args)
+}
+
+pub fn move_file(connection: &P4Connection, source: &str, destination: &str) -> AppResult<()> {
+    let env = env_for(connection);
+    move_file_with(connection, source, destination, |args| {
+        run_ok(&env, args, None)
+    })
+}
+
+fn move_file_with(
+    connection: &P4Connection,
+    source: &str,
+    destination: &str,
+    mut run: impl FnMut(&[&str]) -> AppResult<String>,
+) -> AppResult<()> {
+    let (source, target) = move_file_paths(Path::new(&connection.root), source, destination)?;
+    let from = workspace_file_spec(&connection.root, &source.to_string_lossy());
+    let to = workspace_file_spec(&connection.root, &target.to_string_lossy());
+    let meta = run(&["-ztag", "fstat", "-T", "depotFile,action", &from])?;
+    let record = parse_ztag(&meta).into_iter().next().unwrap_or_default();
+    if field(&record, "depotFile").is_empty() {
+        return Err(AppError::msg("Choose a versioned workspace file."));
+    }
+    let action = field(&record, "action");
+    match action.as_str() {
+        "" => {
+            run(&["edit", &from])?;
+        }
+        "edit" | "add" | "move/add" => {}
+        _ => {
+            return Err(AppError::msg(
+                "Resolve or revert this file's pending action before moving it.",
+            ))
+        }
+    }
+    // Never force an overwrite or undo an edit after failure: local content must survive.
+    run(&["move", &from, &to])?;
     Ok(())
+}
+
+fn move_file_paths(root: &Path, source: &str, destination: &str) -> AppResult<(PathBuf, PathBuf)> {
+    let source = PathBuf::from(strip_verbatim_prefix(source));
+    if !source.is_absolute() {
+        return Err(AppError::msg("Choose a local workspace file."));
+    }
+    let parent = source
+        .parent()
+        .ok_or_else(|| AppError::msg("Choose a file."))?;
+    let source_parent = workspace_directory_path(root, parent.to_path_buf())?;
+    let source = fs::canonicalize(source_parent)?.join(
+        source
+            .file_name()
+            .ok_or_else(|| AppError::msg("Choose a file."))?,
+    );
+    if !fs::symlink_metadata(&source)?.file_type().is_file() {
+        return Err(AppError::msg("Choose a regular workspace file."));
+    }
+    let relative = if cfg!(windows) {
+        destination.replace('\\', "/")
+    } else {
+        destination.to_string()
+    };
+    if relative.is_empty()
+        || relative.contains('\0')
+        || relative.starts_with('/')
+        || relative.split('/').any(|part| {
+            part.is_empty()
+                || part == "."
+                || part == ".."
+                || part.contains(':')
+                || part.contains("...")
+        })
+        || Path::new(&relative).has_root()
+    {
+        return Err(AppError::msg(
+            "Enter a relative destination inside this workspace.",
+        ));
+    }
+    let relative = Path::new(&relative);
+    let parent = relative.parent().unwrap_or_else(|| Path::new(""));
+    let target_parent = workspace_directory_path(root, parent.to_path_buf())?;
+    let target = fs::canonicalize(target_parent)?.join(
+        relative
+            .file_name()
+            .ok_or_else(|| AppError::msg("Enter a file name."))?,
+    );
+    match fs::symlink_metadata(&target) {
+        Ok(_) => {
+            return Err(AppError::msg(
+                "The destination already exists. Choose another file name.",
+            ))
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.into()),
+    }
+    Ok((source, target))
 }
 
 pub fn login(connection: &P4Connection, password: &str) -> AppResult<()> {
@@ -3448,7 +3622,7 @@ fn content_file_diff(
     }
 }
 
-fn env_for(connection: &P4Connection) -> P4Env {
+pub(super) fn env_for(connection: &P4Connection) -> P4Env {
     P4Env {
         cwd: PathBuf::from(&connection.root),
         port: connection.port.clone(),
@@ -3565,6 +3739,296 @@ mod tests {
             .iter()
             .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
             .collect()
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn cli_filespecs_normalize_verbatim_drive_and_unc_paths() {
+        assert_eq!(
+            workspace_file_spec(r"C:\work\client", r"\\?\C:\work\client\ leading #@%.txt"),
+            r"C:\work\client\ leading %23%40%25.txt"
+        );
+        assert_eq!(
+            workspace_file_spec(
+                r"\\server\share\client",
+                r"\\?\UNC\server\share\client\ leading #@%.txt"
+            ),
+            r"\\server\share\client\ leading %23%40%25.txt"
+        );
+        assert_eq!(
+            workspace_file_spec(r"C:\work\client", "//depot/main/file%23name.txt"),
+            "//depot/main/file%23name.txt"
+        );
+    }
+
+    fn mutation_connection(root: &Path) -> P4Connection {
+        P4Connection {
+            root: root.to_string_lossy().into_owned(),
+            port: "perforce.example.com:1666".into(),
+            user: "alice".into(),
+            client: "dev-pc".into(),
+            charset: String::new(),
+            stream: None,
+            server: String::new(),
+        }
+    }
+
+    #[test]
+    fn lock_actions_target_only_explicit_files_in_the_selected_changelist() {
+        let temporary = TestDirectory::new("lock-args");
+        let connection = mutation_connection(&temporary.0);
+        let local = temporary
+            .0
+            .join("asset #@%*.bin")
+            .to_string_lossy()
+            .into_owned();
+        let paths = vec![local, "//depot/main/asset%23%40%25%2A.bin".into()];
+        for command in ["lock", "unlock"] {
+            for change in ["default", "42"] {
+                let args = file_action_args(&connection, command, &paths, Some(change)).unwrap();
+                assert_eq!(&args[..3], &[command, "-c", change]);
+                assert_eq!(args.len(), 5);
+                assert!(args[3].ends_with("asset %23%40%25%2A.bin"));
+                assert_eq!(args[4], "//depot/main/asset%23%40%25%2A.bin");
+                assert!(!args
+                    .iter()
+                    .any(|arg| matches!(arg.as_str(), "-f" | "-x" | "-g")));
+            }
+            assert!(file_action_args(&connection, command, &[], Some("42")).is_err());
+            assert!(file_action_args(&connection, command, &paths, None).is_err());
+            for change in ["", "0", "-1", "42 -f", "42,43", "999999999999999999999"] {
+                assert!(file_action_args(&connection, command, &paths, Some(change)).is_err());
+            }
+            for path in [
+                "",
+                "-f",
+                "relative.txt",
+                "//depot/main/...",
+                "//depot/main/*",
+                "//depot/main/file#1",
+                "//depot/main/file@42",
+            ] {
+                assert!(
+                    file_action_args(&connection, command, &[path.into()], Some("42")).is_err()
+                );
+            }
+        }
+        assert!(file_action_args(&connection, "unlock -f", &paths, Some("42")).is_err());
+        assert!(file_action_args(&connection, "revert", &paths, Some("42")).is_err());
+        // Existing add semantics still pass literal wildcard bytes with -f.
+        let add = file_action_args(&connection, "add", &paths[..1], None).unwrap();
+        assert_eq!(&add[..2], &["add", "-f"]);
+        assert!(add[2].ends_with("asset #@%*.bin"));
+    }
+
+    #[test]
+    fn an_empty_our_lock_tag_is_visible_without_replacing_the_open_action() {
+        let record = parse_ztag("... depotFile //depot/main/asset.bin\n... action edit\n... change 42\n... haveRev 1\n... headRev 1\n... ourLock\n").remove(0);
+        let (status, detail) = status_of(&record);
+        assert_eq!(status, "edit");
+        assert!(detail.lines().any(|line| line == "Locked by you"));
+        assert!(detail.lines().any(|line| line == "Checked out for edit"));
+        assert!(detail.lines().any(|line| line == "Your changelist 42"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn locking_a_forward_slash_unc_workspace_file_escapes_its_literal_filename() {
+        let connection = mutation_connection(Path::new(r"\\fileserver\share\workspace"));
+        let args = file_action_args(
+            &connection,
+            "lock",
+            &["//fileserver/share/workspace/asset#@%*.bin".into()],
+            Some("42"),
+        )
+        .unwrap();
+        assert_eq!(
+            args,
+            [
+                "lock",
+                "-c",
+                "42",
+                r"\\fileserver\share\workspace\asset%23%40%25%2A.bin"
+            ]
+        );
+    }
+
+    #[test]
+    fn delete_change_requires_an_owned_pending_numbered_change_and_never_forces() {
+        let connection = mutation_connection(Path::new(""));
+        for invalid in ["default", "0", "-1", "42 -f"] {
+            assert!(delete_change_with(&connection, invalid, |_| panic!(
+                "invalid change reached CLI"
+            ))
+            .is_err());
+        }
+        for spec in [
+            "Status: submitted\nClient: dev-pc\nUser: alice\n",
+            "Status: pending\nClient: other-pc\nUser: alice\n",
+            "Status: pending\nClient: dev-pc\nUser: bob\n",
+        ] {
+            assert!(delete_change_with(&connection, "42", |args| {
+                assert_eq!(args, ["change", "-o", "42"]);
+                Ok(spec.into())
+            })
+            .is_err());
+        }
+        let mut calls = Vec::new();
+        let error = delete_change_with(&connection, "42", |args| {
+            calls.push(args.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+            if args[1] == "-o" {
+                Ok("Status: pending\nClient: dev-pc\nUser: alice\n".into())
+            } else {
+                Err(AppError::msg("Changelist contains shelved files."))
+            }
+        })
+        .unwrap_err();
+        assert!(error.to_string().contains("shelved"));
+        assert_eq!(
+            calls,
+            [vec!["change", "-o", "42"], vec!["change", "-d", "42"]]
+        );
+    }
+
+    #[test]
+    fn move_file_validates_destinations_before_any_cli_call() {
+        let temporary = TestDirectory::new("move-paths");
+        let source = temporary.0.join("source.txt");
+        fs::write(&source, b"local edits\n").unwrap();
+        fs::write(temporary.0.join("existing.txt"), b"keep\n").unwrap();
+        let connection = mutation_connection(&temporary.0);
+        for invalid in [
+            "../escape.txt",
+            "/outside.txt",
+            "C:/outside.txt",
+            "a/../b.txt",
+            "missing/file.txt",
+            "existing.txt",
+            "file...txt",
+            "",
+        ] {
+            assert!(
+                move_file_with(&connection, &source.to_string_lossy(), invalid, |_| panic!(
+                    "invalid destination reached CLI"
+                ))
+                .is_err()
+            );
+        }
+        assert_eq!(fs::read(&source).unwrap(), b"local edits\n");
+        assert_eq!(
+            fs::read(temporary.0.join("existing.txt")).unwrap(),
+            b"keep\n"
+        );
+    }
+
+    #[test]
+    fn move_file_rejects_unversioned_files_without_checking_them_out() {
+        let temporary = TestDirectory::new("move-unversioned");
+        let source = temporary.0.join("local.txt");
+        fs::write(&source, b"keep local content\n").unwrap();
+        let connection = mutation_connection(&temporary.0);
+        let error = move_file_with(
+            &connection,
+            &source.to_string_lossy(),
+            "target.txt",
+            |args| {
+                assert_eq!(&args[..4], &["-ztag", "fstat", "-T", "depotFile,action"]);
+                Ok(String::new())
+            },
+        )
+        .unwrap_err();
+        assert_eq!(error.to_string(), "Choose a versioned workspace file.");
+        assert_eq!(fs::read(source).unwrap(), b"keep local content\n");
+        assert!(!temporary.0.join("target.txt").exists());
+    }
+
+    #[test]
+    fn move_file_keeps_literal_leading_spaces_in_destination_folders_and_names() {
+        let temporary = TestDirectory::new("move-literal-spaces");
+        let source = temporary.0.join("source.txt");
+        fs::write(&source, b"local edits\n").unwrap();
+        fs::create_dir(temporary.0.join("folder")).unwrap();
+        let intended = temporary.0.join(" folder");
+        fs::create_dir(&intended).unwrap();
+        let (actual_source, destination) = move_file_paths(
+            &temporary.0,
+            &source.to_string_lossy(),
+            " folder/ target.txt",
+        )
+        .unwrap();
+        assert_eq!(actual_source, fs::canonicalize(&source).unwrap());
+        assert_eq!(
+            destination,
+            fs::canonicalize(&intended).unwrap().join(" target.txt")
+        );
+        assert!(!temporary.0.join("folder/ target.txt").exists());
+        assert_eq!(fs::read(&source).unwrap(), b"local edits\n");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn move_file_keeps_trailing_spaces_in_source_and_destination_directories() {
+        let temporary = TestDirectory::new("move-trailing-spaces");
+        let source_directory = temporary.0.join("source folder ");
+        let target_directory = temporary.0.join("target folder ");
+        fs::create_dir(&source_directory).unwrap();
+        fs::create_dir(&target_directory).unwrap();
+        let source = source_directory.join("source.txt");
+        fs::write(&source, b"local edits\n").unwrap();
+        let (actual_source, destination) = move_file_paths(
+            &temporary.0,
+            &source.to_string_lossy(),
+            "target folder /target.txt",
+        )
+        .unwrap();
+        assert_eq!(actual_source, fs::canonicalize(&source).unwrap());
+        assert_eq!(
+            destination,
+            fs::canonicalize(&target_directory)
+                .unwrap()
+                .join("target.txt")
+        );
+    }
+
+    #[test]
+    fn move_file_preserves_changelist_escapes_filespecs_and_keeps_edits_after_failure() {
+        let temporary = TestDirectory::new("move-command");
+        let source = temporary.0.join("source #@%.txt");
+        fs::write(&source, b"local edits\n").unwrap();
+        let connection = mutation_connection(&temporary.0);
+        for action in ["", "edit", "add", "move/add"] {
+            let mut calls = Vec::new();
+            let result = move_file_with(
+                &connection,
+                &source.to_string_lossy(),
+                "target #@%.txt",
+                |args| {
+                    calls.push(args.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+                    if args[0] == "-ztag" {
+                        assert_eq!(&args[1..4], &["fstat", "-T", "depotFile,action"]);
+                        Ok(format!(
+                            "... depotFile //depot/source.txt\n... action {action}\n"
+                        ))
+                    } else if args[0] == "move" {
+                        Err(AppError::msg("Move rejected."))
+                    } else {
+                        Ok(String::new())
+                    }
+                },
+            );
+            assert!(result.is_err());
+            assert_eq!(calls.len(), if action.is_empty() { 3 } else { 2 });
+            let last = calls.last().unwrap();
+            assert_eq!(last[0], "move");
+            assert_eq!(last.len(), 3);
+            assert!(last[1].ends_with("source %23%40%25.txt"));
+            assert!(last[2].ends_with("target %23%40%25.txt"));
+            assert!(!calls
+                .iter()
+                .flatten()
+                .any(|arg| arg == "-f" || arg == "-c" || arg == "revert"));
+            assert_eq!(fs::read(&source).unwrap(), b"local edits\n");
+        }
     }
 
     #[test]

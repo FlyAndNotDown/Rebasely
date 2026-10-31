@@ -1,3 +1,4 @@
+import { t, useTranslation } from "@/i18n";
 import { useState } from "react";
 import { Loader2Icon } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -17,13 +18,7 @@ import { cn } from "@/lib/utils";
 import { useP4 } from "@/state/p4-context";
 import type { P4RevisionMode } from "@/types/p4";
 
-const KINDS: { id: Exclude<P4RevisionMode, "latest">; label: string; placeholder: string }[] = [
-  { id: "revision", label: "Revision", placeholder: "Enter revision number" },
-  { id: "changelist", label: "Changelist", placeholder: "Enter changelist number" },
-  { id: "datetime", label: "Date/Time", placeholder: "yyyy/mm/dd:hh:mm:ss" },
-  { id: "label", label: "Label", placeholder: "Enter label" },
-  { id: "workspace", label: "Workspace", placeholder: "Enter workspace" },
-];
+
 
 export function P4GetRevisionDialog({
   path,
@@ -32,6 +27,14 @@ export function P4GetRevisionDialog({
   path: string | null;
   onOpenChange: (open: boolean) => void;
 }) {
+  useTranslation();
+const KINDS: { id: Exclude<P4RevisionMode, "latest">; label: string; placeholder: string }[] = [
+  { id: "revision", label: t("p4.revision"), placeholder: t("p4.enterRevisionNumber") },
+  { id: "changelist", label: t("p4.changelist"), placeholder: t("p4.enterChangelistNumber") },
+  { id: "datetime", label: t("p4.dateTime"), placeholder: "yyyy/mm/dd:hh:mm:ss" },
+  { id: "label", label: t("p4.label"), placeholder: t("p4.enterLabel") },
+  { id: "workspace", label: t("p4.workspace"), placeholder: t("p4.enterWorkspace") },
+];
   const { connection, getRevision, busy: workspaceBusy } = useP4();
   const [seen, setSeen] = useState<string | null>(null);
   const [latest, setLatest] = useState(true);
@@ -77,7 +80,7 @@ export function P4GetRevisionDialog({
         preview: previewing,
       });
       if (previewing) {
-        setPreview(output.trim() || "Up to date.");
+        setPreview(output.trim() || t("p4.upToDate"));
       } else {
         onOpenChange(false);
       }
@@ -92,7 +95,7 @@ export function P4GetRevisionDialog({
     <Dialog open={path !== null} onOpenChange={(open) => !busy && onOpenChange(open)}>
       <DialogContent className="sm:max-w-xl">
         <DialogHeader>
-          <DialogTitle>Get revision</DialogTitle>
+          <DialogTitle>{t("p4.getRevision")}</DialogTitle>
           <DialogDescription className="truncate font-mono text-xs" title={relative}>
             {relative}
           </DialogDescription>
@@ -109,9 +112,7 @@ export function P4GetRevisionDialog({
                 setLatest(true);
                 setPreview("");
               }}
-            />
-            Get latest revision
-          </label>
+            />{t("p4.getLatestRevision")}</label>
           <div className="flex flex-wrap items-center gap-2">
             <label className="flex items-center gap-2 text-sm">
               <input
@@ -124,11 +125,9 @@ export function P4GetRevisionDialog({
                   setLatest(false);
                   setPreview("");
                 }}
-              />
-              Specify revision using
-            </label>
+              />{t("p4.specifyRevisionUsing")}</label>
             <select
-              aria-label="Revision type"
+              aria-label={t("p4.revisionType")}
               value={kind}
               disabled={!specify || blocked}
               onChange={(event) => {
@@ -157,34 +156,34 @@ export function P4GetRevisionDialog({
             />
           </div>
           <div className="grid gap-2 border-t pt-3">
-            <p className="text-xs text-muted-foreground">Options</p>
+            <p className="text-xs text-muted-foreground">{t("p4.options")}</p>
             <Option
               checked={force}
               disabled={blocked}
               onCheckedChange={setForce}
-              label="Force overwrite"
-              tip="Replace the file even when you already have that revision."
+              label={t("p4.forceOverwrite")}
+              tip={t("p4.replaceTheFileEvenWhenYouAlreadyHaveThatRevision")}
             />
             <Option
               checked={safe}
               disabled={blocked}
               onCheckedChange={setSafe}
-              label="Safe update"
-              tip="Keep files changed without being checked out."
+              label={t("p4.safeUpdate")}
+              tip={t("p4.keepFilesChangedWithoutBeingCheckedOut")}
             />
             <Option
               checked={filesOnly}
               disabled={blocked || !specify || kind !== "changelist"}
               onCheckedChange={setFilesOnly}
-              label="Changelist files only"
-              tip="Get revisions only for files listed in this changelist."
+              label={t("p4.changelistFilesOnly")}
+              tip={t("p4.getRevisionsOnlyForFilesListedInThisChangelist")}
             />
             <Option
               checked={removeMissing}
               disabled={blocked || !specify || kind !== "label"}
               onCheckedChange={setRemoveMissing}
-              label="Remove files missing from label"
-              tip="Remove workspace files that are absent from this label."
+              label={t("p4.removeFilesMissingFromLabel")}
+              tip={t("p4.removeWorkspaceFilesThatAreAbsentFromThisLabel")}
             />
           </div>
           {preview ? (
@@ -195,17 +194,11 @@ export function P4GetRevisionDialog({
         </div>
         <DialogFooter className="sm:justify-between">
           <Button type="button" variant="outline" disabled={blocked || needsValue} onClick={() => void run(true)}>
-            {busy === "preview" ? <Loader2Icon className="animate-spin" /> : null}
-            Preview
-          </Button>
+            {busy === "preview" ? <Loader2Icon className="animate-spin" /> : null}{t("p4.preview")}</Button>
           <div className="flex gap-2">
-            <Button type="button" variant="outline" disabled={busy !== null} onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
+            <Button type="button" variant="outline" disabled={busy !== null} onClick={() => onOpenChange(false)}>{t("p4.cancel")}</Button>
             <Button type="button" disabled={blocked || needsValue} onClick={() => void run(false)}>
-              {busy === "sync" ? <Loader2Icon className="animate-spin" /> : null}
-              Get revision
-            </Button>
+              {busy === "sync" ? <Loader2Icon className="animate-spin" /> : null}{t("p4.getRevision")}</Button>
           </div>
         </DialogFooter>
       </DialogContent>
@@ -226,6 +219,7 @@ function Option({
   label: string;
   tip: string;
 }) {
+  useTranslation();
   return (
     <label className={cn("flex items-start gap-2 text-xs leading-snug", disabled && "opacity-50")}>
       <Checkbox
