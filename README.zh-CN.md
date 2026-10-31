@@ -1,10 +1,20 @@
-![Rebasely 桌面应用中的 Git 改动列表与代码差异](site/public/assets/hero.png)
+<p align="center">
+  <img src="site/public/assets/mark.svg" width="80" height="80" alt="Rebasely 标志">
+</p>
+
+<h1 align="center">Rebasely</h1>
+
+<p align="center">面向 Git 与 Perforce 的开源桌面客户端。</p>
 
 <p align="center">
-  <strong>连接 Git 与 Perforce，看清每一次变更。</strong><br><br>
+  <a href="https://github.com/FlyAndNotDown/Rebasely/releases/latest"><img src="https://img.shields.io/github/v/release/FlyAndNotDown/Rebasely" alt="最新版本"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/FlyAndNotDown/Rebasely" alt="MIT 许可证"></a>
+  <a href="https://github.com/FlyAndNotDown/Rebasely/actions/workflows/check.yml"><img src="https://github.com/FlyAndNotDown/Rebasely/actions/workflows/check.yml/badge.svg?branch=dev&amp;event=pull_request" alt="Check CI"></a>
+</p>
+
+<p align="center">
   <a href="https://flyandnotdown.github.io/Rebasely/zh-CN/">官网</a> ·
   <a href="https://github.com/FlyAndNotDown/Rebasely/releases/latest">下载</a> ·
-  <a href="CONTRIBUTING.md">参与贡献</a> ·
   <a href="README.md">English</a>
 </p>
 
