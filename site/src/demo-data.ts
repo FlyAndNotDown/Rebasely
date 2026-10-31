@@ -87,17 +87,17 @@ export type DemoCommit = {
 };
 
 export const demoCommits: DemoCommit[] = [
-  { hash: "a6f203d", summary: "Refine workspace navigation", ref: "main", time: "2 min ago", fileIds: ["navigation", "test"] },
-  { hash: "9e72bc1", summary: "Merge branch 'feature/search'", graph: "merge", time: "18 min ago", fileIds: ["navigation"] },
-  { hash: "c4d810a", summary: "Keep search results in view", ref: "feature/search", graph: "side", time: "32 min ago", fileIds: ["navigation"] },
-  { hash: "0b73e6f", summary: "Follow the system appearance", time: "1 hour ago", fileIds: ["theme"] },
-  { hash: "d891e3a", summary: "Cover keyboard navigation", time: "2 hours ago", fileIds: ["test"] },
+  { hash: "a6f203d", summary: "Refine workspace navigation", ref: "main", time: "demo.time.twoMinutes", fileIds: ["navigation", "test"] },
+  { hash: "9e72bc1", summary: "Merge branch 'feature/search'", graph: "merge", time: "demo.time.eighteenMinutes", fileIds: ["navigation"] },
+  { hash: "c4d810a", summary: "Keep search results in view", ref: "feature/search", graph: "side", time: "demo.time.thirtyTwoMinutes", fileIds: ["navigation"] },
+  { hash: "0b73e6f", summary: "Follow the system appearance", time: "demo.time.oneHour", fileIds: ["theme"] },
+  { hash: "d891e3a", summary: "Cover keyboard navigation", time: "demo.time.twoHours", fileIds: ["test"] },
 ];
 
 export const allHunkIds = demoFiles.flatMap((file) => file.hunks.map((hunk) => hunk.id));
 
 export const p4Changes = [
-  { id: "41", summary: "Refine workspace navigation", fileId: "navigation", time: "12 min ago" },
-  { id: "40", summary: "Follow the system appearance", fileId: "theme", time: "1 hour ago" },
-  { id: "39", summary: "Cover keyboard navigation", fileId: "test", time: "Yesterday" },
+  { id: "41", summary: "Refine workspace navigation", fileId: "navigation", time: "demo.time.twelveMinutes" },
+  { id: "40", summary: "Follow the system appearance", fileId: "theme", time: "demo.time.oneHour" },
+  { id: "39", summary: "Cover keyboard navigation", fileId: "test", time: "demo.time.yesterday" },
 ];

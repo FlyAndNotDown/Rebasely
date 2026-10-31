@@ -1,18 +1,31 @@
 import { describe, expect, it } from "vitest";
 import { render } from "./entry-server";
 import { LATEST_RELEASE_URL } from "./release-downloads";
+import { siteResources } from "./i18n";
 
 describe("website prerender", () => {
   it("renders product facts and working download URLs without a browser", async () => {
     const html = await render();
     expect(html).toContain('<main id="main"');
-    expect(html).toMatch(/<h1[^>]*>A unified<br\/>version control client\.<\/h1>/);
+    expect(html).toContain("Every change.");
     expect(html).toContain("macOS Apple Silicon");
     expect(html).toContain("Windows x64");
-    expect(html).toContain("Supports Git repositories and Perforce workspaces.");
-    expect(html).toContain("Open source under the MIT License.");
+    expect(html).toContain("Git and Perforce");
+    expect(html).toContain("open source under the MIT License.");
     expect(html.split(`href="${LATEST_RELEASE_URL}"`)).toHaveLength(4);
     expect(html).toContain("Enable JavaScript to try the interactive demo.");
+    expect(html).not.toMatch(/<script\b/i);
+  });
+
+  it("prerenders complete Chinese copy and locale links without leaking locale state", async () => {
+    const translated = await render("zh-CN", false);
+    expect(translated).toContain(siteResources["zh-CN"]["preview.title"]);
+    expect(translated).toContain(siteResources["zh-CN"]["demo.gitIntro"]);
+    expect(translated).toContain('href="../en/"');
+    expect(translated).toContain('href="../zh-CN/"');
+    const english = await render("en", false);
+    expect(english).toContain(siteResources.en["preview.title"]);
+    expect(english).not.toContain(siteResources["zh-CN"]["preview.title"]);
   });
 
   it("keeps the initial platform and generated accessibility IDs deterministic", async () => {

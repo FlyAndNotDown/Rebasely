@@ -1,6 +1,7 @@
 const REPOSITORY_URL = "https://github.com/FlyAndNotDown/Rebasely";
 const DOWNLOAD_URL = `${REPOSITORY_URL}/releases/latest`;
 const SUPPORTED_SYSTEMS = ["macOS (Apple Silicon)", "Windows (x64)"];
+const SITE_URL = "https://flyandnotdown.github.io/Rebasely/";
 
 function decodeText(value) {
   return value.replace(/&(?:#(x[\da-f]+|\d+)|(amp|quot|apos|lt|gt|nbsp));/gi, (entity, numeric, named) => {
@@ -49,9 +50,9 @@ function validSiteUrl(value) {
   } catch { return false; }
 }
 
-export function validateSiteDocument({ html, sitemap, files }) {
+export function validateSiteDocument({ html, sitemap, files, filename = "index.html" }) {
   const violations = [];
-  const fail = (message) => violations.push(`index.html: ${message}`);
+  const fail = (message) => violations.push(`${filename}: ${message}`);
   const content = rootContent(html);
   const mains = elements(content, "main");
   const headings = elements(content, "h1");
@@ -64,6 +65,13 @@ export function validateSiteDocument({ html, sitemap, files }) {
     .filter((attrs) => attrs.get("rel")?.toLowerCase().split(/\s+/).includes("canonical"));
   const canonical = canonicals[0]?.get("href");
   if (canonicals.length !== 1 || !validSiteUrl(canonical)) fail("provide exactly one HTTPS canonical project URL ending in a slash");
+  const expectedCanonical = new URL(filename.replace(/index\.html$/, ""), SITE_URL).href;
+  if (canonical !== expectedCanonical) fail("canonical must identify this language page within the public project");
+  const links = [...html.matchAll(/<link\b([^>]*)>/gi)].map((match) => attributes(match[1]));
+  for (const [language, url] of [["en", `${SITE_URL}en/`], ["zh-CN", `${SITE_URL}zh-CN/`], ["x-default", SITE_URL]]) {
+    const alternates = links.filter((attrs) => attrs.get("rel") === "alternate" && attrs.get("hreflang") === language);
+    if (alternates.length !== 1 || alternates[0].get("href") !== url) fail(`provide one reciprocal ${language} language alternate`);
+  }
   const ogUrls = [...html.matchAll(/<meta\b([^>]*)>/gi)].map((match) => attributes(match[1]))
     .filter((attrs) => attrs.get("property") === "og:url");
   if (ogUrls.length !== 1 || ogUrls[0].get("content") !== canonical) fail("og:url must match the unique canonical URL");
@@ -99,7 +107,7 @@ export function validateSiteDocument({ html, sitemap, files }) {
     locations.some((value) => {
       try {
         const url = new URL(value);
-        return !url.href.startsWith(canonical) || Boolean(url.username || url.password || url.search || url.hash);
+        return !url.href.startsWith(SITE_URL) || Boolean(url.username || url.password || url.search || url.hash);
       } catch { return true; }
     })) violations.push("sitemap.xml: include the canonical homepage once and keep every URL within the canonical project");
 
