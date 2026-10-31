@@ -1,4 +1,4 @@
-![Rebasely — a unified version control client](site/public/assets/hero.svg)
+![Rebasely desktop showing Git changes and a code diff](site/public/assets/hero.png)
 
 <p align="center">
   <strong>Git and Perforce. A clearer view of every change.</strong><br><br>

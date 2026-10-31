@@ -1,4 +1,4 @@
-![Rebasely — Git + Perforce](site/public/assets/hero.svg)
+![Rebasely 桌面应用中的 Git 改动列表与代码差异](site/public/assets/hero.png)
 
 <p align="center">
   <strong>连接 Git 与 Perforce，看清每一次变更。</strong><br><br>
