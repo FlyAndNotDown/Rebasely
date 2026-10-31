@@ -18,10 +18,27 @@ pub(crate) fn configure_main_webview(config: &mut tauri::Config) {
         .find(|window| window.label == "main")
     {
         window.background_color = None;
+        window.decorations = true;
+        window.title_bar_style = tauri::TitleBarStyle::Overlay;
+        window.hidden_title = true;
+        window.traffic_light_position =
+            Some(tauri::utils::config::LogicalPosition { x: 16.0, y: 22.0 });
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "linux")]
+pub(crate) fn configure_main_webview(config: &mut tauri::Config) {
+    if let Some(window) = config
+        .app
+        .windows
+        .iter_mut()
+        .find(|window| window.label == "main")
+    {
+        window.decorations = true;
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub(crate) fn configure_main_webview(_: &mut tauri::Config) {}
 
 pub(crate) fn background_command(program: impl AsRef<OsStr>) -> Command {

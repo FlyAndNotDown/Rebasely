@@ -1583,7 +1583,14 @@ fn submodule_status_lines_are_parsed() {
     let text = " 1111111111111111111111111111111111111111 libs/core (v1.0)\n\
                 -2222222222222222222222222222222222222222 libs/new folder\n\
                 +3333333333333333333333333333333333333333 vendor/x (heads/main)\n";
-    let parsed = parse_submodule_status(text);
+    let parsed = parse_submodule_status(
+        text,
+        &[
+            "libs/core".into(),
+            "libs/new folder".into(),
+            "vendor/x".into(),
+        ],
+    );
     assert_eq!(
         parsed,
         vec![

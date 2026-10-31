@@ -1,5 +1,6 @@
 import type { AppPrefs, PanelLayout, PanelLayouts } from "@/types/git";
 import { pathsIgnoreCase } from "@/lib/format";
+import { normalizeHttpProxy } from "@/lib/network";
 
 export const SIDEBAR_VIEWS = ["changes", "history", "stash", "files"] as const;
 
@@ -15,6 +16,8 @@ export const DEFAULT_PANEL_LAYOUTS: PanelLayouts = {
 };
 
 export const defaultPrefs: AppPrefs = {
+  httpProxy: { mode: "system", url: "" },
+  avatarProvider: "builtin",
   terminalId: "auto",
   editorId: "system",
   sidebarOrder: [...SIDEBAR_VIEWS],
@@ -186,6 +189,8 @@ function normalizeCharset(value: unknown): string {
 
 export function normalizePrefs(prefs: Partial<AppPrefs> | null | undefined): AppPrefs {
   return {
+    httpProxy: normalizeHttpProxy(prefs?.httpProxy),
+    avatarProvider: prefs?.avatarProvider === "github" || prefs?.avatarProvider === "gitlab" ? prefs.avatarProvider : "builtin",
     terminalId: prefs?.terminalId || "auto",
     editorId: !prefs?.editorId || prefs.editorId === "auto" ? "system" : prefs.editorId,
     sidebarOrder: normalizeSidebarOrder(prefs?.sidebarOrder),

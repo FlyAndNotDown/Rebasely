@@ -130,8 +130,6 @@ export function releaseAssets(tag) {
   return [
     { platform: "windows-x86_64", name: `${prefix}windows_x64.exe` },
     { platform: "darwin-aarch64", name: `${prefix}macos_arm64.app.tar.gz`, installer: `${prefix}macos_arm64.dmg` },
-    { platform: "linux-x86_64", name: `${prefix}linux_x64.AppImage` },
-    { platform: "linux-x86_64-deb", name: `${prefix}linux_x64.deb` },
   ];
 }
 

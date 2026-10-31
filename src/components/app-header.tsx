@@ -30,7 +30,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { HoverTip, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ActivityMeter } from "@/components/activity-meter";
 import { AppMenu } from "@/components/app-menu";
 import { AppToolbar } from "@/components/app-toolbar";
@@ -44,6 +44,7 @@ import { isRemoteTrackingBranch } from "@/lib/git";
 import { useWindowedRows } from "@/lib/use-windowed-rows";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { cn } from "@/lib/utils";
+import { desktopPlatform } from "@/lib/desktop-platform";
 import { useGitPick, type AppTab } from "@/state/git-context";
 import type { BranchInfo } from "@/types/git";
 
@@ -116,7 +117,7 @@ export function AppHeader() {
   const repoOpen = activeTab.kind === "repo";
   return (
     <header className="shrink-0 bg-background">
-      <div className="flex h-9 items-stretch">
+      <div className={cn("flex items-stretch", desktopPlatform() === "macos" ? "h-11 pl-[84px]" : "h-9")}>
         <AppMenu />
         <TabStrip
           tabs={tabs}
@@ -207,10 +208,14 @@ export function AppHeader() {
                 </>
               ) : null}
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => setBranchOpen(true)}>
-                <PlusIcon />
-                New branch
-              </DropdownMenuItem>
+              <HoverTip label={repo?.headId ? undefined : "Create a commit first"}>
+                <span className="block">
+                  <DropdownMenuItem disabled={!repo?.headId} aria-description={repo?.headId ? undefined : "Create a commit first"} onClick={() => setBranchOpen(true)}>
+                    <PlusIcon />
+                    New branch
+                  </DropdownMenuItem>
+                </span>
+              </HoverTip>
             </DropdownMenuContent>
           </DropdownMenu>
         </>

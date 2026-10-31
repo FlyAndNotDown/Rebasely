@@ -61,6 +61,19 @@ export function shouldReloadWorkdirDiff(hint: RefreshHint, repoPath: string, fil
   return hint.paths.some((changed) => watchTouchesFile(changed, repoPath, filePath));
 }
 
+/** Binary diff metadata cannot reveal byte changes in a selected file or its index. */
+export function shouldRefreshBinaryDiff(hint: RefreshHint, repoPath: string, filePath: string) {
+  if (hint.overflow || hint.paths.length === 0) return true;
+  const separator = pathsIgnoreCase() ? "\\" : "/";
+  const root = repoPath.replace(pathsIgnoreCase() ? /[\\/]+$/ : /\/+$/, "");
+  const file = normalizeRepoPath(`${root}/${filePath}`);
+  const metadata = normalizeRepoPath(`${root}/.git`);
+  return hint.paths.some((path) => {
+    const changed = normalizeRepoPath(path);
+    return changed === file || changed === metadata || changed.startsWith(`${metadata}${separator}`);
+  });
+}
+
 export function sameFiles(left: FileStatus[], right: FileStatus[]) {
   if (left.length !== right.length) return false;
   for (let index = 0; index < left.length; index += 1) {

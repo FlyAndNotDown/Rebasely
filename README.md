@@ -10,19 +10,22 @@
 Rebasely brings your repositories into one desktop workspace. Move between
 projects, inspect a diff, and make the next change with context.
 
-- **Review precisely.** Compare text and images; stage a file, hunk, or line.
+- **Review precisely.** Inspect unified or split text diffs, compare images, and stage a file, hunk, or line.
 - **Follow the work.** Explore commit graphs, branches, file history, and changelists.
-- **Stay in flow.** Keep projects in tabs, with keyboard shortcuts and light or dark themes.
+- **Stay in flow.** Keep projects in tabs, with a command palette, keyboard shortcuts, and light or dark themes.
 
-Supports Git and Perforce. Built for **macOS Apple Silicon**, **Windows x64**,
-and **Linux x64**. Install Git for Git repositories, or the Perforce CLI (`p4`)
-for Perforce workspaces.
+Try the [interactive feature demo](https://flyandnotdown.github.io/Rebasely/#features)
+to explore example Git and Perforce workflows.
+
+Supports Git and Perforce. Available for **macOS Apple Silicon** and **Windows x64**.
 
 ## Get started
 
-[Browse releases](https://github.com/FlyAndNotDown/Rebasely/releases) or
-[run from source](docs/development.md). Open a local repository or connect a
-remote workspace.
+1. [Download a release](https://github.com/FlyAndNotDown/Rebasely/releases) for your platform.
+2. Install Git for Git repositories, or the Perforce CLI (`p4`) for Perforce workspaces.
+3. Open or clone a Git repository, or connect an existing Perforce workspace.
+
+To build or contribute, see the [development guide](docs/development.md).
 Bug reports and ideas are welcome in
 [Issues](https://github.com/FlyAndNotDown/Rebasely/issues).
 

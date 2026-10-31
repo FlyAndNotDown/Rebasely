@@ -9,6 +9,7 @@ import {
   sameRevs,
   sameSnapshot,
   shouldReloadWorkdirDiff,
+  shouldRefreshBinaryDiff,
 } from "./snapshot-compare";
 
 function snapshot(overrides: Partial<WorkspaceSnapshot> = {}): WorkspaceSnapshot {
@@ -103,6 +104,16 @@ describe("historyGraphChanged", () => {
 });
 
 describe("refresh hints", () => {
+  it("refreshes unchanged binary metadata only for the selected file or owned Git metadata", () => {
+    const only = (paths: string[]) => ({ paths, overflow: false });
+    expect(shouldRefreshBinaryDiff(only(["E:/repo/pixel.png"]), "E:/repo", "pixel.png")).toBe(true);
+    expect(shouldRefreshBinaryDiff(only(["E:/repo/.git/index"]), "E:/repo", "pixel.png")).toBe(true);
+    expect(shouldRefreshBinaryDiff(only(["E:/repo/other.png"]), "E:/repo", "pixel.png")).toBe(false);
+    expect(shouldRefreshBinaryDiff(only(["E:/other/pixel.png", "E:/other/.git/index"]), "E:/repo", "pixel.png")).toBe(false);
+    expect(shouldRefreshBinaryDiff(only(["E:/repository/.git/index"]), "E:/repo", "pixel.png")).toBe(false);
+    expect(shouldRefreshBinaryDiff({ paths: [], overflow: true }, "E:/repo", "pixel.png")).toBe(true);
+  });
+
   it("detects POSIX metadata changes without treating backslashes as separators", () => {
     vi.stubGlobal("navigator", { userAgent: "Macintosh; Mac OS X" });
     const only = (paths: string[]) => ({ paths, overflow: false });

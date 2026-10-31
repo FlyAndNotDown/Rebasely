@@ -51,11 +51,10 @@ Ordinary local `npm run build` uses `createUpdaterArtifacts: false` and does not
 | --- | --- | --- |
 | Windows x64 | NSIS `.exe` | The same `.exe`, with `.sig` |
 | macOS Apple Silicon | `.dmg` | `.app.tar.gz`, with `.sig` |
-| Linux x64 | `.AppImage` and `.deb` | Each package, with its own `.sig` |
 
-Asset names include the full version and platform, for example `Rebasely_v0.0.1_windows_x64.exe`. Windows and macOS Apple Silicon build on native runners. Linux bundles build on Ubuntu 22.04 for its older system-library baseline.
+Asset names include the full version and platform, for example `Rebasely_v0.0.1_windows_x64.exe`. Windows and macOS Apple Silicon build on native runners. Linux packages are not currently published; packages in earlier releases remain available. The source and native Check workflow retain Linux compatibility checks.
 
-All three builds upload to the same draft. Only after every build succeeds does the final job check that every required bundle, installer, and signature exists and has finished uploading. It creates one `latest.json` containing the three supported platforms, including a separate Linux Debian entry so Debian installations receive a `.deb` update. It then publishes the release and marks it latest. Generating this manifest once avoids parallel build jobs overwriting each other's platform entries.
+Both builds upload to the same draft. Only after every build succeeds does the final job check that every required bundle, installer, and signature exists and has finished uploading. It creates one `latest.json` containing exactly `windows-x86_64` and `darwin-aarch64`, then publishes the release and marks it latest. Generating this manifest once avoids parallel build jobs overwriting each other's platform entries.
 
 GitHub can give draft assets temporary `untagged-...` download URLs. The final job checks these against the draft's release page and writes the requested version's permanent download URLs into `latest.json` before publishing.
 
