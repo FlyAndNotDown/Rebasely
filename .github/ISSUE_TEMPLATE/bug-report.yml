@@ -1,0 +1,31 @@
+name: Bug report
+description: Report a reproducible problem.
+body:
+  - type: markdown
+    attributes:
+      value: Remove private paths, hosts, repository details, and credentials from all examples and attachments. Report security issues privately through SECURITY.md.
+  - type: input
+    id: environment
+    attributes:
+      label: App version and operating system
+      placeholder: Rebasely version, OS version, architecture
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Use a small invented repository when possible.
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Expected and actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Logs or screenshots
+      description: Optional. Review attachments for sensitive information.

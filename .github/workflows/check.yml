@@ -1,0 +1,73 @@
+name: Check
+
+on:
+  pull_request:
+    branches: [master]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native:
+    name: Check (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            platform: Linux
+          - os: windows-latest
+            platform: Windows
+          - os: macos-15
+            platform: macOS arm64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: System packages
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev \
+            build-essential curl wget file libxdo-dev libssl-dev \
+            libayatana-appindicator3-dev librsvg2-dev
+      - name: Rust
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+          rustup default stable
+      - name: Rust cache
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: "src-tauri -> target"
+          cache-workspace-crates: "false"
+          cache-on-failure: "true"
+          cache-bin: "false"
+      - name: Dependencies
+        run: npm ci
+      - name: Frontend checks
+        run: npm run check
+      - name: Frontend build
+        run: npm run vite:build
+      - name: Askpass helper
+        run: cargo build --manifest-path src-tauri/Cargo.toml --locked --bin rebasely
+      - name: Rust checks
+        run: npm run check:rust
+      - name: Source proof
+        shell: bash
+        run: |
+          git diff --quiet HEAD --
+          checked_tree="$(git rev-parse 'HEAD^{tree}')"
+          printf '::notice title=Rebasely checked source::%s\n' "$checked_tree"

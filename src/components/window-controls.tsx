@@ -1,0 +1,158 @@
+import { useEffect, useState, type ReactNode } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { cn } from "@/lib/utils";
+
+type ResizeDirection =
+  | "East"
+  | "North"
+  | "NorthEast"
+  | "NorthWest"
+  | "South"
+  | "SouthEast"
+  | "SouthWest"
+  | "West";
+
+const RESIZE_EDGES: { direction: ResizeDirection; className: string }[] = [
+  { direction: "North", className: "top-0 right-2 left-2 h-1 cursor-ns-resize" },
+  { direction: "South", className: "right-2 bottom-0 left-2 h-1 cursor-ns-resize" },
+  { direction: "West", className: "top-2 bottom-2 left-0 w-1 cursor-ew-resize" },
+  { direction: "East", className: "top-2 right-0 bottom-2 w-1 cursor-ew-resize" },
+  { direction: "NorthWest", className: "top-0 left-0 size-2 cursor-nw-resize" },
+  { direction: "NorthEast", className: "top-0 right-0 size-2 cursor-ne-resize" },
+  { direction: "SouthWest", className: "bottom-0 left-0 size-2 cursor-sw-resize" },
+  { direction: "SouthEast", className: "right-0 bottom-0 size-2 cursor-se-resize" },
+];
+
+function isLinuxDesktop() {
+  if (typeof navigator === "undefined") return false;
+  const agent = navigator.userAgent;
+  return /linux/i.test(agent) && !/android/i.test(agent);
+}
+
+/** Undecorated windows on Linux cannot be resized from the window frame. */
+export function WindowResizeBorders() {
+  if (!isLinuxDesktop()) return null;
+  return (
+    <>
+      {RESIZE_EDGES.map((edge) => (
+        <div
+          key={edge.direction}
+          className={cn("absolute z-50", edge.className)}
+          onMouseDown={(event) => {
+            event.preventDefault();
+            void getCurrentWindow().startResizeDragging(edge.direction);
+          }}
+        />
+      ))}
+    </>
+  );
+}
+
+export function WindowControls() {
+  const [maximized, setMaximized] = useState(false);
+
+  useEffect(() => {
+    const appWindow = getCurrentWindow();
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+
+    void appWindow.isMaximized().then((value) => {
+      if (!disposed) setMaximized(value);
+    });
+    void appWindow.onResized(() => {
+      void appWindow.isMaximized().then((value) => {
+        if (!disposed) setMaximized(value);
+      });
+    }).then((fn) => {
+      if (disposed) fn();
+      else unlisten = fn;
+    });
+
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
+
+  return (
+    <div className="flex h-full shrink-0">
+      <CaptionButton label="Minimize" onClick={() => void getCurrentWindow().minimize()}>
+        <MinimizeGlyph />
+      </CaptionButton>
+      <CaptionButton
+        label={maximized ? "Restore" : "Maximize"}
+        onClick={() => void getCurrentWindow().toggleMaximize()}
+      >
+        {maximized ? <RestoreGlyph /> : <MaximizeGlyph />}
+      </CaptionButton>
+      <CaptionButton
+        label="Close"
+        tone="danger"
+        onClick={() => void getCurrentWindow().close()}
+      >
+        <CloseGlyph />
+      </CaptionButton>
+    </div>
+  );
+}
+
+function CaptionButton({
+  label,
+  tone = "default",
+  onClick,
+  children,
+}: {
+  label: string;
+  tone?: "default" | "danger";
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      onClick={onClick}
+      className={cn(
+        "flex h-full w-[46px] items-center justify-center text-foreground/80",
+        tone === "danger"
+          ? "hover:bg-[#c42b1c] hover:text-white"
+          : "hover:bg-black/10 hover:text-foreground dark:hover:bg-white/10",
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+function MinimizeGlyph() {
+  return (
+    <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
+      <path d="M1 5h8" fill="none" stroke="currentColor" strokeWidth="1" />
+    </svg>
+  );
+}
+
+function MaximizeGlyph() {
+  return (
+    <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
+      <rect x="1.5" y="1.5" width="7" height="7" fill="none" stroke="currentColor" strokeWidth="1" />
+    </svg>
+  );
+}
+
+function RestoreGlyph() {
+  return (
+    <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
+      <path d="M3 1.5h5.5V7" fill="none" stroke="currentColor" strokeWidth="1" />
+      <rect x="1.5" y="3.5" width="5" height="5" fill="none" stroke="currentColor" strokeWidth="1" />
+    </svg>
+  );
+}
+
+function CloseGlyph() {
+  return (
+    <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
+      <path d="M2 2l6 6M8 2L2 8" fill="none" stroke="currentColor" strokeWidth="1" />
+    </svg>
+  );
+}
