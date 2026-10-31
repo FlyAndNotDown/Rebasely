@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useState, type ReactNode, type Ref } from "react";
 import { CheckIcon, FileIcon, MinusIcon, PlusIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -44,16 +45,17 @@ export function DiffPane({ file, hunks = file.hunks, actionLabel, onHunkAction, 
   onHunkAction?: (hunk: DemoHunk) => void;
   emptyAction?: ReactNode;
 }) {
+  const { t } = useTranslation();
   const [mode, setMode] = useState<"unified" | "split">("unified");
   return (
-    <section className="demo-diff" aria-label={`Diff for ${file.path}`}>
+    <section className="demo-diff" aria-label={t("demo.diff", { path: file.path })}>
       <PaneHeader><span className="demo-path"><FileIcon />{file.path}</span><span className="demo-language">TypeScript</span></PaneHeader>
       <div className="demo-diff-toolbar">
-        <SegmentedControl label="Diff layout" value={mode} onChange={setMode} options={[{ value: "unified", label: "Unified" }, { value: "split", label: "Split" }]} />
-        <span className="demo-diff-scope">{actionLabel ? "Working changes" : "Read only"}</span>
+        <SegmentedControl label={t("demo.diffLayout")} value={mode} onChange={setMode} options={[{ value: "unified", label: t("demo.unified") }, { value: "split", label: t("demo.split") }]} />
+        <span className="demo-diff-scope">{actionLabel ? t("demo.workingChanges") : t("demo.readOnly")}</span>
       </div>
       {hunks.length ? (
-        <ScrollArea className="demo-code-scroll" gutter={false} viewportClassName="demo-code-viewport" aria-label="Diff lines" tabIndex={0}>
+        <ScrollArea className="demo-code-scroll" gutter={false} viewportClassName="demo-code-viewport" aria-label={t("demo.diffLines")} tabIndex={0}>
           <div className={cn("demo-code", mode === "split" && "demo-code-split")}>
             {hunks.map((hunk) => (
               <div key={hunk.id} className="demo-hunk">
@@ -63,7 +65,7 @@ export function DiffPane({ file, hunks = file.hunks, actionLabel, onHunkAction, 
             ))}
           </div>
         </ScrollArea>
-      ) : <EmptyPane title="No changes in this view." detail="Select a file from the other group.">{emptyAction}</EmptyPane>}
+      ) : <EmptyPane title={t("demo.noChanges")} detail={t("demo.selectOther")}>{emptyAction}</EmptyPane>}
     </section>
   );
 }

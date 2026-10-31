@@ -1,3 +1,4 @@
+import { t, useTranslation } from "@/i18n";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -10,6 +11,7 @@ import { VcsIcon } from "@/components/vcs-icon";
 import { useGitPick } from "@/state/git-context";
 
 export function RepoKindDialog() {
+  useTranslation();
   const { kindPrompt, chooseRepoKind, dismissRepoKind } = useGitPick([
     "kindPrompt",
     "chooseRepoKind",
@@ -20,10 +22,9 @@ export function RepoKindDialog() {
     <Dialog open={kindPrompt !== null} onOpenChange={(open) => !open && dismissRepoKind()}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Open which repository?</DialogTitle>
+          <DialogTitle>{t("desktop.repoKindDialog.open_which_repository")}</DialogTitle>
           <DialogDescription>
-            This folder contains both a Git repository and a Perforce workspace.
-          </DialogDescription>
+            {t("desktop.repoKindDialog.this_folder_contains_both_a_git_repository_and")}</DialogDescription>
         </DialogHeader>
         {kindPrompt ? (
           <div className="grid gap-2">
@@ -42,7 +43,7 @@ export function RepoKindDialog() {
             >
               <VcsIcon vcs="perforce" />
               <span className="min-w-0 text-left">
-                <span className="block">Perforce · {kindPrompt.client || "workspace"}</span>
+                <span className="block">{t("desktop.repoKindDialog.perforce")}{" "}{kindPrompt.client || t("desktop.appSidebar.workspace")}</span>
                 <span className="block truncate font-mono text-[11px] font-normal text-muted-foreground">
                   {kindPrompt.port || kindPrompt.root}
                 </span>

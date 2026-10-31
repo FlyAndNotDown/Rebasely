@@ -1,3 +1,4 @@
+import { t, useTranslation } from "@/i18n";
 import { useState } from "react";
 import { ArchiveRestoreIcon, CheckIcon, Trash2Icon } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -26,6 +27,7 @@ import { useGitPick } from "@/state/git-context";
 import type { StashInfo } from "@/types/git";
 
 export function StashPane() {
+  useTranslation();
   const { stashes, stashSelection, selectStash, stashApply, stashPop, stashDrop } = useGitPick([
     "stashes",
     "stashSelection",
@@ -43,7 +45,7 @@ export function StashPane() {
         viewportClassName="[&>div]:w-full [&>div]:min-w-0 [&>div]:max-w-full"
       >
         {stashes.length === 0 ? (
-          <p className="px-3 py-3 text-sm text-muted-foreground">No stashes yet</p>
+          <p className="px-3 py-3 text-sm text-muted-foreground">{t("git.ui.no_stashes_yet")}</p>
         ) : (
           <div className="w-full min-w-0 px-2 py-1">
             {stashes.map((stash) => (
@@ -69,25 +71,20 @@ export function StashPane() {
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Drop stash?</DialogTitle>
+            <DialogTitle>{t("git.ui.drop_stash")}</DialogTitle>
             <DialogDescription>
-              This permanently deletes{" "}
-              <span className="font-mono">{dropping ? `stash@{${dropping.index}}` : ""}</span>.
+              {t("git.dynamic.dropStash", { stash: dropping ? `stash@{${dropping.index}}` : "" })}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDropping(null)}>
-              Cancel
-            </Button>
+            <Button variant="outline" onClick={() => setDropping(null)}>{t("git.ui.cancel")}</Button>
             <Button
               variant="destructive"
               onClick={() => {
                 if (dropping) void stashDrop(dropping.id);
                 setDropping(null);
               }}
-            >
-              Drop
-            </Button>
+            >{t("git.ui.drop")}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -96,6 +93,7 @@ export function StashPane() {
 }
 
 export function StashComposer() {
+  useTranslation();
   const { stashSave } = useGitPick(["stashSave"]);
   const [message, setMessage] = useState("");
   const [includeUntracked, setIncludeUntracked] = useState(true);
@@ -125,7 +123,7 @@ export function StashComposer() {
       <Textarea
         value={message}
         onChange={(event) => setMessage(event.target.value)}
-        placeholder="Stash message"
+        placeholder={t("git.ui.stash_message")}
         className="min-h-16 resize-none"
       />
       <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
@@ -135,13 +133,9 @@ export function StashComposer() {
             checked={includeUntracked}
             onCheckedChange={(value) => setIncludeUntracked(value === true)}
           />
-          <Label htmlFor="include-untracked" className="font-normal text-muted-foreground">
-            Include untracked
-          </Label>
+          <Label htmlFor="include-untracked" className="font-normal text-muted-foreground">{t("git.ui.include_untracked")}</Label>
         </div>
-        <Button type="submit" disabled={saving}>
-          Stash changes
-        </Button>
+        <Button type="submit" disabled={saving}>{t("git.ui.stash_changes")}</Button>
       </div>
     </form>
   );
@@ -162,7 +156,8 @@ function StashRow({
   onPop: () => void;
   onDrop: () => void;
 }) {
-  const label = stash.message || "(no message)";
+  useTranslation();
+  const label = stash.message || t("git.ui.no_message");
 
   return (
     <ContextMenu>
@@ -186,18 +181,12 @@ function StashRow({
       </HoverTip>
       <ContextMenuContent className="w-36">
         <ContextMenuItem onClick={onApply}>
-          <CheckIcon />
-          Apply
-        </ContextMenuItem>
+          <CheckIcon />{t("git.ui.apply")}</ContextMenuItem>
         <ContextMenuItem onClick={onPop}>
-          <ArchiveRestoreIcon />
-          Pop
-        </ContextMenuItem>
+          <ArchiveRestoreIcon />{t("git.ui.pop")}</ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem variant="destructive" onClick={onDrop}>
-          <Trash2Icon />
-          Drop
-        </ContextMenuItem>
+          <Trash2Icon />{t("git.ui.drop")}</ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
   );

@@ -9,12 +9,16 @@ import {
   GitBranchIcon,
   GitMergeIcon,
   PlusIcon,
+  PencilIcon,
+  LinkIcon,
   SearchIcon,
   TagIcon,
   Trash2Icon,
   UploadIcon,
 } from "lucide-react";
 import { AddRemoteDialog } from "@/components/lazy-dialogs";
+import { BranchUpstreamDialog, EditRemoteDialog, RenameBranchDialog } from "@/components/branch-management-dialogs";
+import { useTranslation } from "@/i18n";
 import { CreateTagDialog } from "@/components/create-ref-dialogs";
 import { MergeDialog, RebaseOntoDialog } from "@/components/rebase-dialog";
 import { RepoStructure } from "@/components/repo-structure";
@@ -26,6 +30,7 @@ import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
+  ContextMenuSeparator,
   ContextMenuSub,
   ContextMenuSubContent,
   ContextMenuSubTrigger,
@@ -58,6 +63,7 @@ type BranchTreeNode = {
 const DEFAULT_EXPANDED = ["section:local", "section:remotes", "remote:origin", "section:tags"];
 
 export function HistoryBranches() {
+  const { t } = useTranslation();
   const {
     snapshot,
     historyRevs,
@@ -67,6 +73,9 @@ export function HistoryBranches() {
     ensureBranches,
     addRemote,
     deleteRemote,
+    setRemoteUrl,
+    renameBranch,
+    setBranchUpstream,
     checkoutBranch,
     deleteBranch,
     fetchRemote,
@@ -83,6 +92,9 @@ export function HistoryBranches() {
     "ensureBranches",
     "addRemote",
     "deleteRemote",
+    "setRemoteUrl",
+    "renameBranch",
+    "setBranchUpstream",
     "checkoutBranch",
     "deleteBranch",
     "fetchRemote",
@@ -101,6 +113,9 @@ export function HistoryBranches() {
   const [deleteRemoteToo, setDeleteRemoteToo] = useState(true);
   const [pendingRemote, setPendingRemote] = useState<string | null>(null);
   const [deletingRemote, setDeletingRemote] = useState<string | null>(null);
+  const [renaming, setRenaming] = useState<{ repoPath: string; branch: BranchInfo } | null>(null);
+  const [upstreamBranch, setUpstreamBranch] = useState<{ repoPath: string; branch: BranchInfo } | null>(null);
+  const [editingRemote, setEditingRemote] = useState<{ repoPath: string; name: string } | null>(null);
   const [rebasing, setRebasing] = useState<BranchInfo | null>(null);
   const [merging, setMerging] = useState<BranchInfo | null>(null);
   const [creatingTag, setCreatingTag] = useState(false);
@@ -282,13 +297,13 @@ export function HistoryBranches() {
     }));
   const root: BranchTreeNode[] = [
     ...(localTree.length > 0
-      ? [{ id: "section:local", label: "Local", children: localTree }]
+      ? [{ id: "section:local", label: t("git.sidebar.local"), children: localTree }]
       : []),
     ...(!needle || remotesTree.length > 0
-      ? [{ id: "section:remotes", label: "Remotes", children: remotesTree }]
+      ? [{ id: "section:remotes", label: t("git.sidebar.remotes"), children: remotesTree }]
       : []),
     ...(!needle || tagTree.length > 0
-      ? [{ id: "section:tags", label: "Tags", children: tagTree }]
+      ? [{ id: "section:tags", label: t("git.sidebar.tags"), children: tagTree }]
       : []),
   ];
   const visibleBranches = collectBranches(root, expanded, forceOpen);
@@ -316,7 +331,7 @@ export function HistoryBranches() {
                 setNeedle("");
               }
             }}
-            placeholder="Filter branches and tags"
+            placeholder={t("git.sidebar.filter")}
             className="h-7 pl-7"
           />
         </div>
@@ -324,9 +339,7 @@ export function HistoryBranches() {
       <ScrollArea className="min-h-0 flex-1 py-1">
         {sidebarReady ? null : <BranchSidebarSkeleton />}
         {sidebarReady && root.length === 0 && needle ? (
-          <div className="px-3 py-6 text-center text-xs text-muted-foreground">
-            No matching branches
-          </div>
+          <div className="px-3 py-6 text-center text-xs text-muted-foreground">{t("git.sidebar.noMatching")}</div>
         ) : null}
         {sidebarReady && (root.length > 0 || !needle) ? (
           <TreeRows
@@ -339,9 +352,12 @@ export function HistoryBranches() {
             onToggleWatch={toggleWatch}
             onCheckout={(branch) => void checkoutBranch(branch.name)}
             onDelete={requestDelete}
+            onRename={(branch) => setRenaming({ repoPath, branch })}
+            onSetUpstream={(branch) => setUpstreamBranch({ repoPath, branch })}
             onRebase={canRebase ? setRebasing : undefined}
             onMerge={canRebase ? setMerging : undefined}
             onDeleteRemote={setDeletingRemote}
+            onEditRemote={(name) => setEditingRemote({ repoPath, name })}
             onFetchRemote={(name) => void fetchRemote(name)}
             onAddRemote={() => setAddOpen(true)}
             onCreateTag={() => setCreatingTag(true)}
@@ -381,6 +397,33 @@ export function HistoryBranches() {
           if (!open) setMerging(null);
         }}
       />
+      {renaming?.repoPath === repoPath ? (
+        <RenameBranchDialog
+          key={`${repoPath}:${renaming.branch.name}`}
+          branch={renaming.branch}
+          existingNames={branches?.local.map((branch) => branch.name) ?? []}
+          onOpenChange={(open) => { if (!open) setRenaming((current) => current === renaming ? null : current); }}
+          onRename={renameBranch}
+        />
+      ) : null}
+      {upstreamBranch?.repoPath === repoPath ? (
+        <BranchUpstreamDialog
+          key={`${repoPath}:${upstreamBranch.branch.name}`}
+          branch={upstreamBranch.branch}
+          remoteBranches={(branches?.remote ?? []).filter((branch) => isRemoteTrackingBranch(branch.name))}
+          onOpenChange={(open) => { if (!open) setUpstreamBranch((current) => current === upstreamBranch ? null : current); }}
+          onSave={setBranchUpstream}
+        />
+      ) : null}
+      {editingRemote?.repoPath === repoPath && snapshot?.remotes.some((remote) => remote.name === editingRemote.name) ? (
+        <EditRemoteDialog
+          key={`${repoPath}:${editingRemote.name}`}
+          remote={snapshot.remotes.find((remote) => remote.name === editingRemote.name)!}
+          repoPath={repoPath}
+          onOpenChange={(open) => { if (!open) setEditingRemote((current) => current === editingRemote ? null : current); }}
+          onSave={setRemoteUrl}
+        />
+      ) : null}
       <RebaseOntoDialog
         target={rebasing ? { onto: rebasing.name, label: rebasing.name } : null}
         onOpenChange={(open) => {
@@ -396,17 +439,13 @@ export function HistoryBranches() {
       <Dialog open={Boolean(deleting)} onOpenChange={(open) => !open && setDeleting(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete remote branch?</DialogTitle>
+            <DialogTitle>{t("git.sidebar.deleteRemoteBranchTitle")}</DialogTitle>
             <DialogDescription>
-              This permanently deletes{" "}
-              <span className="font-mono text-foreground">{deleting?.name}</span> from the remote.
-              Anyone still using it will need to recover the branch.
+              {t("git.sidebar.deleteRemoteBranchDescription", { name: deleting?.name })}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setDeleting(null)}>
-              Cancel
-            </Button>
+            <Button type="button" variant="outline" onClick={() => setDeleting(null)}>{t("common.cancel")}</Button>
             <Button
               type="button"
               variant="destructive"
@@ -416,9 +455,7 @@ export function HistoryBranches() {
                 setDeleting(null);
                 void deleteBranch(branch.name);
               }}
-            >
-              Delete
-            </Button>
+            >{t("common.delete")}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -430,10 +467,9 @@ export function HistoryBranches() {
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete branch?</DialogTitle>
+            <DialogTitle>{t("git.sidebar.deleteLocalBranchTitle")}</DialogTitle>
             <DialogDescription>
-              Delete local branch{" "}
-              <span className="font-mono text-foreground">{trackedDelete?.name}</span>.
+              {t("git.sidebar.deleteLocalBranchDescription", { name: trackedDelete?.name })}
             </DialogDescription>
           </DialogHeader>
           <label className="flex items-start gap-2 text-sm">
@@ -443,14 +479,11 @@ export function HistoryBranches() {
               onCheckedChange={(value) => setDeleteRemoteToo(value === true)}
             />
             <span>
-              Also delete remote branch{" "}
-              <span className="font-mono">{trackedDelete?.upstream}</span>
+              {t("git.sidebar.alsoDeleteRemoteBranch", { name: trackedDelete?.upstream })}
             </span>
           </label>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setTrackedDelete(null)}>
-              Cancel
-            </Button>
+            <Button type="button" variant="outline" onClick={() => setTrackedDelete(null)}>{t("common.cancel")}</Button>
             <Button
               type="button"
               variant="destructive"
@@ -461,9 +494,7 @@ export function HistoryBranches() {
                 setTrackedDelete(null);
                 void removeLocalBranch(branch, false, remote);
               }}
-            >
-              Delete
-            </Button>
+            >{t("common.delete")}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -478,11 +509,9 @@ export function HistoryBranches() {
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete unmerged branch?</DialogTitle>
+            <DialogTitle>{t("git.sidebar.deleteUnmergedTitle")}</DialogTitle>
             <DialogDescription>
-              <span className="font-mono text-foreground">{forceDeleting?.name}</span> is not fully
-              merged into the current branch. Deleting it drops commits that exist only on this
-              branch.
+              {t("git.sidebar.deleteUnmergedDescription", { name: forceDeleting?.name })}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -493,9 +522,7 @@ export function HistoryBranches() {
                 setForceDeleting(null);
                 setPendingRemote(null);
               }}
-            >
-              Cancel
-            </Button>
+            >{t("common.cancel")}</Button>
             <Button
               type="button"
               variant="destructive"
@@ -507,9 +534,7 @@ export function HistoryBranches() {
                 setPendingRemote(null);
                 void removeLocalBranch(branch, true, remote);
               }}
-            >
-              Delete anyway
-            </Button>
+            >{t("git.sidebar.deleteAnyway")}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -525,10 +550,9 @@ export function HistoryBranches() {
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete tag?</DialogTitle>
+            <DialogTitle>{t("git.sidebar.deleteTagTitle")}</DialogTitle>
             <DialogDescription>
-              This deletes the local tag <span className="font-mono text-foreground">{deletingTag}</span>
-              {tagRemotes.length ? ` and the tag on ${tagRemotes.join(", ")}.` : ". Remote tags are left in place."}
+              {t(tagRemotes.length ? "git.sidebar.deleteTagRemotesDescription" : "git.sidebar.deleteTagDescription", { name: deletingTag, remotes: tagRemotes.join(", ") })}
             </DialogDescription>
           </DialogHeader>
           {snapshot?.remotes.length ? (
@@ -545,7 +569,7 @@ export function HistoryBranches() {
                       )
                     }
                   />
-                  Also delete from <span className="font-mono">{remote.name}</span>
+                  {t("git.sidebar.alsoDeleteFrom", { name: remote.name })}
                 </label>
               ))}
             </div>
@@ -558,9 +582,7 @@ export function HistoryBranches() {
                 setDeletingTag(null);
                 setTagRemotes([]);
               }}
-            >
-              Cancel
-            </Button>
+            >{t("common.cancel")}</Button>
             <Button
               type="button"
               variant="destructive"
@@ -575,9 +597,7 @@ export function HistoryBranches() {
                   for (const remote of remotes) await deleteRemoteTag(remote, name);
                 })();
               }}
-            >
-              Delete
-            </Button>
+            >{t("common.delete")}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -585,12 +605,12 @@ export function HistoryBranches() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              Delete {deletingMany?.length === 1 ? "this branch?" : `${deletingMany?.length ?? 0} branches?`}
+              {t("git.sidebar.deleteBranchesTitle", { count: deletingMany?.length ?? 0 })}
             </DialogTitle>
             <DialogDescription>
               {deletingMany?.some((branch) => !branch.isRemote && branch.upstream)
-                ? "Remote branches that track these are left in place."
-                : "This cannot be undone from the sidebar."}
+                ? t("git.sidebar.keepRemoteBranches")
+                : t("git.sidebar.cannotUndo")}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-1">
@@ -601,9 +621,7 @@ export function HistoryBranches() {
             ))}
           </div>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setDeletingMany(null)}>
-              Cancel
-            </Button>
+            <Button type="button" variant="outline" onClick={() => setDeletingMany(null)}>{t("common.cancel")}</Button>
             <Button
               type="button"
               variant="destructive"
@@ -613,26 +631,20 @@ export function HistoryBranches() {
                 setDeletingMany(null);
                 void deleteMany(branches);
               }}
-            >
-              Delete
-            </Button>
+            >{t("common.delete")}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
       <Dialog open={Boolean(deletingRemote)} onOpenChange={(open) => !open && setDeletingRemote(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete remote?</DialogTitle>
+            <DialogTitle>{t("git.sidebar.deleteRemoteTitle")}</DialogTitle>
             <DialogDescription>
-              This removes{" "}
-              <span className="font-mono text-foreground">{deletingRemote}</span> and its
-              remote-tracking branches from this repository.
+              {t("git.sidebar.deleteRemoteDescription", { name: deletingRemote })}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setDeletingRemote(null)}>
-              Cancel
-            </Button>
+            <Button type="button" variant="outline" onClick={() => setDeletingRemote(null)}>{t("common.cancel")}</Button>
             <Button
               type="button"
               variant="destructive"
@@ -642,9 +654,7 @@ export function HistoryBranches() {
                 setDeletingRemote(null);
                 void deleteRemote(name);
               }}
-            >
-              Delete
-            </Button>
+            >{t("common.delete")}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -662,9 +672,12 @@ function TreeRows({
   onToggleWatch,
   onCheckout,
   onDelete,
+  onRename,
+  onSetUpstream,
   onRebase,
   onMerge,
   onDeleteRemote,
+  onEditRemote,
   onFetchRemote,
   onAddRemote,
   onCreateTag,
@@ -689,9 +702,12 @@ function TreeRows({
   onToggleWatch: (name: string) => void;
   onCheckout: (branch: BranchInfo) => void;
   onDelete: (branch: BranchInfo) => void;
+  onRename?: (branch: BranchInfo) => void;
+  onSetUpstream?: (branch: BranchInfo) => void;
   onRebase?: (branch: BranchInfo) => void;
   onMerge?: (branch: BranchInfo) => void;
   onDeleteRemote?: (name: string) => void;
+  onEditRemote?: (name: string) => void;
   onFetchRemote?: (name: string) => void;
   onAddRemote?: () => void;
   onCreateTag?: () => void;
@@ -707,6 +723,7 @@ function TreeRows({
   onHideBranches?: (names: string[]) => void;
   onDeleteBranches?: (branches: BranchInfo[]) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <>
       {nodes.map((node) => {
@@ -719,7 +736,7 @@ function TreeRows({
                 <div
                   role="button"
                   tabIndex={0}
-                  aria-label={`Tag ${name}`}
+                  aria-label={t("git.sidebar.tagLabel", { name })}
                   className="flex h-7 items-center gap-1 pr-1 text-muted-foreground outline-none hover:bg-muted/70 focus-visible:bg-muted/70 focus-visible:ring-1 focus-visible:ring-ring"
                   style={{ paddingLeft: 8 + depth * 12 }}
                 >
@@ -727,22 +744,18 @@ function TreeRows({
                   <span className="min-w-0 flex-1 truncate font-mono text-xs">{node.label}</span>
                   <WatchButton
                     active={active}
-                    title={active ? "Remove this tag from History" : "Add this tag to History"}
+                    title={active ? t("git.sidebar.hideTag") : t("git.sidebar.showTag")}
                     onClick={() => onToggleWatch(name)}
                   />
                 </div>
               </ContextMenuTrigger>
               <ContextMenuContent className="w-44">
                 <ContextMenuItem onClick={() => onCheckout({ name, isHead: false, isRemote: false, upstream: null })}>
-                  <ArrowDownToLineIcon />
-                  Checkout
-                </ContextMenuItem>
+                  <ArrowDownToLineIcon />{t("git.sidebar.checkout")}</ContextMenuItem>
                 {onPushTag && remotes && remotes.length > 0 ? (
                   <ContextMenuSub>
                     <ContextMenuSubTrigger>
-                      <UploadIcon />
-                      Push to
-                    </ContextMenuSubTrigger>
+                      <UploadIcon />{t("git.sidebar.pushTo")}</ContextMenuSubTrigger>
                     <ContextMenuSubContent>
                       {remotes.map((remote) => (
                         <ContextMenuItem key={remote} onClick={() => onPushTag(remote, name)}>
@@ -755,9 +768,7 @@ function TreeRows({
                 ) : null}
                 {onDeleteTag ? (
                   <ContextMenuItem variant="destructive" onClick={() => onDeleteTag(name)}>
-                    <Trash2Icon />
-                    Delete
-                  </ContextMenuItem>
+                    <Trash2Icon />{t("common.delete")}</ContextMenuItem>
                 ) : null}
               </ContextMenuContent>
             </ContextMenu>
@@ -777,7 +788,7 @@ function TreeRows({
                   role="button"
                   tabIndex={0}
                   aria-pressed={Boolean(selectedNames?.includes(branch.name))}
-                  aria-label={`Branch ${branch.name}`}
+                  aria-label={t("git.sidebar.branchLabel", { name: branch.name })}
                   className={cn(
                     "flex h-7 items-center gap-1 pr-1 text-muted-foreground outline-none hover:bg-muted/70 focus-visible:ring-1 focus-visible:ring-ring",
                     selectedNames?.includes(branch.name) && "bg-muted text-foreground",
@@ -818,7 +829,7 @@ function TreeRows({
                   </span>
                   <WatchButton
                     active={active}
-                    title={active ? "Remove this branch from History" : "Add this branch to History"}
+                    title={active ? t("git.sidebar.hideBranch") : t("git.sidebar.showBranch")}
                     onClick={(event) => {
                       event.stopPropagation();
                       onToggleWatch(branch.name);
@@ -839,19 +850,25 @@ function TreeRows({
                 ) : (
                 <>
                 <ContextMenuItem disabled={branch.isHead} onClick={() => onCheckout(branch)}>
-                  <ArrowDownToLineIcon />
-                  Checkout
-                </ContextMenuItem>
+                  <ArrowDownToLineIcon />{t("git.sidebar.checkout")}</ContextMenuItem>
                 {onRebase ? (
                   <ContextMenuItem disabled={branch.isHead} onClick={() => onRebase(branch)}>
-                    <GitBranchIcon />
-                    Rebase onto
-                  </ContextMenuItem>
+                    <GitBranchIcon />{t("git.sidebar.rebaseOnto")}</ContextMenuItem>
                 ) : null}
                 {onMerge ? (
                   <ContextMenuItem disabled={branch.isHead} onClick={() => onMerge(branch)}>
-                    <GitMergeIcon />
-                    Merge
+                    <GitMergeIcon />{t("git.sidebar.merge")}</ContextMenuItem>
+                ) : null}
+                {!branch.isRemote && onRename ? (
+                  <ContextMenuItem onClick={() => onRename(branch)}>
+                    <PencilIcon />
+                    {t("git.branch.rename")}
+                  </ContextMenuItem>
+                ) : null}
+                {!branch.isRemote && onSetUpstream ? (
+                  <ContextMenuItem onClick={() => onSetUpstream(branch)}>
+                    <LinkIcon />
+                    {t("git.branch.upstreamTitle")}
                   </ContextMenuItem>
                 ) : null}
                 <ContextMenuItem
@@ -859,9 +876,7 @@ function TreeRows({
                   disabled={branch.isHead}
                   onClick={() => onDelete(branch)}
                 >
-                  <Trash2Icon />
-                  Delete
-                </ContextMenuItem>
+                  <Trash2Icon />{t("common.delete")}</ContextMenuItem>
                 </>
                 )}
               </ContextMenuContent>
@@ -896,11 +911,11 @@ function TreeRows({
               </span>
             </button>
             {remoteSection && onAddRemote ? (
-              <HoverTip label="Add remote">
+              <HoverTip label={t("git.sidebar.addRemote")}>
                 <Button
                   variant="ghost"
                   size="icon-xs"
-                  aria-label="Add remote"
+                  aria-label={t("git.sidebar.addRemote")}
                   type="button"
                   className="flex size-6 shrink-0 items-center justify-center rounded-sm hover:bg-muted hover:text-foreground"
                   onClick={onAddRemote}
@@ -910,12 +925,12 @@ function TreeRows({
               </HoverTip>
             ) : null}
             {tags && onCreateTag ? (
-              <HoverTip label={createTagDisabled ? "Create a commit first" : "Create tag"}>
+              <HoverTip label={createTagDisabled ? t("git.sidebar.commitFirst") : t("git.sidebar.createTag")}>
                 <span className="inline-flex shrink-0" tabIndex={createTagDisabled ? 0 : undefined}>
                   <Button
                     variant="ghost"
                     size="icon-xs"
-                    aria-label="Create tag"
+                    aria-label={t("git.sidebar.createTag")}
                     type="button"
                     className="flex size-6 shrink-0 items-center justify-center rounded-sm hover:bg-muted hover:text-foreground"
                     disabled={createTagDisabled}
@@ -930,21 +945,26 @@ function TreeRows({
         );
         return (
           <div key={node.id}>
-            {remoteName && (onFetchRemote || onDeleteRemote) ? (
+            {remoteName && (onFetchRemote || onDeleteRemote || onEditRemote) ? (
               <ContextMenu>
                 <ContextMenuTrigger asChild>{folderRow}</ContextMenuTrigger>
                 <ContextMenuContent className="w-44">
                   {onFetchRemote ? (
                     <ContextMenuItem onClick={() => onFetchRemote(remoteName)}>
-                      <DownloadIcon />
-                      Fetch
+                      <DownloadIcon />{t("git.sidebar.fetch")}</ContextMenuItem>
+                  ) : null}
+                  {onEditRemote ? (
+                    <ContextMenuItem onClick={() => onEditRemote(remoteName)}>
+                      <PencilIcon />
+                      {t("git.remote.edit")}
                     </ContextMenuItem>
                   ) : null}
                   {onDeleteRemote ? (
-                    <ContextMenuItem variant="destructive" onClick={() => onDeleteRemote(remoteName)}>
-                      <Trash2Icon />
-                      Delete
-                    </ContextMenuItem>
+                    <>
+                      <ContextMenuSeparator />
+                      <ContextMenuItem variant="destructive" onClick={() => onDeleteRemote(remoteName)}>
+                        <Trash2Icon />{t("common.delete")}</ContextMenuItem>
+                    </>
                   ) : null}
                 </ContextMenuContent>
               </ContextMenu>
@@ -962,9 +982,12 @@ function TreeRows({
                 onToggleWatch={onToggleWatch}
                 onCheckout={onCheckout}
                 onDelete={onDelete}
+                onRename={onRename}
+                onSetUpstream={onSetUpstream}
                 onRebase={onRebase}
                 onMerge={onMerge}
                 onDeleteRemote={onDeleteRemote}
+                onEditRemote={onEditRemote}
                 onFetchRemote={onFetchRemote}
                 onAddRemote={onAddRemote}
                 onCreateTag={onCreateTag}
@@ -1003,6 +1026,7 @@ function MultiBranchMenu({
   onHide: (names: string[]) => void;
   onDelete: (branches: BranchInfo[]) => void;
 }) {
+  const { t } = useTranslation();
   const names = branches.map((branch) => branch.name);
   const hidden = names.filter((name) => !watched.has(name));
   const shown = names.filter((name) => watched.has(name));
@@ -1011,27 +1035,19 @@ function MultiBranchMenu({
     <>
       {branches.length === 2 ? (
         <ContextMenuItem onClick={() => onCompare(branches)}>
-          <ArrowLeftRightIcon />
-          Compare
-        </ContextMenuItem>
+          <ArrowLeftRightIcon />{t("git.sidebar.compare")}</ContextMenuItem>
       ) : null}
       {hidden.length > 0 ? (
         <ContextMenuItem onClick={() => onShow(hidden)}>
-          <EyeIcon />
-          Show in history
-        </ContextMenuItem>
+          <EyeIcon />{t("git.sidebar.showInHistory")}</ContextMenuItem>
       ) : null}
       {shown.length > 0 ? (
         <ContextMenuItem onClick={() => onHide(shown)}>
-          <EyeOffIcon />
-          Hide from history
-        </ContextMenuItem>
+          <EyeOffIcon />{t("git.sidebar.hideFromHistory")}</ContextMenuItem>
       ) : null}
       {deletable.length > 0 ? (
         <ContextMenuItem variant="destructive" onClick={() => onDelete(deletable)}>
-          <Trash2Icon />
-          Delete
-        </ContextMenuItem>
+          <Trash2Icon />{t("common.delete")}</ContextMenuItem>
       ) : null}
     </>
   );

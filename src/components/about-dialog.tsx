@@ -1,3 +1,4 @@
+import { t, useTranslation } from "@/i18n";
 import { toast } from "sonner";
 import { version } from "../../package.json";
 import { AppMark } from "@/components/app-mark";
@@ -19,6 +20,7 @@ export function AboutDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  useTranslation();
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="gap-0 p-0 sm:max-w-[24rem]">
@@ -27,15 +29,14 @@ export function AboutDialog({
             <AppMark className="size-10 shrink-0" iconClassName="size-5" />
             <div className="flex min-w-0 items-baseline gap-2">
               <DialogTitle className="text-2xl leading-none font-medium tracking-tight">
-                <span className="sr-only">About </span>
+                <span className="sr-only">{t("desktop.appMenu.about")}{" "}</span>
                 Rebasely
               </DialogTitle>
               <span className="font-mono text-[11px] text-muted-foreground">v{version}</span>
             </div>
           </div>
           <DialogDescription className="mt-4 text-sm leading-relaxed">
-            A unified version control client.
-          </DialogDescription>
+            {t("desktop.aboutDialog.a_unified_version_control_client")}</DialogDescription>
           <div className="mt-7">
             <p className="text-sm font-medium tracking-tight">{AUTHOR}</p>
             <button

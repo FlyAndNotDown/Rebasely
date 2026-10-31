@@ -1,3 +1,4 @@
+import { t, useTranslation } from "@/i18n";
 import { useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
@@ -54,6 +55,7 @@ function joinPath(root: string, relative: string) {
 
 /** Submodule and worktree sections for the branches sidebar. */
 export function RepoStructure({ onReady }: { onReady?: (repoPath: string) => void }) {
+  useTranslation();
   const { snapshot, openPath, updateSubmodules, beginActivity, endActivity } = useGitPick([
     "snapshot",
     "openPath",
@@ -99,9 +101,9 @@ export function RepoStructure({ onReady }: { onReady?: (repoPath: string) => voi
   async function copy(text: string) {
     try {
       await navigator.clipboard.writeText(text);
-      toast.success("Copied");
+      toast.success(t("git.ui.copied"));
     } catch {
-      toast.error("Could not copy to the clipboard");
+      toast.error(t("git.ui.could_not_copy_to_the_clipboard"));
     }
   }
 
@@ -116,11 +118,11 @@ export function RepoStructure({ onReady }: { onReady?: (repoPath: string) => voi
   async function prune() {
     await mutation.run(async () => {
       setBusy(true);
-      const activity = beginActivity("Pruning worktrees");
+      const activity = beginActivity(t("git.ui.pruning_worktrees"));
       try {
         await gitApi.pruneWorktrees(repoPath);
         setReload((value) => value + 1);
-        toast.success("Pruned missing worktrees");
+        toast.success(t("git.ui.pruned_missing_worktrees"));
       } catch (error) {
         toast.error(errorMessage(error));
       } finally {
@@ -134,11 +136,11 @@ export function RepoStructure({ onReady }: { onReady?: (repoPath: string) => voi
     let removed = false;
     await mutation.run(async () => {
       setBusy(true);
-      const activity = beginActivity("Removing worktree", tree.path);
+      const activity = beginActivity(t("git.ui.removing_worktree"), tree.path);
       try {
         await gitApi.removeWorktree(repoPath, tree.path, force);
         setReload((value) => value + 1);
-        toast.success("Removed worktree");
+        toast.success(t("git.ui.removed_worktree"));
         removed = true;
       } finally {
         endActivity(activity);
@@ -153,15 +155,15 @@ export function RepoStructure({ onReady }: { onReady?: (repoPath: string) => voi
       {structureReady && (submodules.length > 0 || errors.submodules) ? (
         <section>
           <SectionHeader
-            label="Submodules"
+            label={t("git.ui.submodules")}
             open={openSections.submodules}
             onToggle={() => setOpenSections((current) => ({ ...current, submodules: !current.submodules }))}
             action={
-              <HoverTip label="Update all submodules">
+              <HoverTip label={t("git.ui.update_all_submodules")}>
                 <Button
                   variant="ghost"
                   size="icon-xs"
-                  aria-label="Update all submodules"
+                  aria-label={t("git.ui.update_all_submodules")}
                   type="button"
                   className="flex size-6 shrink-0 items-center justify-center rounded-sm hover:bg-muted hover:text-foreground"
                   disabled={busy}
@@ -182,7 +184,7 @@ export function RepoStructure({ onReady }: { onReady?: (repoPath: string) => voi
                       type="button"
                       className="flex h-7 w-full items-center gap-1.5 pr-2 pl-7 text-left text-xs hover:bg-muted/70"
                       onDoubleClick={() => {
-                        if (module.state !== "uninitialized") void openPath(joinPath(repoPath, module.path));
+                        if (module.state !== "uninitialized") void openPath(joinPath(repoPath, module.path), "git");
                       }}
                     >
                       <BoxIcon className="size-3.5 shrink-0 text-muted-foreground" />
@@ -206,26 +208,20 @@ export function RepoStructure({ onReady }: { onReady?: (repoPath: string) => voi
                   </HoverTip>
                   <ContextMenuContent className="w-48">
                     {module.state !== "uninitialized" ? (
-                      <ContextMenuItem onClick={() => void openPath(joinPath(repoPath, module.path))}>
-                        <AppWindowIcon />
-                        Open in a new tab
-                      </ContextMenuItem>
+                      <ContextMenuItem onClick={() => void openPath(joinPath(repoPath, module.path), "git")}>
+                        <AppWindowIcon />{t("git.ui.open_in_a_new_tab")}</ContextMenuItem>
                     ) : null}
                     <ContextMenuItem disabled={busy} onClick={() => void update([module.path])}>
                       {module.state === "uninitialized" ? <DownloadIcon /> : <RefreshCwIcon />}
-                      {module.state === "uninitialized" ? "Check out" : "Update to recorded commit"}
+                      {module.state === "uninitialized" ? t("git.ui.check_out") : t("git.ui.update_to_recorded_commit")}
                     </ContextMenuItem>
                     <ContextMenuSeparator />
                     {module.url ? (
                       <ContextMenuItem onClick={() => void copy(module.url ?? "")}>
-                        <LinkIcon />
-                        Copy URL
-                      </ContextMenuItem>
+                        <LinkIcon />{t("git.ui.copy_url")}</ContextMenuItem>
                     ) : null}
                     <ContextMenuItem onClick={() => void copy(module.path)}>
-                      <CopyIcon />
-                      Copy path
-                    </ContextMenuItem>
+                      <CopyIcon />{t("git.ui.copy_path")}</ContextMenuItem>
                   </ContextMenuContent>
                 </ContextMenu>
               ))
@@ -238,16 +234,16 @@ export function RepoStructure({ onReady }: { onReady?: (repoPath: string) => voi
           <ContextMenuTrigger asChild>
             <div>
               <SectionHeader
-                label="Worktrees"
+                label={t("git.ui.worktrees")}
                 open={openSections.worktrees}
                 onToggle={() => setOpenSections((current) => ({ ...current, worktrees: !current.worktrees }))}
                 action={
-                  <HoverTip label={canAddWorktree ? "New worktree" : "Create a commit first"}>
+                  <HoverTip label={canAddWorktree ? t("git.ui.new_worktree") : t("git.ui.create_a_commit_first")}>
                     <span className="inline-flex shrink-0" tabIndex={canAddWorktree ? undefined : 0}>
                       <Button
                         variant="ghost"
                         size="icon-xs"
-                        aria-label="New worktree"
+                        aria-label={t("git.ui.new_worktree")}
                         type="button"
                         className="flex size-6 shrink-0 items-center justify-center rounded-sm hover:bg-muted hover:text-foreground"
                         disabled={busy || !canAddWorktree}
@@ -262,18 +258,14 @@ export function RepoStructure({ onReady }: { onReady?: (repoPath: string) => voi
             </div>
           </ContextMenuTrigger>
           <ContextMenuContent className="w-44">
-            <HoverTip label={canAddWorktree ? undefined : "Create a commit first"}>
+            <HoverTip label={canAddWorktree ? undefined : t("git.ui.create_a_commit_first")}>
               <span className="block">
-                <ContextMenuItem disabled={busy || !canAddWorktree} aria-description={canAddWorktree ? undefined : "Create a commit first"} onClick={() => setAdding(true)}>
-                  <PlusIcon />
-                  New worktree…
-                </ContextMenuItem>
+                <ContextMenuItem disabled={busy || !canAddWorktree} aria-description={canAddWorktree ? undefined : t("git.ui.create_a_commit_first")} onClick={() => setAdding(true)}>
+                  <PlusIcon />{t("git.ui.new_worktree_menu")}</ContextMenuItem>
               </span>
             </HoverTip>
             <ContextMenuItem disabled={busy} onClick={() => void prune()}>
-              <ScissorsIcon />
-              Prune missing
-            </ContextMenuItem>
+              <ScissorsIcon />{t("git.ui.prune_missing")}</ContextMenuItem>
           </ContextMenuContent>
         </ContextMenu>
         {errors.worktrees ? <StructureError message={errors.worktrees} busy={busy} onRetry={() => setReload((value) => value + 1)} /> : null}
@@ -286,38 +278,32 @@ export function RepoStructure({ onReady }: { onReady?: (repoPath: string) => voi
                     type="button"
                     className="flex h-7 w-full items-center gap-1.5 pr-2 pl-7 text-left text-xs hover:bg-muted/70"
                     onDoubleClick={() => {
-                      if (!tree.current && !tree.prunable) void openPath(tree.path);
+                      if (!tree.current && !tree.prunable) void openPath(tree.path, "git");
                     }}
                   >
                     <FolderGit2Icon className="size-3.5 shrink-0 text-muted-foreground" />
                     <span className={cn("min-w-0 flex-1 truncate font-mono", tree.prunable && "line-through opacity-60")}>
-                      {tree.branch ?? (tree.head ? `detached ${tree.head.slice(0, 7)}` : tree.path)}
+                      {tree.branch ?? (tree.head ? t("git.dynamic.detachedHead", { id: tree.head.slice(0, 7) }) : tree.path)}
                     </span>
-                    {tree.current ? <span className="shrink-0 text-[10px] text-muted-foreground">current</span> : null}
+                    {tree.current ? <span className="shrink-0 text-[10px] text-muted-foreground">{t("git.ui.current")}</span> : null}
                     {!tree.current && tree.main ? (
-                      <span className="shrink-0 text-[10px] text-muted-foreground">main</span>
+                      <span className="shrink-0 text-[10px] text-muted-foreground">{t("git.ui.main")}</span>
                     ) : null}
                   </button>
                 </ContextMenuTrigger>
                 </HoverTip>
                 <ContextMenuContent className="w-48">
                   {!tree.current && !tree.prunable ? (
-                    <ContextMenuItem onClick={() => void openPath(tree.path)}>
-                      <AppWindowIcon />
-                      Open in a new tab
-                    </ContextMenuItem>
+                    <ContextMenuItem onClick={() => void openPath(tree.path, "git")}>
+                      <AppWindowIcon />{t("git.ui.open_in_a_new_tab")}</ContextMenuItem>
                   ) : null}
                   <ContextMenuItem onClick={() => void copy(tree.path)}>
-                    <CopyIcon />
-                    Copy path
-                  </ContextMenuItem>
+                    <CopyIcon />{t("git.ui.copy_path")}</ContextMenuItem>
                   {!tree.main && !tree.current ? (
                     <>
                       <ContextMenuSeparator />
                       <ContextMenuItem disabled={busy} variant="destructive" onClick={() => setRemoving(tree)}>
-                        <Trash2Icon />
-                        Remove…
-                      </ContextMenuItem>
+                        <Trash2Icon />{t("git.ui.remove_menu")}</ContextMenuItem>
                     </>
                   ) : null}
                 </ContextMenuContent>
@@ -331,7 +317,7 @@ export function RepoStructure({ onReady }: { onReady?: (repoPath: string) => voi
         onOpenChange={setAdding}
         onCreated={(path) => {
           setReload((value) => value + 1);
-          toast.success("Created worktree", { action: { label: "Open", onClick: () => void openPath(path) } });
+          toast.success(t("git.ui.created_worktree"), { action: { label: t("git.ui.open"), onClick: () => void openPath(path, "git") } });
         }}
       />
       <RemoveWorktreeDialog
@@ -344,7 +330,8 @@ export function RepoStructure({ onReady }: { onReady?: (repoPath: string) => voi
 }
 
 function StructureError({ message, busy, onRetry }: { message: string; busy: boolean; onRetry: () => void }) {
-  return <div role="alert" className="grid gap-1 px-3 py-2 text-xs text-destructive"><p className="break-words">{message}</p><Button variant="outline" size="xs" className="w-fit" disabled={busy} onClick={onRetry}>Retry</Button></div>;
+  useTranslation();
+  return <div role="alert" className="grid gap-1 px-3 py-2 text-xs text-destructive"><p className="break-words">{message}</p><Button variant="outline" size="xs" className="w-fit" disabled={busy} onClick={onRetry}>{t("git.ui.retry")}</Button></div>;
 }
 
 function SectionHeader({
@@ -358,6 +345,7 @@ function SectionHeader({
   onToggle: () => void;
   action?: React.ReactNode;
 }) {
+  useTranslation();
   return (
     <div className="flex h-7 items-center gap-1 pr-1 pl-2 text-muted-foreground hover:bg-muted/70 hover:text-foreground">
       <button type="button" className="flex min-w-0 flex-1 items-center gap-1 text-left" onClick={onToggle} aria-expanded={open}>
@@ -378,6 +366,7 @@ function AddWorktreeDialog({
   onOpenChange: (open: boolean) => void;
   onCreated: (path: string) => void;
 }) {
+  useTranslation();
   const [mutation] = useState(createExclusiveAction);
   return (
     <Dialog open={isOpen} onOpenChange={(next) => { if (!mutation.busy) onOpenChange(next); }}>
@@ -389,6 +378,7 @@ function AddWorktreeDialog({
 }
 
 function AddWorktreeForm({ mutation, onClose, onCreated }: { mutation: ReturnType<typeof createExclusiveAction>; onClose: () => void; onCreated: (path: string) => void }) {
+  useTranslation();
   const { snapshot } = useGitPick(["snapshot"]);
   const repoPath = snapshot?.repo.path ?? "";
   const branches = (snapshot?.branches.local ?? []).filter((branch) => !branch.isHead);
@@ -402,7 +392,7 @@ function AddWorktreeForm({ mutation, onClose, onCreated }: { mutation: ReturnTyp
   const canSave = Boolean(folder.trim()) && (mode === "existing" ? Boolean(branch) : hasHead && Boolean(newBranch.trim())) && !saving;
 
   async function browse() {
-    const picked = await open({ directory: true, multiple: false, title: "Folder for the new worktree" });
+    const picked = await open({ directory: true, multiple: false, title: t("git.ui.folder_for_the_new_worktree") });
     if (typeof picked === "string") setFolder(picked);
   }
 
@@ -434,14 +424,14 @@ function AddWorktreeForm({ mutation, onClose, onCreated }: { mutation: ReturnTyp
       }}
     >
       <DialogHeader>
-        <DialogTitle>New worktree</DialogTitle>
+        <DialogTitle>{t("git.ui.new_worktree")}</DialogTitle>
         <DialogDescription>
-          Checks out another branch in its own folder, sharing this repository&apos;s history.
+          {t("git.dynamic.worktreeDescription")}
         </DialogDescription>
       </DialogHeader>
       <div className="mt-3 grid gap-4">
         <div className="grid gap-2">
-          <Label htmlFor="worktree-folder">Folder</Label>
+          <Label htmlFor="worktree-folder">{t("git.ui.folder")}</Label>
           <div className="flex gap-2">
             <Input
               id="worktree-folder"
@@ -450,15 +440,13 @@ function AddWorktreeForm({ mutation, onClose, onCreated }: { mutation: ReturnTyp
               value={folder}
               onChange={(event) => setFolder(event.target.value)}
             />
-            <Button type="button" variant="outline" disabled={saving} onClick={() => void browse()}>
-              Browse
-            </Button>
+            <Button type="button" variant="outline" disabled={saving} onClick={() => void browse()}>{t("git.ui.browse")}</Button>
           </div>
         </div>
         <div className="grid gap-2">
           <div className="flex gap-1 rounded-md bg-muted p-0.5">
             {(["existing", "new"] as const).map((item) => (
-              <HoverTip key={item} label={item === "new" && !hasHead ? "Create a commit first" : undefined}>
+              <HoverTip key={item} label={item === "new" && !hasHead ? t("git.ui.create_a_commit_first") : undefined}>
                 <span className="flex flex-1" tabIndex={item === "new" && !hasHead ? 0 : undefined}>
                   <Button
                     type="button"
@@ -468,7 +456,7 @@ function AddWorktreeForm({ mutation, onClose, onCreated }: { mutation: ReturnTyp
                     disabled={saving || (item === "existing" ? branches.length === 0 : !hasHead)}
                     onClick={() => setMode(item)}
                   >
-                    {item === "existing" ? "Existing branch" : "New branch"}
+                    {item === "existing" ? t("git.ui.existing_branch") : t("git.ui.new_branch")}
                   </Button>
                 </span>
               </HoverTip>
@@ -476,7 +464,7 @@ function AddWorktreeForm({ mutation, onClose, onCreated }: { mutation: ReturnTyp
           </div>
           {mode === "existing" ? (
             <select
-              aria-label="Branch"
+              aria-label={t("git.ui.branch")}
               disabled={saving}
               className="h-8 rounded-md border bg-transparent px-2 font-mono text-sm"
               value={branch}
@@ -490,26 +478,24 @@ function AddWorktreeForm({ mutation, onClose, onCreated }: { mutation: ReturnTyp
             </select>
           ) : (
             <Input
-              aria-label="New branch name"
+              aria-label={t("git.ui.new_branch_name")}
               disabled={saving}
               className="font-mono"
-              placeholder="feature/name"
+              placeholder={t("git.dynamic.branchExample")}
               value={newBranch}
               onChange={(event) => setNewBranch(event.target.value)}
             />
           )}
           {mode === "new" ? (
-            <p className="text-xs text-muted-foreground">Starts from {snapshot?.repo.currentBranch ?? "HEAD"}.</p>
+            <p className="text-xs text-muted-foreground">{t("git.dynamic.worktreeStart", { branch: snapshot?.repo.currentBranch ?? "HEAD" })}</p>
           ) : null}
         </div>
       </div>
       {error ? <p role="alert" className="mt-3 break-words text-xs text-destructive">{error}</p> : null}
       <DialogFooter className="mt-4">
-        <Button type="button" variant="outline" disabled={saving} onClick={onClose}>
-          Cancel
-        </Button>
+        <Button type="button" variant="outline" disabled={saving} onClick={onClose}>{t("git.ui.cancel")}</Button>
         <Button type="submit" disabled={!canSave}>
-          {saving ? "Creating…" : "Create"}
+          {saving ? t("git.ui.creating") : t("git.ui.create")}
         </Button>
       </DialogFooter>
     </form>
@@ -525,6 +511,7 @@ function RemoveWorktreeDialog({
   onClose: () => void;
   onRemove: (tree: WorktreeInfo, force: boolean) => Promise<boolean>;
 }) {
+  useTranslation();
   const [force, setForce] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -559,32 +546,27 @@ function RemoveWorktreeDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Remove worktree?</DialogTitle>
+          <DialogTitle>{t("git.ui.remove_worktree")}</DialogTitle>
           <DialogDescription>
-            Deletes the folder <span className="font-mono text-foreground">{tree?.path}</span>. Its branch
-            {tree?.branch ? ` ${tree.branch}` : ""} stays in this repository.
+            {t("git.dynamic.removeWorktreeDescription", { path: tree?.path, branch: tree?.branch ?? "" })}
           </DialogDescription>
         </DialogHeader>
         <div className="flex items-center gap-1">
           <label className="flex items-center gap-2 text-sm">
-            <Checkbox checked={force} disabled={saving} onCheckedChange={(checked) => setForce(checked === true)} />
-            Force removal
-          </label>
-          <HoverTip label="Deletes uncommitted files and checked-out submodules in this worktree. Required when the worktree contains submodules.">
-            <Button variant="ghost" size="icon-xs" aria-label="About force removal"><InfoIcon /></Button>
+            <Checkbox checked={force} disabled={saving} onCheckedChange={(checked) => setForce(checked === true)} />{t("git.ui.force_removal")}</label>
+          <HoverTip label={t("git.ui.deletes_uncommitted_files_and_checked_out_submodules_in_this_worktree_required_when_the_worktree_contains_submodules")}>
+            <Button variant="ghost" size="icon-xs" aria-label={t("git.ui.about_force_removal")}><InfoIcon /></Button>
           </HoverTip>
         </div>
         {error ? <p role="alert" className="break-words text-xs text-destructive">{error}</p> : null}
         <DialogFooter>
-          <Button variant="outline" disabled={saving} onClick={close}>
-            Cancel
-          </Button>
+          <Button variant="outline" disabled={saving} onClick={close}>{t("git.ui.cancel")}</Button>
           <Button
             variant="destructive"
             disabled={saving}
             onClick={() => void submit()}
           >
-            {saving ? "Removing…" : "Remove"}
+            {saving ? t("git.ui.removing") : t("git.ui.remove")}
           </Button>
         </DialogFooter>
       </DialogContent>

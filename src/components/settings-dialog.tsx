@@ -55,15 +55,16 @@ import { AUTO_FETCH_CHOICES, isGitFileName, isP4FileName, normalizePrefs, sameGi
 import { cn } from "@/lib/utils";
 import { useGitPick } from "@/state/git-context";
 import type { AppPrefs, TerminalOption, ToolConfig } from "@/types/git";
+import { t, type LanguagePreference , useTranslation} from "@/i18n";
 
 type SettingsSection = "git" | "perforce" | "ssh" | "general" | "network" | "diagnostics";
 type GuiTool = { id: string; name: string; installed: boolean };
 type ThemeChoice = "dark" | "light" | "system";
 
 const themeOptions: { id: ThemeChoice; label: string }[] = [
-  { id: "dark", label: "Dark" },
-  { id: "light", label: "Light" },
-  { id: "system", label: "System" },
+  { id: "dark", get label() { return t("desktop.settingsDialog.dark"); } },
+  { id: "light", get label() { return t("desktop.settingsDialog.light"); } },
+  { id: "system", get label() { return t("desktop.settingsDialog.system"); } },
 ];
 
 export function SettingsDialog({
@@ -73,6 +74,7 @@ export function SettingsDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex h-[min(40rem,calc(100vh-4rem))] w-[min(56rem,calc(100vw-4rem))] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none">
@@ -84,6 +86,7 @@ export function SettingsDialog({
 }
 
 function SettingsForm() {
+  useTranslation();
   const { theme, setTheme } = useTheme();
   const { prefs, updatePrefs } = useGitPick(["prefs", "updatePrefs"]);
   const [section, setSection] = useState<SettingsSection>("general");
@@ -257,13 +260,13 @@ function SettingsForm() {
   }
 
   async function addGitExecutable() {
-    const picked = await openFile({ multiple: false, title: "Git executable" });
+    const picked = await openFile({ multiple: false, title: t("desktop.settingsDialog.git_executable") });
     if (typeof picked !== "string") return;
     if (!isGitFileName(picked)) {
       toast.error(
         typeof navigator !== "undefined" && /windows/i.test(navigator.userAgent)
-          ? "Choose a file named git. On Windows, choose git.exe."
-          : "Choose a file named git.",
+          ? t("desktop.settingsDialog.choose_a_file_named_git_on_windows_choose")
+          : t("desktop.settingsDialog.choose_a_file_named_git"),
       );
       return;
     }
@@ -302,13 +305,13 @@ function SettingsForm() {
   }
 
   async function addP4Executable() {
-    const picked = await openFile({ multiple: false, title: "p4 executable" });
+    const picked = await openFile({ multiple: false, title: t("desktop.settingsDialog.p4_executable") });
     if (typeof picked !== "string") return;
     if (!isP4FileName(picked)) {
       toast.error(
         typeof navigator !== "undefined" && /windows/i.test(navigator.userAgent)
-          ? "Choose a file named p4. On Windows, choose p4.exe."
-          : "Choose a file named p4.",
+          ? t("desktop.settingsDialog.choose_a_file_named_p4_on_windows_choose")
+          : t("desktop.settingsDialog.choose_a_file_named_p4"),
       );
       return;
     }
@@ -351,11 +354,9 @@ function SettingsForm() {
       <div className="flex min-h-0 flex-1">
         <aside className="flex w-44 shrink-0 flex-col gap-1 border-r p-4">
           <NavButton active={section === "general"} icon={<SlidersHorizontalIcon />} onClick={() => setSection("general")}>
-            General
-          </NavButton>
+            {t("desktop.settingsDialog.general")}</NavButton>
           <NavButton active={section === "network"} icon={<GlobeIcon />} onClick={() => setSection("network")}>
-            Network
-          </NavButton>
+            {t("desktop.settingsDialog.network")}</NavButton>
           <NavButton active={section === "git"} icon={<GitLogo />} onClick={() => setSection("git")}>
             Git
           </NavButton>
@@ -366,15 +367,14 @@ function SettingsForm() {
             SSH
           </NavButton>
           <NavButton active={section === "diagnostics"} icon={<ActivityIcon />} onClick={() => setSection("diagnostics")}>
-            Diagnostics
-          </NavButton>
+            {t("desktop.settingsDialog.diagnostics")}</NavButton>
         </aside>
         <ScrollArea key={section} className="min-w-0 flex-1" scrollbars="vertical">
         <div className="p-6">
           {incomplete ? (
             <div role="alert" className="mb-4 flex items-center gap-3 rounded-lg border border-destructive/30 px-3 py-2 text-sm">
-              <p className="min-w-0 flex-1">Some settings could not be loaded.</p>
-              <Button variant="outline" size="sm" onClick={() => setReload((value) => value + 1)}>Retry</Button>
+              <p className="min-w-0 flex-1">{t("desktop.settingsDialog.some_settings_could_not_be_loaded")}</p>
+              <Button variant="outline" size="sm" onClick={() => setReload((value) => value + 1)}>{t("common.retry")}</Button>
             </div>
           ) : null}
           {section === "git" ? (
@@ -382,8 +382,7 @@ function SettingsForm() {
               <DialogHeader>
                 <DialogTitle>Git</DialogTitle>
                 <DialogDescription>
-                  Executable, global identity, and tools.
-                </DialogDescription>
+                  {t("desktop.settingsDialog.executable_global_identity_and_tools")}</DialogDescription>
               </DialogHeader>
               <div className="mt-6 grid gap-8">
                 <GitExecutableSection
@@ -396,21 +395,21 @@ function SettingsForm() {
                   onRemove={removeGitExecutable}
                   onAdd={() => void addGitExecutable()}
                 />
-                <FieldGroup title="Identity" hint="Saved to your global Git configuration. Repository settings take precedence.">
+                <FieldGroup title={t("desktop.settingsDialog.identity")} hint={t("desktop.settingsDialog.saved_to_your_global_git_configuration_repository_settings")}>
                   {identityReady ? (
                     <>
                       <div className="grid gap-2">
-                        <Label htmlFor="git-name">User name</Label>
+                        <Label htmlFor="git-name">{t("desktop.settingsDialog.user_name")}</Label>
                         <Input
                           id="git-name"
                           value={name}
                           onChange={(event) => setName(event.target.value)}
                           onBlur={() => void commitIdentity()}
-                          placeholder="Your name"
+                          placeholder={t("desktop.settingsDialog.your_name")}
                         />
                       </div>
                       <div className="grid gap-2">
-                        <Label htmlFor="git-email">Email</Label>
+                        <Label htmlFor="git-email">{t("desktop.settingsDialog.email")}</Label>
                         <Input
                           id="git-email"
                           type="email"
@@ -422,28 +421,28 @@ function SettingsForm() {
                       </div>
                     </>
                   ) : loaded ? (
-                    <p className="text-sm text-muted-foreground">Identity settings are unavailable. Check the Git executable above, then retry.</p>
+                    <p className="text-sm text-muted-foreground">{t("desktop.settingsDialog.identity_settings_are_unavailable_check_the_git_executable")}</p>
                   ) : (
-                    <div role="status" aria-label="Loading Git identity" className="grid gap-4">
+                    <div role="status" aria-label={t("desktop.settingsDialog.loading_git_identity")} className="grid gap-4">
                       <div className="grid gap-2">
-                        <Label>User name</Label>
+                        <Label>{t("desktop.settingsDialog.user_name")}</Label>
                         <Skeleton className="h-8 w-full" />
                       </div>
                       <div className="grid gap-2">
-                        <Label>Email</Label>
+                        <Label>{t("desktop.settingsDialog.email")}</Label>
                         <Skeleton className="h-8 w-full" />
                       </div>
                     </div>
                   )}
                 </FieldGroup>
-                <FieldGroup title="Fetching">
+                <FieldGroup title={t("desktop.settingsDialog.fetching")}>
                   <SelectField
                     id="auto-fetch"
-                    label="Fetch in the background"
+                    label={t("desktop.settingsDialog.fetch_in_the_background")}
                     value={autoFetch}
                     options={AUTO_FETCH_CHOICES.map((minutes) => ({
                       id: String(minutes),
-                      label: minutes === 0 ? "Never" : `Every ${minutes} minutes`,
+                      label: minutes === 0 ? t("desktop.settingsDialog.never") : t("common.everyMinutes", { count: minutes }),
                     }))}
                     onChange={(value) => {
                       setAutoFetch(value);
@@ -451,7 +450,7 @@ function SettingsForm() {
                     }}
                   />
                   <label className="flex items-start gap-2 text-sm">
-                    <HoverTip label="Remove tracking references for branches deleted on the remote.">
+                    <HoverTip label={t("desktop.settingsDialog.remove_tracking_references_for_branches_deleted_on_the")}>
                     <Checkbox
                       className="mt-0.5"
                       checked={prune}
@@ -462,16 +461,16 @@ function SettingsForm() {
                       }}
                     />
                     </HoverTip>
-                    <span>Prune when fetching</span>
+                    <span>{t("desktop.settingsDialog.prune_when_fetching")}</span>
                   </label>
                 </FieldGroup>
-                <FieldGroup title="Diff and merge" hint="Saved to your global Git configuration. Uses Git's configured diff and merge tools.">
+                <FieldGroup title={t("desktop.settingsDialog.diff_and_merge")} hint={t("desktop.settingsDialog.saved_to_your_global_git_configuration_uses_git")}>
                   {loaded && !toolConfigReady ? (
-                    <p className="text-sm text-muted-foreground">Choose a Git executable above to configure diff and merge tools.</p>
+                    <p className="text-sm text-muted-foreground">{t("desktop.settingsDialog.choose_a_git_executable_above_to_configure_diff")}</p>
                   ) : <>
                   <ToolPicker
                     id="diff-tool"
-                    label="Diff tool"
+                    label={t("desktop.settingsDialog.diff_tool")}
                     value={tools.diffTool}
                     tools={guiTools}
                     ready={guiToolsReady}
@@ -479,7 +478,7 @@ function SettingsForm() {
                   />
                   <ToolPicker
                     id="merge-tool"
-                    label="Merge tool"
+                    label={t("desktop.settingsDialog.merge_tool")}
                     value={tools.mergeTool}
                     tools={guiTools}
                     ready={guiToolsReady}
@@ -494,8 +493,7 @@ function SettingsForm() {
               <DialogHeader>
                 <DialogTitle>Perforce</DialogTitle>
                 <DialogDescription>
-                  Executable and workspace refresh.
-                </DialogDescription>
+                  {t("desktop.settingsDialog.executable_and_workspace_refresh")}</DialogDescription>
               </DialogHeader>
               <div className="mt-6 grid gap-8">
                 <P4ExecutableSection
@@ -508,14 +506,14 @@ function SettingsForm() {
                   onRemove={removeP4Executable}
                   onAdd={() => void addP4Executable()}
                 />
-                <FieldGroup title="Refresh">
+                <FieldGroup title={t("common.refresh")}>
                   <SelectField
                     id="p4-refresh"
-                    label="Refresh in the background"
+                    label={t("desktop.settingsDialog.refresh_in_the_background")}
                     value={p4Refresh}
                     options={AUTO_FETCH_CHOICES.map((minutes) => ({
                       id: String(minutes),
-                      label: minutes === 0 ? "Never" : `Every ${minutes} minutes`,
+                      label: minutes === 0 ? t("desktop.settingsDialog.never") : t("common.everyMinutes", { count: minutes }),
                     }))}
                     onChange={(value) => {
                       setP4Refresh(value);
@@ -529,28 +527,40 @@ function SettingsForm() {
             <SshKeysSettings email={email} />
           ) : section === "network" ? (
             <>
-              <DialogHeader><DialogTitle>Network</DialogTitle><DialogDescription>Client connection settings.</DialogDescription></DialogHeader>
+              <DialogHeader><DialogTitle>{t("desktop.settingsDialog.network")}</DialogTitle><DialogDescription>{t("desktop.settingsDialog.client_connection_settings")}</DialogDescription></DialogHeader>
               <div className="mt-6"><NetworkSettings value={prefs.httpProxy} onSave={(httpProxy) => persistPrefs({ httpProxy })} /></div>
             </>
           ) : section === "diagnostics" ? (
             <>
-              <DialogHeader><DialogTitle>Diagnostics</DialogTitle><DialogDescription>Inspect and export local diagnostics.</DialogDescription></DialogHeader>
+              <DialogHeader><DialogTitle>{t("desktop.settingsDialog.diagnostics")}</DialogTitle><DialogDescription>{t("desktop.settingsDialog.inspect_and_export_local_diagnostics")}</DialogDescription></DialogHeader>
               <div className="mt-6"><DiagnosticsSettings /></div>
             </>
           ) : (
             <>
               <DialogHeader>
-                <DialogTitle>General</DialogTitle>
+                <DialogTitle>{t("desktop.settingsDialog.general")}</DialogTitle>
                 <DialogDescription>
-                  Updates, appearance, and external apps.
-                </DialogDescription>
+                  {t("desktop.settingsDialog.updates_appearance_and_external_apps")}</DialogDescription>
               </DialogHeader>
               <div className="mt-6 grid gap-8">
                 <UpdatesSettings />
-                <FieldGroup title="Appearance">
+                <FieldGroup title={t("language.label")} hint={t("language.hint")}>
+                  <SelectField<LanguagePreference>
+                    id="language-choice"
+                    label={t("language.label")}
+                    value={prefs.language}
+                    options={[
+                      { id: "system", label: t("language.system") },
+                      { id: "en", label: t("language.english") },
+                      { id: "zh-CN", label: t("language.chinese") },
+                    ]}
+                    onChange={(language) => { void persistPrefs({ language }); }}
+                  />
+                </FieldGroup>
+                <FieldGroup title={t("desktop.settingsDialog.appearance")}>
                   <SelectField
                     id="theme-choice"
-                    label="Theme"
+                    label={t("desktop.settingsDialog.theme")}
                     value={themeChoice}
                     options={themeOptions}
                     onChange={(value) => {
@@ -565,26 +575,26 @@ function SettingsForm() {
                     }}
                   />
                 </FieldGroup>
-                <FieldGroup title="External Editor">
+                <FieldGroup title={t("desktop.settingsDialog.external_editor")}>
                   <AppPicker
                     id="editor-app"
                     options={editors.filter((editor) => editor.available)}
                     catalog={editors.filter((editor) => editor.id !== "system")}
                     value={editorId}
-                    fallback="System default app"
+                    fallback={t("desktop.settingsDialog.system_default_app")}
                     onChange={(value) => {
                       setEditorId(value);
                       void persistPrefs({ editorId: value });
                     }}
                   />
                 </FieldGroup>
-                <FieldGroup title="Terminal">
+                <FieldGroup title={t("desktop.settingsDialog.terminal")}>
                   <AppPicker
                     id="terminal-app"
                     options={terminals.filter((terminal) => terminal.available)}
                     catalog={terminals.filter((terminal) => terminal.id !== "auto")}
                     value={terminalId}
-                    fallback="System default"
+                    fallback={t("desktop.settingsDialog.system_default")}
                     onChange={(value) => {
                       setTerminalId(value);
                       void persistPrefs({ terminalId: value });
@@ -616,14 +626,15 @@ function AppPicker({
   fallback: string;
   onChange: (value: string) => void;
 }) {
+  useTranslation();
   return (
     <div className="grid gap-2">
-      <Label htmlFor={id}>Application</Label>
+      <Label htmlFor={id}>{t("desktop.settingsDialog.application")}</Label>
       <div className="flex items-center gap-2">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button id={id} type="button" variant="outline" className="min-w-0 flex-1 justify-between font-normal">
-              <span className="truncate">{options.find((item) => item.id === value)?.name ?? fallback}</span>
+              <span className="truncate">{value === "system" ? t("desktop.settingsDialog.system_default_app") : value === "auto" ? t("desktop.settingsDialog.system_default") : options.find((item) => item.id === value)?.name ?? fallback}</span>
               <ChevronDownIcon />
             </Button>
           </DropdownMenuTrigger>
@@ -631,7 +642,7 @@ function AppPicker({
             {options.map((option) => (
               <DropdownMenuItem key={option.id} onClick={() => onChange(option.id)}>
                 <span className="min-w-4">{option.id === value ? <CheckIcon className="size-3.5" /> : null}</span>
-                <span className="truncate">{option.name}</span>
+                <span className="truncate">{option.id === "system" ? t("desktop.settingsDialog.system_default_app") : option.id === "auto" ? t("desktop.settingsDialog.system_default") : option.name}</span>
               </DropdownMenuItem>
             ))}
           </DropdownMenuContent>
@@ -643,21 +654,22 @@ function AppPicker({
 }
 
 function SupportList({ items }: { items: { id: string; name: string; available: boolean }[] }) {
+  useTranslation();
   const installed = items.filter((item) => item.available);
   const missing = items.filter((item) => !item.available);
   return (
     <DropdownMenu>
-      <HoverTip label="Supported tools">
+      <HoverTip label={t("desktop.settingsDialog.supported_tools")}>
         <DropdownMenuTrigger asChild>
-          <Button type="button" variant="outline" size="icon" className="shrink-0" aria-label="Supported tools">
+          <Button type="button" variant="outline" size="icon" className="shrink-0" aria-label={t("desktop.settingsDialog.supported_tools")}>
             <ListIcon />
           </Button>
         </DropdownMenuTrigger>
       </HoverTip>
       <DropdownMenuContent align="end" className="w-64">
-        <SupportGroup title="Installed" items={installed} />
+        <SupportGroup title={t("desktop.settingsDialog.installed")} items={installed} />
         <DropdownMenuSeparator />
-        <SupportGroup title="Not installed" items={missing} muted />
+        <SupportGroup title={t("desktop.settingsDialog.not_installed")} items={missing} muted />
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -672,11 +684,12 @@ function SupportGroup({
   items: { id: string; name: string }[];
   muted?: boolean;
 }) {
+  useTranslation();
   return (
     <>
       <DropdownMenuLabel>{title}</DropdownMenuLabel>
       {items.length === 0 ? (
-        <p className="px-1.5 py-1 text-xs text-muted-foreground">None</p>
+        <p className="px-1.5 py-1 text-xs text-muted-foreground">{t("desktop.settingsDialog.none")}</p>
       ) : (
         items.map((item) => (
           <div key={item.id} className={cn("truncate px-1.5 py-1 text-sm", muted && "text-muted-foreground")}>
@@ -707,18 +720,19 @@ function GitExecutableSection({
   onRemove: (path: string) => void;
   onAdd: () => void;
 }) {
+  useTranslation();
   const unusable = ready && !pathGit && gitPath === "";
   const selectedCustom = extras.find((path) => sameGitPath(path, gitPath));
   const selectedPath = selectedCustom ?? (pathGit && gitPath === "" ? pathGit : null);
   if (!ready) {
     return (
-      <FieldGroup title="Executable">
-        <Skeleton className="h-8 w-full" role="status" aria-label="Loading Git executable" />
+      <FieldGroup title={t("desktop.settingsDialog.executable")}>
+        <Skeleton className="h-8 w-full" role="status" aria-label={t("desktop.settingsDialog.loading_git_executable")} />
       </FieldGroup>
     );
   }
   return (
-    <FieldGroup title="Executable">
+    <FieldGroup title={t("desktop.settingsDialog.executable")}>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button
@@ -730,7 +744,7 @@ function GitExecutableSection({
             {selectedPath ? (
               <GitExecutableLabel path={selectedPath} pathTag={!selectedCustom} />
             ) : (
-              <span className="truncate text-muted-foreground">Not found</span>
+              <span className="truncate text-muted-foreground">{t("desktop.settingsDialog.not_found")}</span>
             )}
             <ChevronDownIcon />
           </Button>
@@ -759,8 +773,7 @@ function GitExecutableSection({
             <span className="min-w-4">
               <PlusIcon className="size-3.5" />
             </span>
-            Add Git executable
-          </DropdownMenuItem>
+            {t("desktop.settingsDialog.add_git_executable")}</DropdownMenuItem>
           <ExecutableRemovalMenu paths={extras} onRemove={onRemove} />
         </DropdownMenuContent>
       </DropdownMenu>
@@ -769,8 +782,8 @@ function GitExecutableSection({
           <CircleAlertIcon className="mt-0.5 size-3.5 shrink-0" />
           <span>
             {extras.length === 0
-              ? "Git executable was not found. Add one to continue."
-              : "Git executable was not found. Select one of the added executables."}
+              ? t("desktop.settingsDialog.git_executable_was_not_found_add_one_to")
+              : t("desktop.settingsDialog.git_executable_was_not_found_select_one_of")}
           </span>
         </p>
       ) : null}
@@ -779,6 +792,7 @@ function GitExecutableSection({
 }
 
 function GitExecutableLabel({ path, pathTag = false }: { path: string; pathTag?: boolean }) {
+
   const label = displayPath(path);
   return (
     <span className="flex min-w-0 flex-1 items-center gap-2">
@@ -813,25 +827,26 @@ function P4ExecutableSection({
   onRemove: (path: string) => void;
   onAdd: () => void;
 }) {
+  useTranslation();
   const unusable = ready && !pathP4 && p4Path === "";
   const selectedCustom = extras.find((path) => sameP4Path(path, p4Path));
   const selectedPath = selectedCustom ?? (pathP4 && p4Path === "" ? pathP4 : null);
   if (!ready) {
     return (
-      <FieldGroup title="Executable">
-        <Skeleton className="h-8 w-full" role="status" aria-label="Loading p4 executable" />
+      <FieldGroup title={t("desktop.settingsDialog.executable")}>
+        <Skeleton className="h-8 w-full" role="status" aria-label={t("desktop.settingsDialog.loading_p4_executable")} />
       </FieldGroup>
     );
   }
   return (
-    <FieldGroup title="Executable">
+    <FieldGroup title={t("desktop.settingsDialog.executable")}>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button type="button" variant="outline" className="w-full justify-between font-normal" disabled={busy}>
             {selectedPath ? (
               <GitExecutableLabel path={selectedPath} pathTag={!selectedCustom} />
             ) : (
-              <span className="truncate text-muted-foreground">Not found</span>
+              <span className="truncate text-muted-foreground">{t("desktop.settingsDialog.not_found")}</span>
             )}
             <ChevronDownIcon />
           </Button>
@@ -860,8 +875,7 @@ function P4ExecutableSection({
             <span className="min-w-4">
               <PlusIcon className="size-3.5" />
             </span>
-            Add p4 executable
-          </DropdownMenuItem>
+            {t("desktop.settingsDialog.add_p4_executable")}</DropdownMenuItem>
           <ExecutableRemovalMenu paths={extras} onRemove={onRemove} />
         </DropdownMenuContent>
       </DropdownMenu>
@@ -870,8 +884,8 @@ function P4ExecutableSection({
           <CircleAlertIcon className="mt-0.5 size-3.5 shrink-0" />
           <span>
             {extras.length === 0
-              ? "p4 executable was not found. Add one to continue."
-              : "p4 executable was not found. Select one of the added executables."}
+              ? t("desktop.settingsDialog.p4_executable_was_not_found_add_one_to")
+              : t("desktop.settingsDialog.p4_executable_was_not_found_select_one_of")}
           </span>
         </p>
       ) : null}
@@ -880,13 +894,13 @@ function P4ExecutableSection({
 }
 
 function ExecutableRemovalMenu({ paths, onRemove }: { paths: string[]; onRemove: (path: string) => void }) {
+  useTranslation();
   if (paths.length === 0) return null;
   return (
     <DropdownMenuSub>
       <DropdownMenuSubTrigger>
         <Trash2Icon />
-        Remove executable
-      </DropdownMenuSubTrigger>
+        {t("desktop.settingsDialog.remove_executable")}</DropdownMenuSubTrigger>
       <DropdownMenuSubContent className="max-h-72 max-w-96 overflow-y-auto [scrollbar-width:thin]">
         {paths.map((path) => (
           <DropdownMenuItem key={path} onSelect={() => onRemove(path)}>
@@ -899,13 +913,14 @@ function ExecutableRemovalMenu({ paths, onRemove }: { paths: string[]; onRemove:
 }
 
 function FieldGroup({ title, hint, children }: { title: string; hint?: string; children: ReactNode }) {
+  useTranslation();
   return (
     <section className="grid gap-4">
       <h3 className="flex items-center gap-3 text-sm font-semibold tracking-wide text-foreground">
         <span>{title}</span>
         {hint ? (
           <HoverTip label={hint}>
-            <Button variant="ghost" size="icon-xs" aria-label={`About ${title.toLowerCase()}`} className="text-muted-foreground">
+            <Button variant="ghost" size="icon-xs" aria-label={t("common.aboutNamed", { name: title })} className="text-muted-foreground">
               <InfoIcon />
             </Button>
           </HoverTip>
@@ -934,6 +949,7 @@ function ToolPicker({
   ready: boolean;
   onChange: (value: string) => void;
 }) {
+  useTranslation();
   const [customOverride, setCustomOverride] = useState<boolean | null>(null);
   const [probe, setProbe] = useState<{ value: string; found: boolean } | null>(null);
   const known = tools.some((tool) => tool.id === value);
@@ -963,12 +979,12 @@ function ToolPicker({
 
   const selected = custom ? CUSTOM_TOOL : value;
   const selectedLabel = custom
-    ? "Custom executable"
-    : (tools.find((tool) => tool.id === value)?.name ?? (value ? value : "None"));
+    ? t("desktop.settingsDialog.custom_executable")
+    : (tools.find((tool) => tool.id === value)?.name ?? (value ? value : t("desktop.settingsDialog.none")));
 
   if (!ready) {
     return (
-      <div className="grid gap-2" role="status" aria-label={`Loading ${label}`}>
+      <div className="grid gap-2" role="status" aria-label={t("common.loadingNamed", { name: label })}>
         <Label htmlFor={id}>{label}</Label>
         <div className="flex items-center gap-2">
           <Skeleton className="h-8 min-w-0 flex-1" />
@@ -997,8 +1013,7 @@ function ToolPicker({
             }}
           >
             <span className="min-w-4">{selected === "" ? <CheckIcon className="size-3.5" /> : null}</span>
-            None
-          </DropdownMenuItem>
+            {t("desktop.settingsDialog.none")}</DropdownMenuItem>
           {choices.map((tool) => (
             <DropdownMenuItem
               key={tool.id}
@@ -1019,8 +1034,7 @@ function ToolPicker({
             }}
           >
             <span className="min-w-4">{selected === CUSTOM_TOOL ? <CheckIcon className="size-3.5" /> : null}</span>
-            Custom executable
-          </DropdownMenuItem>
+            {t("desktop.settingsDialog.custom_executable")}</DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
       <SupportList items={tools.map((tool) => ({ id: tool.id, name: tool.name, available: tool.installed }))} />
@@ -1028,10 +1042,10 @@ function ToolPicker({
       {custom ? (
         <div className="flex gap-2">
           <Input
-            aria-label={`${label} executable path`}
+            aria-label={t("common.executablePath", { name: label })}
             value={value}
             onChange={(event) => onChange(event.target.value)}
-            placeholder="Path to an executable"
+            placeholder={t("desktop.settingsDialog.path_to_an_executable")}
             spellCheck={false}
             className="min-w-0 flex-1"
           />
@@ -1041,8 +1055,7 @@ function ToolPicker({
       {missing ? (
         <p className="flex items-center gap-1.5 text-xs text-destructive" role="alert">
           <CircleAlertIcon className="size-3.5 shrink-0" />
-          Executable not found
-        </p>
+          {t("desktop.settingsDialog.executable_not_found")}</p>
       ) : null}
     </div>
   );
@@ -1061,6 +1074,7 @@ function SelectField<T extends string>({
   options: { id: T; label: string }[];
   onChange: (value: T) => void;
 }) {
+
   return (
     <div className="grid gap-2">
       <Label htmlFor={id}>{label}</Label>
@@ -1102,6 +1116,7 @@ function NavButton({
   onClick: () => void;
   children: string;
 }) {
+
   return (
     <button
       type="button"

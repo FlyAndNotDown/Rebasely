@@ -1,3 +1,4 @@
+import { t, useTranslation } from "@/i18n";
 import { useEffect, useRef, useState } from "react";
 import { RotateCcwIcon } from "lucide-react";
 import { toast } from "sonner";
@@ -26,15 +27,16 @@ export function RepoSettingsDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  useTranslation();
   const { snapshot } = useGitPick(["snapshot"]);
   const repoPath = snapshot?.repo.path;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Repository settings</DialogTitle>
+          <DialogTitle>{t("git.ui.repository_settings")}</DialogTitle>
           <DialogDescription>
-            {repoPath ? "Override your global Git identity for this repository." : "Open a repository to edit its identity."}
+            {repoPath ? t("git.ui.override_your_global_git_identity_for_this_repository") : t("git.ui.open_a_repository_to_edit_its_identity")}
           </DialogDescription>
         </DialogHeader>
         {open && repoPath ? (
@@ -46,6 +48,7 @@ export function RepoSettingsDialog({
 }
 
 function RepoSettingsForm({ repoPath, onClose }: { repoPath: string; onClose: () => void }) {
+  useTranslation();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [globalIdentity, setGlobalIdentity] = useState<GitIdentity | null>(null);
@@ -81,7 +84,7 @@ function RepoSettingsForm({ repoPath, onClose }: { repoPath: string; onClose: ()
     try {
       const saved = await request.save({ name, email }, globalIdentity);
       if (!saved || session.current !== request) return;
-      toast.success("Saved repository settings");
+      toast.success(t("git.ui.saved_repository_settings"));
       onClose();
     } catch (error) {
       if (session.current === request) setError(errorMessage(error));
@@ -96,7 +99,7 @@ function RepoSettingsForm({ repoPath, onClose }: { repoPath: string; onClose: ()
         <div role="alert" className="flex items-start gap-2">
           <p className="min-w-0 flex-1 break-words text-sm text-destructive">{error}</p>
           {!globalIdentity ? (
-            <Button variant="outline" size="sm" onClick={() => { setError(""); setReload((value) => value + 1); }}>Retry</Button>
+            <Button variant="outline" size="sm" onClick={() => { setError(""); setReload((value) => value + 1); }}>{t("git.ui.retry")}</Button>
           ) : null}
         </div>
       ) : null}
@@ -104,7 +107,7 @@ function RepoSettingsForm({ repoPath, onClose }: { repoPath: string; onClose: ()
         <div className="grid gap-5">
           <IdentityField
             id="repo-git-name"
-            label="User name"
+            label={t("git.ui.user_name")}
             value={name}
             fallback={globalIdentity.name}
             disabled={saving}
@@ -112,7 +115,7 @@ function RepoSettingsForm({ repoPath, onClose }: { repoPath: string; onClose: ()
           />
           <IdentityField
             id="repo-git-email"
-            label="Email"
+            label={t("git.ui.email")}
             type="email"
             value={email}
             fallback={globalIdentity.email}
@@ -121,17 +124,15 @@ function RepoSettingsForm({ repoPath, onClose }: { repoPath: string; onClose: ()
           />
         </div>
       ) : !error ? (
-        <div role="status" aria-label="Loading repository identity" className="grid gap-5">
+        <div role="status" aria-label={t("git.ui.loading_repository_identity")} className="grid gap-5">
           <Skeleton className="h-14 w-full" />
           <Skeleton className="h-14 w-full" />
         </div>
       ) : null}
       <DialogFooter>
-        <Button type="button" variant="outline" onClick={onClose}>
-          Cancel
-        </Button>
+        <Button type="button" variant="outline" onClick={onClose}>{t("git.ui.cancel")}</Button>
         <Button type="button" onClick={() => void save()} disabled={saving || !globalIdentity}>
-          {saving ? "Saving…" : "Save"}
+          {saving ? t("git.ui.saving") : t("git.ui.save")}
         </Button>
       </DialogFooter>
     </>
@@ -155,6 +156,7 @@ function IdentityField({
   disabled: boolean;
   onChange: (value: string) => void;
 }) {
+  useTranslation();
   const changed = value.trim() !== fallback.trim();
   return (
     <div className="grid gap-2">
@@ -162,13 +164,13 @@ function IdentityField({
       <div className="flex items-center gap-2">
         <Input id={id} type={type} value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)} />
         {changed ? (
-          <HoverTip label="Use global identity">
+          <HoverTip label={t("git.ui.use_global_identity")}>
             <Button
               type="button"
               variant="ghost"
               size="icon"
               className="shrink-0"
-              aria-label={`Reset ${label.toLowerCase()}`}
+              aria-label={t("git.dynamic.resetField", { label })}
               disabled={disabled}
               onClick={() => onChange(fallback)}
             >

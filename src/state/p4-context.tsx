@@ -1,3 +1,4 @@
+import { t, useTranslation } from "@/i18n";
 import {
   createContext,
   useCallback,
@@ -18,9 +19,10 @@ import { depotBase, P4_LOGIN, P4_MISSING, p4Api, syncSummary } from "@/lib/p4";
 import { sameRepoPath } from "@/lib/format";
 import { useGitPick } from "@/state/git-context";
 import { repoTabId, type RepoTab } from "@/state/session";
-import { defaultChange, fileKey, refreshPendingSession, sameP4Connection, shownFile, updateP4Session, usableP4Session, type P4Session as Session, type P4View } from "@/state/p4-session";
+import { defaultChange, fileKey, refreshPendingSession, sameP4Connection, showP4OperationResult, shownFile, updateP4Session, usableP4Session, type P4ResolveRequest, type P4Session as Session, type P4View } from "@/state/p4-session";
 import { pendingDiffRequest, pendingRefreshRequest, withP4Login } from "@/state/p4-requests";
 import { acquireP4Mutation, invalidateP4Session } from "@/state/p4-mutations";
+import { p4DisplayError } from "@/lib/p4-operation-preview";
 import type { FileDiff } from "@/types/git";
 import type {
   P4Auth,
@@ -30,6 +32,9 @@ import type {
   P4DirEntry,
   P4FileSearch,
   P4GetRevision,
+  P4IntegrateRequest,
+  P4UndoRequest,
+  P4OperationPreview,
   P4ResolveView,
   P4Revision,
   P4StreamOption,
@@ -53,6 +58,7 @@ interface P4ContextValue {
   loading: boolean;
   busy: boolean;
   busyLabel: string;
+  busyKind: "submit" | null;
   error: string | null;
   selectedChange: string;
   selectedFile: string | null;
@@ -73,6 +79,15 @@ interface P4ContextValue {
   submitSelected: () => Promise<void>;
   saveSelected: () => Promise<void>;
   createChange: (description: string) => Promise<boolean>;
+  deleteChange: (changeId: string) => Promise<boolean>;
+  renameFile: (source: string, destination: string) => Promise<boolean>;
+  previewIntegrate: (request: P4IntegrateRequest) => Promise<P4OperationPreview>;
+  applyIntegrate: (request: P4IntegrateRequest, preview: P4OperationPreview) => Promise<string>;
+  previewUndo: (request: P4UndoRequest) => Promise<P4OperationPreview>;
+  applyUndo: (request: P4UndoRequest, preview: P4OperationPreview) => Promise<string>;
+  resolveRequest: P4ResolveRequest | null;
+  dismissResolveRequest: (id: number) => void;
+  lockFiles: (files: { change: string; path: string }[], locked: boolean) => Promise<void>;
   moveFiles: (depotPaths: string[], changeId: string) => Promise<void>;
   placeFiles: (
     files: { change: string; path: string; shelved: boolean }[],
@@ -123,6 +138,7 @@ interface P4ContextValue {
 const P4Context = createContext<P4ContextValue | null>(null);
 
 export function P4Provider({ children }: { children: ReactNode }) {
+  const language = useTranslation().i18n.resolvedLanguage;
   const { activeTab, beginActivity, endActivity, setTabMeta, retargetRepoTab, refreshRecents, prefs } = useGitPick([
     "activeTab",
     "beginActivity",
@@ -136,12 +152,13 @@ export function P4Provider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submittedBusy, setSubmittedBusy] = useState<ReadonlySet<string>>(() => new Set());
-  const [mutationLabels, setMutationLabels] = useState<ReadonlyMap<string, string>>(() => new Map());
+  const [mutationLabels, setMutationLabels] = useState<ReadonlyMap<string, { label: string; kind: "submit" | null }>>(() => new Map());
   const mutationOwners = useRef(new Set<string>());
-  const lockMutation = useCallback((owner: Session, label: string) => {
+  const resolveRequestId = useRef(0);
+  const lockMutation = useCallback((owner: Session, label: string, kind: "submit" | null = null) => {
     const release = acquireP4Mutation(mutationOwners.current, owner.tabId);
     if (!release) return null;
-    setMutationLabels((labels) => new Map(labels).set(owner.tabId, label));
+    setMutationLabels((labels) => new Map(labels).set(owner.tabId, { label, kind }));
     let finished = false;
     return () => {
       if (finished) return;
@@ -222,16 +239,16 @@ export function P4Provider({ children }: { children: ReactNode }) {
     const message = errorMessage(caught);
     if (!message) return;
     if (message === P4_MISSING) {
-      toast.error(message, {
+      toast.error(t("desktop.dependencies.p4Missing"), {
         id: "p4-missing",
         action: {
-          label: "Settings",
+          label: t("p4.settings"),
           onClick: () => window.dispatchEvent(new Event(OPEN_SETTINGS_EVENT)),
         },
       });
       return;
     }
-    toast.error(message);
+    toast.error(p4DisplayError(message));
   }, []);
 
   const remember = useCallback((next: Session) => {
@@ -317,7 +334,7 @@ export function P4Provider({ children }: { children: ReactNode }) {
           await p4Api.login(opened.connection, password);
           opened = await p4Api.open(opened.connection.root || target.path);
           if (generation.current !== current) return;
-          if (opened.status !== "ready") throw new Error("Perforce rejected that password.");
+          if (opened.status !== "ready") throw new Error(t("p4.perforceRejectedThatPassword"));
         }
         if (opened.status !== "ready") return;
         const name = opened.connection.client || target.name;
@@ -357,6 +374,7 @@ export function P4Provider({ children }: { children: ReactNode }) {
           submittedUser: previous?.submittedUser ?? "",
           submittedClient: previous?.submittedClient ?? "",
           view: previous?.view ?? "pending",
+          resolveRequest: previous?.resolveRequest ?? null,
         }, pending);
         cache.current.set(tabId, next);
         if (generation.current !== current) return;
@@ -401,7 +419,7 @@ export function P4Provider({ children }: { children: ReactNode }) {
     const current = sessionRef.current;
     if (!current || refreshing.current.has(current.tabId)) return;
     refreshing.current.add(current.tabId);
-    const id = beginActivity("Refreshing workspace", current.connection.client);
+    const id = beginActivity(t("p4.refreshingWorkspace"), current.connection.client);
     try {
       await reloadPending(current, undefined, quiet);
     } catch (caught) {
@@ -464,14 +482,14 @@ export function P4Provider({ children }: { children: ReactNode }) {
   const submitSelected = useCallback(async () => {
     const current = sessionRef.current;
     if (!current) return;
-    const release = lockMutation(current, "Submitting changelist");
+    const release = lockMutation(current, t("p4.submittingChangelist"), "submit");
     if (!release) return;
-    const id = beginActivity("Submitting", current.selectedChange);
+    const id = beginActivity(t("p4.submitting"), current.selectedChange);
     try {
       await guard(current.connection, () =>
         p4Api.submit(current.connection, current.selectedChange, current.description),
       );
-      toast.success("Submitted");
+      toast.success(t("p4.submitted"));
       await reloadPending(current, "default");
     } catch (caught) {
       report(caught);
@@ -484,14 +502,14 @@ export function P4Provider({ children }: { children: ReactNode }) {
   const saveSelected = useCallback(async () => {
     const current = sessionRef.current;
     if (!current) return;
-    const release = lockMutation(current, "Saving changelist");
+    const release = lockMutation(current, t("p4.savingChangelist"));
     if (!release) return;
-    const id = beginActivity("Saving changelist", current.selectedChange);
+    const id = beginActivity(t("p4.savingChangelist"), current.selectedChange);
     try {
       const saved = await guard(current.connection, () =>
         p4Api.saveChange(current.connection, current.selectedChange, current.description),
       );
-      toast.success(current.selectedChange === "default" ? `Created change ${saved}` : "Description saved");
+      toast.success(current.selectedChange === "default" ? t("p4.createdChange", { id: saved }) : t("p4.descriptionSaved"));
       await reloadPending(current, saved);
     } catch (caught) {
       report(caught);
@@ -505,12 +523,12 @@ export function P4Provider({ children }: { children: ReactNode }) {
     async (description: string) => {
       const current = sessionRef.current;
       if (!current) return false;
-      const release = lockMutation(current, "Creating changelist");
+      const release = lockMutation(current, t("p4.creatingChangelist"));
       if (!release) return false;
-      const id = beginActivity("Creating changelist");
+      const id = beginActivity(t("p4.creatingChangelist"));
       try {
         const saved = await guard(current.connection, () => p4Api.newChange(current.connection, description));
-        toast.success(`Created change ${saved}`);
+        toast.success(t("p4.createdChange", { id: saved }));
         await reloadPending(current, saved);
         return true;
       } catch (caught) {
@@ -524,13 +542,143 @@ export function P4Provider({ children }: { children: ReactNode }) {
     [lockMutation, beginActivity, endActivity, guard, reloadPending, report],
   );
 
+  const deleteChange = useCallback(async (changeId: string) => {
+    const current = sessionRef.current;
+    if (!current) return false;
+    const release = lockMutation(current, t("p4.deletingChangelist"));
+    if (!release) return false;
+    const id = beginActivity(t("p4.deletingChangelist"), changeId);
+    try {
+      await guard(current.connection, () => p4Api.deleteChange(current.connection, changeId));
+      await reloadPending(current, "default");
+      toast.success(t("p4.deletedChange", { id: changeId }));
+      return true;
+    } catch (caught) {
+      report(caught);
+      return false;
+    } finally {
+      endActivity(id);
+      release();
+    }
+  }, [lockMutation, beginActivity, endActivity, guard, reloadPending, report]);
+
+  const renameFile = useCallback(async (source: string, destination: string) => {
+    const current = sessionRef.current;
+    if (!current) return false;
+    const release = lockMutation(current, t("p4.movingFile"));
+    if (!release) return false;
+    const id = beginActivity(t("p4.movingFile"), source);
+    try {
+      await guard(current.connection, () => p4Api.moveFile(current.connection, source, destination));
+      await reloadPending(current);
+      bumpFiles();
+      toast.success(t("p4.fileMoved"));
+      return true;
+    } catch (caught) {
+      // A failed move can leave a previously unopened file checked out.
+      // Refresh its owning session without replacing the operation's error.
+      await reloadPending(current).catch(() => {});
+      bumpFiles();
+      report(caught);
+      return false;
+    } finally {
+      endActivity(id);
+      release();
+    }
+  }, [lockMutation, beginActivity, endActivity, guard, reloadPending, bumpFiles, report]);
+
+  const previewIntegrate = useCallback(async (request: P4IntegrateRequest) => {
+    const current = sessionRef.current;
+    if (!current) throw new Error(t("p4-operations.connectionRequired"));
+    return guard(current.connection, () => p4Api.previewIntegrate(current.connection, request));
+  }, [guard]);
+
+  const previewUndo = useCallback(async (request: P4UndoRequest) => {
+    const current = sessionRef.current;
+    if (!current) throw new Error(t("p4-operations.connectionRequired"));
+    return guard(current.connection, () => p4Api.previewUndo(current.connection, request));
+  }, [guard]);
+
+  const showFileOperation = useCallback(async (owner: Session, changeId: string, target: string) => {
+    await reloadPending(owner, changeId);
+    const latest = cache.current.get(owner.tabId);
+    if (!latest || !sameP4Connection(latest.connection, owner.connection)) return;
+    const next = updateSession(owner.tabId, (current) => showP4OperationResult(current, target, changeId, ++resolveRequestId.current));
+    if (next) requestDiff(next);
+    if (activeTabRef.current.id === owner.tabId) bumpFiles();
+  }, [reloadPending, updateSession, requestDiff, bumpFiles]);
+
+  const applyIntegrate = useCallback(async (request: P4IntegrateRequest, preview: P4OperationPreview) => {
+    const current = sessionRef.current;
+    if (!current) throw new Error(t("p4-operations.connectionRequired"));
+    const release = lockMutation(current, t("p4-operations.integrate.running"));
+    if (!release) throw new Error(t("p4-operations.workspaceBusy"));
+    const activity = beginActivity(t("p4-operations.integrate.running"), preview.target, undefined, current.tabId);
+    try {
+      const output = await guard(current.connection, () => p4Api.applyIntegrate(current.connection, request, preview.fingerprint));
+      await showFileOperation(current, request.changeId, preview.target);
+      toast.success(t("p4-operations.integrate.completed"));
+      return output;
+    } catch (caught) {
+      await reloadPending(current).catch(() => {});
+      if (activeTabRef.current.id === current.tabId) bumpFiles();
+      throw caught;
+    } finally { endActivity(activity); release(); }
+  }, [lockMutation, beginActivity, endActivity, guard, showFileOperation, reloadPending, bumpFiles]);
+
+  const applyUndo = useCallback(async (request: P4UndoRequest, preview: P4OperationPreview) => {
+    const current = sessionRef.current;
+    if (!current) throw new Error(t("p4-operations.connectionRequired"));
+    const release = lockMutation(current, t("p4-operations.undo.running"));
+    if (!release) throw new Error(t("p4-operations.workspaceBusy"));
+    const activity = beginActivity(t("p4-operations.undo.running"), preview.target, undefined, current.tabId);
+    try {
+      const output = await guard(current.connection, () => p4Api.applyUndo(current.connection, request, preview.fingerprint));
+      await showFileOperation(current, request.changeId, preview.target);
+      toast.success(t("p4-operations.undo.completed"));
+      return output;
+    } catch (caught) {
+      await reloadPending(current).catch(() => {});
+      if (activeTabRef.current.id === current.tabId) bumpFiles();
+      throw caught;
+    } finally { endActivity(activity); release(); }
+  }, [lockMutation, beginActivity, endActivity, guard, showFileOperation, reloadPending, bumpFiles]);
+
+  const dismissResolveRequest = useCallback((id: number) => {
+    const current = sessionRef.current;
+    if (current?.resolveRequest?.id === id) updateSession(current.tabId, (value) => ({ ...value, resolveRequest: null }));
+  }, [updateSession]);
+
+  const lockFiles = useCallback(async (files: { change: string; path: string }[], locked: boolean) => {
+    const current = sessionRef.current;
+    if (!current || files.length === 0) return;
+    const label = t(locked ? "p4.lock.locking" : "p4.lock.unlocking");
+    const release = lockMutation(current, label);
+    if (!release) return;
+    const id = beginActivity(label);
+    try {
+      for (const [changeId, paths] of groupPaths(files)) {
+        await guard(current.connection, () => p4Api.fileAction(current.connection, locked ? "lock" : "unlock", paths, changeId));
+      }
+      toast.success(t(locked ? "p4.lock.locked" : "p4.lock.unlocked"));
+    } catch (caught) {
+      report(caught);
+    } finally {
+      // Earlier groups may have succeeded even when another changelist failed.
+      await reloadPending(current).catch(report);
+      bumpFiles();
+      endActivity(id);
+      release();
+    }
+  }, [lockMutation, beginActivity, endActivity, guard, reloadPending, bumpFiles, report]);
+
   const moveFiles = useCallback(
     async (depotPaths: string[], changeId: string) => {
       const current = sessionRef.current;
       if (!current || depotPaths.length === 0) return;
-      const release = lockMutation(current, "Moving files");
+      const release = lockMutation(current, t("p4.movingFiles"));
       if (!release) return;
-      const id = beginActivity("Moving files");
+      const id = beginActivity(t("p4.movingFiles"));
       try {
         await guard(current.connection, () => p4Api.reopen(current.connection, changeId, depotPaths));
         await reloadPending(current, changeId);
@@ -557,7 +705,7 @@ export function P4Provider({ children }: { children: ReactNode }) {
       if (shelf && targetChange === "default") return;
       if (shelf && shelved && files.every((file) => file.change === targetChange)) return;
       if (!shelf && !shelved && files.every((file) => file.change === targetChange)) return;
-      const label = !shelved && !shelf ? "Moving" : shelved && !shelf ? "Unshelving" : "Shelving";
+      const label = !shelved && !shelf ? t("p4.moving") : shelved && !shelf ? t("p4.unshelving") : t("p4.shelving");
       const release = lockMutation(current, label);
       if (!release) return;
       const id = beginActivity(label, targetChange);
@@ -590,7 +738,7 @@ export function P4Provider({ children }: { children: ReactNode }) {
             );
           }
         });
-        toast.success(!shelved && !shelf ? "Moved" : shelved && !shelf ? "Unshelved" : "Shelved");
+        toast.success(!shelved && !shelf ? t("p4.moved") : shelved && !shelf ? t("p4.unshelved") : t("p4.shelved"));
         await reloadPending(current, targetChange);
       } catch (caught) {
         report(caught);
@@ -606,12 +754,12 @@ export function P4Provider({ children }: { children: ReactNode }) {
     async (paths: string[], wipe: string[] = []) => {
       const current = sessionRef.current;
       if (!current || (paths.length === 0 && wipe.length === 0)) return;
-      const release = lockMutation(current, "Reverting");
+      const release = lockMutation(current, t("p4.reverting"));
       if (!release) return;
-      const id = beginActivity("Reverting");
+      const id = beginActivity(t("p4.reverting"));
       try {
         await guard(current.connection, () => p4Api.revert(current.connection, paths, wipe));
-        toast.success("Reverted");
+        toast.success(t("p4.reverted"));
         await reloadPending(current);
       } catch (caught) {
         report(caught);
@@ -628,9 +776,9 @@ export function P4Provider({ children }: { children: ReactNode }) {
       const current = sessionRef.current;
       const numbered = files.filter((file) => file.change !== "default");
       if (!current || numbered.length === 0) return false;
-      const release = lockMutation(current, "Shelving");
+      const release = lockMutation(current, t("p4.shelving"));
       if (!release) return false;
-      const id = beginActivity("Shelving");
+      const id = beginActivity(t("p4.shelving"));
       try {
         await guard(current.connection, async () => {
           for (const [change, paths] of groupPaths(numbered)) {
@@ -638,7 +786,7 @@ export function P4Provider({ children }: { children: ReactNode }) {
           }
         });
         const skipped = files.length - numbered.length;
-        toast.success(skipped > 0 ? "Shelved the files in numbered changelists." : "Shelved");
+        toast.success(skipped > 0 ? t("p4.shelvedTheFilesInNumberedChangelists") : t("p4.shelved"));
         await reloadPending(current, numbered[0]?.change);
         return true;
       } catch (caught) {
@@ -655,12 +803,12 @@ export function P4Provider({ children }: { children: ReactNode }) {
   const shelveSelected = useCallback(async () => {
     const current = sessionRef.current;
     if (!current) return;
-    const release = lockMutation(current, "Shelving");
+    const release = lockMutation(current, t("p4.shelving"));
     if (!release) return;
-    const id = beginActivity("Shelving", current.selectedChange);
+    const id = beginActivity(t("p4.shelving"), current.selectedChange);
     try {
       await guard(current.connection, () => p4Api.shelve(current.connection, current.selectedChange));
-      toast.success("Shelved");
+      toast.success(t("p4.shelved"));
       await reloadPending(current, current.selectedChange);
     } catch (caught) {
       report(caught);
@@ -673,12 +821,12 @@ export function P4Provider({ children }: { children: ReactNode }) {
   const unshelveSelected = useCallback(async () => {
     const current = sessionRef.current;
     if (!current) return;
-    const release = lockMutation(current, "Unshelving");
+    const release = lockMutation(current, t("p4.unshelving"));
     if (!release) return;
-    const id = beginActivity("Unshelving", current.selectedChange);
+    const id = beginActivity(t("p4.unshelving"), current.selectedChange);
     try {
       await guard(current.connection, () => p4Api.unshelve(current.connection, current.selectedChange));
-      toast.success("Unshelved");
+      toast.success(t("p4.unshelved"));
       await reloadPending(current, current.selectedChange);
     } catch (caught) {
       report(caught);
@@ -691,12 +839,12 @@ export function P4Provider({ children }: { children: ReactNode }) {
   const deleteSelectedShelf = useCallback(async () => {
     const current = sessionRef.current;
     if (!current) return;
-    const release = lockMutation(current, "Deleting shelf");
+    const release = lockMutation(current, t("p4.deletingShelf"));
     if (!release) return;
-    const id = beginActivity("Deleting shelf", current.selectedChange);
+    const id = beginActivity(t("p4.deletingShelf"), current.selectedChange);
     try {
       await guard(current.connection, () => p4Api.deleteShelf(current.connection, current.selectedChange));
-      toast.success("Shelf deleted");
+      toast.success(t("p4.shelfDeleted"));
       await reloadPending(current, current.selectedChange);
     } catch (caught) {
       report(caught);
@@ -719,13 +867,13 @@ export function P4Provider({ children }: { children: ReactNode }) {
     async (path: string, mode: "yours" | "theirs" | "merge") => {
       const current = sessionRef.current;
       if (!current) return false;
-      const label = mode === "yours" ? "Accepting yours" : mode === "theirs" ? "Accepting theirs" : "Merging";
+      const label = mode === "yours" ? t("p4.acceptingYours") : mode === "theirs" ? t("p4.acceptingTheirs") : t("p4.merging");
       const release = lockMutation(current, label);
       if (!release) return false;
       const id = beginActivity(label, depotBase(path));
       try {
         await guard(current.connection, () => p4Api.resolveAccept(current.connection, path, mode));
-        toast.success(mode === "merge" ? "Merged" : mode === "yours" ? "Accepted yours" : "Accepted theirs");
+        toast.success(mode === "merge" ? t("p4.merged") : mode === "yours" ? t("p4.acceptedYours") : t("p4.acceptedTheirs"));
         await reloadPending(current, current.selectedChange);
         return true;
       } catch (caught) {
@@ -742,9 +890,9 @@ export function P4Provider({ children }: { children: ReactNode }) {
   const revertUnchanged = useCallback(async () => {
     const current = sessionRef.current;
     if (!current) return;
-    const release = lockMutation(current, "Reverting unchanged");
+    const release = lockMutation(current, t("p4.revertingUnchanged"));
     if (!release) return;
-    const id = beginActivity("Reverting unchanged");
+    const id = beginActivity(t("p4.revertingUnchanged"));
     try {
       await guard(current.connection, () => p4Api.revertUnchanged(current.connection));
       await reloadPending(current);
@@ -760,9 +908,9 @@ export function P4Provider({ children }: { children: ReactNode }) {
     async (paths: string[] = []) => {
       const current = sessionRef.current;
       if (!current) return;
-      const release = lockMutation(current, "Getting latest");
+      const release = lockMutation(current, t("p4.gettingLatest"));
       if (!release) return;
-      const id = beginActivity("Getting latest", current.connection.client);
+      const id = beginActivity(t("p4.gettingLatest"), current.connection.client);
       try {
         const output = await guard(current.connection, () => p4Api.sync(current.connection, paths, id));
         toast.success(syncSummary(output));
@@ -782,15 +930,15 @@ export function P4Provider({ children }: { children: ReactNode }) {
     async (request: P4GetRevision) => {
       const current = sessionRef.current;
       if (!current) return "";
-      const release = lockMutation(current, request.preview ? "Previewing revision" : "Getting revision");
+      const release = lockMutation(current, request.preview ? t("p4.previewingRevision") : t("p4.gettingRevision"));
       if (!release) return "";
-      const id = beginActivity(request.preview ? "Previewing revision" : "Getting revision");
+      const id = beginActivity(request.preview ? t("p4.previewingRevision") : t("p4.gettingRevision"));
       try {
         const output = await guard(current.connection, () =>
           p4Api.getRevision(current.connection, request, id),
         );
         if (!request.preview) {
-          toast.success(lastLine(output) || "Got revision");
+          toast.success(lastLine(output) || t("p4.gotRevision"));
           await reloadPending(current);
           bumpFiles();
         }
@@ -809,12 +957,12 @@ export function P4Provider({ children }: { children: ReactNode }) {
   const reconcile = useCallback(async () => {
     const current = sessionRef.current;
     if (!current) return;
-    const release = lockMutation(current, "Reconciling");
+    const release = lockMutation(current, t("p4.reconciling"));
     if (!release) return;
-    const id = beginActivity("Reconciling", current.connection.client);
+    const id = beginActivity(t("p4.reconciling"), current.connection.client);
     try {
       const output = await guard(current.connection, () => p4Api.reconcile(current.connection, id));
-      toast.success(lastLine(output) || "Reconciled");
+      toast.success(lastLine(output) || t("p4.reconciled"));
       await reloadPending(current, "default");
       bumpFiles();
     } catch (caught) {
@@ -829,7 +977,7 @@ export function P4Provider({ children }: { children: ReactNode }) {
     async (action: "edit" | "add" | "delete", paths: string[]) => {
       const current = sessionRef.current;
       if (!current || paths.length === 0) return;
-      const label = action === "edit" ? "Opening for edit" : action === "add" ? "Marking for add" : "Marking for delete";
+      const label = action === "edit" ? t("p4.openingForEdit") : action === "add" ? t("p4.markingForAdd") : t("p4.markingForDelete");
       const release = lockMutation(current, label);
       if (!release) return;
       const id = beginActivity(label);
@@ -1038,9 +1186,9 @@ export function P4Provider({ children }: { children: ReactNode }) {
       const current = sessionRef.current;
       const tab = activeTabRef.current;
       if (!current || tab.kind !== "repo") return;
-      const release = lockMutation(current, "Saving workspace");
+      const release = lockMutation(current, t("p4.savingWorkspace"));
       if (!release) return;
-      const id = beginActivity("Saving workspace", current.connection.client);
+      const id = beginActivity(t("p4.savingWorkspace"), current.connection.client);
       try {
         const next = await guard(current.connection, () => p4Api.saveWorkspace(current.connection, root, stream));
         if (!sameRepoPath(current.connection.root, next.root)) {
@@ -1066,9 +1214,9 @@ export function P4Provider({ children }: { children: ReactNode }) {
       const current = sessionRef.current;
       const tab = activeTabRef.current;
       if (!current || tab.kind !== "repo") return;
-      const release = lockMutation(current, "Saving connection");
+      const release = lockMutation(current, t("p4.savingConnection"));
       if (!release) return;
-      const id = beginActivity("Saving connection", edit.client);
+      const id = beginActivity(t("p4.savingConnection"), edit.client);
       try {
         const root = await p4Api.prepareClient(edit, edit.client);
         if (!sameRepoPath(current.connection.root, root)) {
@@ -1097,8 +1245,9 @@ export function P4Provider({ children }: { children: ReactNode }) {
       pending: visibleSession?.pending ?? [],
       loading,
       busy: mutationLabels.has(activePerforceId),
-      busyLabel: mutationLabels.get(activePerforceId) ?? "",
-      error,
+      busyLabel: mutationLabels.get(activePerforceId)?.label ?? "",
+      busyKind: mutationLabels.get(activePerforceId)?.kind ?? null,
+      error: error === P4_MISSING ? t("desktop.dependencies.p4Missing", { lng: language }) : error ? p4DisplayError(error, language) : null,
       selectedChange,
       selectedFile,
       selectedShelved,
@@ -1118,6 +1267,15 @@ export function P4Provider({ children }: { children: ReactNode }) {
       submitSelected,
       saveSelected,
       createChange,
+      deleteChange,
+      renameFile,
+      previewIntegrate,
+      applyIntegrate,
+      previewUndo,
+      applyUndo,
+      resolveRequest: visibleSession?.resolveRequest ?? null,
+      dismissResolveRequest,
+      lockFiles,
       moveFiles,
       placeFiles,
       revertPaths,
@@ -1157,9 +1315,18 @@ export function P4Provider({ children }: { children: ReactNode }) {
     }),
     [
       activePerforceId,
+      language,
       mutationLabels,
       connection,
       createChange,
+      deleteChange,
+      renameFile,
+      previewIntegrate,
+      applyIntegrate,
+      previewUndo,
+      applyUndo,
+      dismissResolveRequest,
+      lockFiles,
       deleteSelectedShelf,
       resolveAccept,
       resolveView,

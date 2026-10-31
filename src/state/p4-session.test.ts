@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { emptyBinaryDiff } from "@/lib/git";
 import type { P4Changelist, P4File } from "@/types/p4";
-import { defaultChange, fileKey, refreshPendingSession, sameP4Connection, shownFile, updateP4Session, usableP4Session, type P4Session } from "./p4-session";
+import { defaultChange, fileKey, refreshPendingSession, sameP4Connection, showP4OperationResult, shownFile, updateP4Session, usableP4Session, type P4Session } from "./p4-session";
 
 function file(name: string): P4File {
   return {
@@ -52,6 +52,28 @@ describe("initial pending changelist selection", () => {
     expect(defaultChange([change("42", "Empty", []), change("default", "", [])])).toBe("default");
     expect(defaultChange([change("42", "Empty", []), change("43", "Empty", [])])).toBe("42");
     expect(defaultChange([])).toBe("default");
+  });
+});
+
+describe("previewed Perforce operation results", () => {
+  it("opens the affected pending target and its existing resolve workflow", () => {
+    const target = { ...file("b.txt"), status: "conflict" };
+    const current = { ...session(), pending: [change("42", "Saved description", [target])], view: "workspace" as const, description: "Unsaved description" };
+    const next = showP4OperationResult(current, target.localPath, "42", 7);
+    expect(next.view).toBe("pending");
+    expect(next.selectedFile).toBe(target.depotPath);
+    expect(next.resolveRequest).toEqual({ id: 7, change: "42", path: target.depotPath });
+    expect(next.description).toBe("Unsaved description");
+    expect(current.view).toBe("workspace");
+  });
+
+  it("does not auto-resolve an unrelated file when the target is clean or absent", () => {
+    const unrelated = { ...file("a.txt"), status: "conflict" };
+    const target = file("b.txt");
+    const current = { ...session(), pending: [change("42", "Saved", [unrelated, target])] };
+    expect(showP4OperationResult(current, target.localPath, "42", 8).resolveRequest).toBeNull();
+    expect(showP4OperationResult(current, "C:\\work\\client\\missing.txt", "42", 9).resolveRequest).toBeNull();
+    expect(showP4OperationResult(current, target.localPath, "43", 10).resolveRequest).toBeNull();
   });
 });
 

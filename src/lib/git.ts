@@ -199,6 +199,8 @@ export const gitApi = {
     call<WorkspaceSnapshot>("add_remote", { repoPath, name, url }),
   deleteRemote: (repoPath: string, name: string) =>
     call<WorkspaceSnapshot>("delete_remote", { repoPath, name }),
+  setRemoteUrl: (repoPath: string, name: string, url: string) =>
+    call<WorkspaceSnapshot>("set_remote_url", { repoPath, name, url }),
   probeRemoteUrl: (repoPath: string, url: string) =>
     call<RemoteProbe>("probe_remote_url", { repoPath, url }),
   pullRemote: (repoPath: string, activityId?: string, remote?: string, rebase = false) =>
@@ -250,6 +252,10 @@ export const gitApi = {
       force,
       activityId: activityId || null,
     }),
+  renameBranch: (repoPath: string, name: string, newName: string) =>
+    call<WorkspaceSnapshot>("rename_branch", { repoPath, name, newName }),
+  setBranchUpstream: (repoPath: string, name: string, upstream: string | null) =>
+    call<WorkspaceSnapshot>("set_branch_upstream", { repoPath, name, upstream }),
   revertCommit: (repoPath: string, oid: string) =>
     call<WorkspaceSnapshot>("revert_commit", { repoPath, oid }),
   cherryPickCommit: (repoPath: string, oid: string) =>

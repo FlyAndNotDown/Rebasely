@@ -1,9 +1,10 @@
 import { prerenderToNodeStream } from "react-dom/static";
 import { IDENTIFIER_PREFIX, SiteRoot } from "./app-root";
+import type { SiteLocale } from "./i18n";
 
-export async function render() {
+export async function render(locale: SiteLocale = "en", rootPage = true) {
   const errors: unknown[] = [];
-  const { prelude } = await prerenderToNodeStream(<SiteRoot />, {
+  const { prelude } = await prerenderToNodeStream(<SiteRoot locale={locale} rootPage={rootPage} />, {
     identifierPrefix: IDENTIFIER_PREFIX,
     signal: AbortSignal.timeout(15_000),
     onError: (error) => { errors.push(error); },

@@ -1,13 +1,16 @@
+import { t, useTranslation } from "@/i18n";
 import { useEffect, useState, type ReactNode } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { cn } from "@/lib/utils";
 import { desktopPlatform } from "@/lib/desktop-platform";
 
 export function WindowControls() {
+
   return desktopPlatform() === "windows" ? <WindowsControls /> : null;
 }
 
 function WindowsControls() {
+  useTranslation();
   const [maximized, setMaximized] = useState(false);
 
   useEffect(() => {
@@ -35,17 +38,17 @@ function WindowsControls() {
 
   return (
     <div className="flex h-full shrink-0">
-      <CaptionButton label="Minimize" onClick={() => void getCurrentWindow().minimize()}>
+      <CaptionButton label={t("desktop.windowControls.minimize")} onClick={() => void getCurrentWindow().minimize()}>
         <MinimizeGlyph />
       </CaptionButton>
       <CaptionButton
-        label={maximized ? "Restore" : "Maximize"}
+        label={maximized ? t("desktop.windowControls.restore") : t("desktop.windowControls.maximize")}
         onClick={() => void getCurrentWindow().toggleMaximize()}
       >
         {maximized ? <RestoreGlyph /> : <MaximizeGlyph />}
       </CaptionButton>
       <CaptionButton
-        label="Close"
+        label={t("common.close")}
         tone="danger"
         onClick={() => void getCurrentWindow().close()}
       >
@@ -66,6 +69,7 @@ function CaptionButton({
   onClick: () => void;
   children: ReactNode;
 }) {
+
   return (
     <button
       type="button"
@@ -84,6 +88,7 @@ function CaptionButton({
 }
 
 function MinimizeGlyph() {
+
   return (
     <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
       <path d="M1 5h8" fill="none" stroke="currentColor" strokeWidth="1" />
@@ -92,6 +97,7 @@ function MinimizeGlyph() {
 }
 
 function MaximizeGlyph() {
+
   return (
     <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
       <rect x="1.5" y="1.5" width="7" height="7" fill="none" stroke="currentColor" strokeWidth="1" />
@@ -100,6 +106,7 @@ function MaximizeGlyph() {
 }
 
 function RestoreGlyph() {
+
   return (
     <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
       <path d="M3 1.5h5.5V7" fill="none" stroke="currentColor" strokeWidth="1" />
@@ -109,6 +116,7 @@ function RestoreGlyph() {
 }
 
 function CloseGlyph() {
+
   return (
     <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
       <path d="M2 2l6 6M8 2L2 8" fill="none" stroke="currentColor" strokeWidth="1" />

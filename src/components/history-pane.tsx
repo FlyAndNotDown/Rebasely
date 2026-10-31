@@ -1,3 +1,4 @@
+import { t, useTranslation } from "@/i18n";
 import {
   memo,
   useCallback,
@@ -79,31 +80,31 @@ type CommitRowAction =
   | { type: "interactive"; commit: CommitSummary }
   | { type: "undo" };
 
-const RESET_MODES: { id: ResetMode; label: string; detail: string }[] = [
+const RESET_MODES: { id: ResetMode; labelKey: string; detailKey: string }[] = [
   {
     id: "soft",
-    label: "Soft",
-    detail: "Move the branch. Staged and unstaged changes stay.",
+    labelKey: "git.ui.soft",
+    detailKey: "git.ui.move_the_branch_staged_and_unstaged_changes_stay",
   },
   {
     id: "mixed",
-    label: "Mixed",
-    detail: "Move the branch and unstage. Working tree changes stay. This is the default.",
+    labelKey: "git.ui.mixed",
+    detailKey: "git.ui.move_the_branch_and_unstage_working_tree_changes_stay_this_is_the_default",
   },
   {
     id: "hard",
-    label: "Hard",
-    detail: "Move the branch and discard tracked changes in the index and working tree.",
+    labelKey: "git.ui.hard",
+    detailKey: "git.ui.move_the_branch_and_discard_tracked_changes_in_the_index_and_working_tree",
   },
   {
     id: "merge",
-    label: "Merge",
-    detail: "Move the branch. Stops if an unstaged edit overlaps a file that would change.",
+    labelKey: "git.ui.merge",
+    detailKey: "git.ui.move_the_branch_stops_if_an_unstaged_edit_overlaps_a_file_that_would_change",
   },
   {
     id: "keep",
-    label: "Keep",
-    detail: "Move the branch. Stops if a file that would change has local edits.",
+    labelKey: "git.ui.keep",
+    detailKey: "git.ui.move_the_branch_stops_if_a_file_that_would_change_has_local_edits",
   },
 ];
 
@@ -115,6 +116,7 @@ const LINE_WIDTH = 2;
 const CORNER_RADIUS = 5;
 
 export function HistoryPane() {
+  useTranslation();
   const {
     activeTabId,
     commits,
@@ -249,8 +251,8 @@ export function HistoryPane() {
           break;
         case "copy-hashes":
           void navigator.clipboard.writeText(action.commits.map((commit) => commit.id).join("\n")).then(
-            () => toast.success(action.commits.length === 1 ? "Copied commit hash" : "Copied commit hashes"),
-            () => toast.error("Could not copy"),
+            () => toast.success(action.commits.length === 1 ? t("git.ui.copied_commit_hash") : t("git.ui.copied_commit_hashes")),
+            () => toast.error(t("git.ui.could_not_copy")),
           );
           break;
         case "reset":
@@ -379,7 +381,7 @@ export function HistoryPane() {
           <SearchIcon className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <HoverTip
             label={
-              "Words match the subject, author, hash, or a branch or tag. Narrow with filters:\n" +
+              t("git.dynamic.searchHelp") + "\n" +
               "author:name  path:src/file.cs  content:\"text added or removed\"\n" +
               "regex:pattern  since:2.weeks  until:2026-01-01"
             }
@@ -398,17 +400,17 @@ export function HistoryPane() {
                   setApplied("");
                 }
               }}
-              placeholder="Search commits · author: path: content: since:"
+              placeholder={t("git.ui.search_commits_author_path_content_since")}
               className="h-7 pl-7"
             />
           </HoverTip>
         </div>
-        <HoverTip label="Reflog">
+        <HoverTip label={t("git.ui.reflog")}>
           <Button
             type="button"
             variant="ghost"
             size="icon-sm"
-            aria-label="Reflog"
+            aria-label={t("git.ui.reflog")}
             onClick={() => setOpenPanel("reflog")}
           >
             <FileClockIcon />
@@ -418,14 +420,14 @@ export function HistoryPane() {
       <ScrollArea className="min-h-0 flex-1" viewportRef={rows.viewportRef} onScroll={onScroll}>
         {visible.length === 0 ? (
           loading ? (
-            <HistorySkeleton fill label={searchingMode ? "Searching" : "Loading history"} />
+            <HistorySkeleton fill label={searchingMode ? t("git.ui.searching") : t("git.ui.loading_history")} />
           ) : (
             <div className="flex h-full flex-col items-center justify-center gap-2 p-4 text-sm text-muted-foreground">
-              <p role="status">{searchingMode ? "No matching commits" : "No commits yet"}</p>
+              <p role="status">{searchingMode ? t("git.ui.no_matching_commits") : t("git.ui.no_commits_yet")}</p>
               {searchingMode ? (
-                <Button variant="outline" size="sm" onClick={() => { setQuery(""); setApplied(""); }}>Clear filter</Button>
+                <Button variant="outline" size="sm" onClick={() => { setQuery(""); setApplied(""); }}>{t("git.ui.clear_filter")}</Button>
               ) : (
-                <Button variant="outline" size="sm" onClick={() => setView("changes")}>Review changes</Button>
+                <Button variant="outline" size="sm" onClick={() => setView("changes")}>{t("git.ui.review_changes")}</Button>
               )}
             </div>
           )
@@ -467,26 +469,20 @@ export function HistoryPane() {
       <Dialog open={confirmUndo} onOpenChange={setConfirmUndo}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Undo a pushed commit?</DialogTitle>
+            <DialogTitle>{t("git.ui.undo_a_pushed_commit")}</DialogTitle>
             <DialogDescription>
-              {snapshot?.headCommit?.summary ? `“${snapshot.headCommit.summary}” ` : "The last commit "}
-              is already on {snapshot?.repo.upstream}. Undoing it here leaves the remote unchanged, so
-              publishing again needs a force push.
+              {t("git.dynamic.undoPushedDescription", { commit: snapshot?.headCommit?.summary ?? t("git.dynamic.lastCommit"), upstream: snapshot?.repo.upstream })}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setConfirmUndo(false)}>
-              Cancel
-            </Button>
+            <Button variant="outline" onClick={() => setConfirmUndo(false)}>{t("git.ui.cancel")}</Button>
             <Button
               variant="destructive"
               onClick={() => {
                 setConfirmUndo(false);
                 void undoLastCommit();
               }}
-            >
-              Undo commit
-            </Button>
+            >{t("git.ui.undo_commit")}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -496,20 +492,20 @@ export function HistoryPane() {
             <DialogTitle>
               {confirm?.kind === "revert"
                 ? confirm.commits.length > 1
-                  ? `Revert ${confirm.commits.length} commits?`
-                  : "Revert this commit?"
+                  ? t("git.dynamic.revertCommits", { count: confirm.commits.length })
+                  : t("git.ui.revert_this_commit")
                 : confirm && confirm.commits.length > 1
-                  ? `Cherry-pick ${confirm.commits.length} commits?`
-                  : "Cherry-pick this commit?"}
+                  ? t("git.dynamic.cherryPickCommits", { count: confirm.commits.length })
+                  : t("git.ui.cherry_pick_this_commit")}
             </DialogTitle>
             <DialogDescription>
               {confirm?.kind === "revert"
                 ? confirm.commits.length > 1
-                  ? "Creates new commits that undo these changes, newest first."
-                  : "Creates a new commit that undoes this change on the current branch."
+                  ? t("git.ui.creates_new_commits_that_undo_these_changes_newest_first")
+                  : t("git.ui.creates_a_new_commit_that_undoes_this_change_on_the_current_branch")
                 : confirm && confirm.commits.length > 1
-                  ? "Applies these commits onto the current branch, oldest first."
-                  : "Applies this commit onto the current branch."}
+                  ? t("git.ui.applies_these_commits_onto_the_current_branch_oldest_first")
+                  : t("git.ui.applies_this_commit_onto_the_current_branch")}
             </DialogDescription>
           </DialogHeader>
           {confirm && confirm.commits.length > 1 ? (
@@ -522,9 +518,7 @@ export function HistoryPane() {
             <CommitLine commit={confirm?.commits[0]} />
           )}
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setConfirm(null)}>
-              Cancel
-            </Button>
+            <Button type="button" variant="outline" onClick={() => setConfirm(null)}>{t("git.ui.cancel")}</Button>
             <Button
               type="button"
               variant={confirm?.kind === "revert" ? "destructive" : "default"}
@@ -539,7 +533,7 @@ export function HistoryPane() {
                 );
               }}
             >
-              {confirm?.kind === "revert" ? "Revert" : "Cherry-pick"}
+              {confirm?.kind === "revert" ? t("git.ui.revert") : t("git.ui.cherry_pick")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -562,8 +556,8 @@ export function HistoryPane() {
             }}
           >
             <DialogHeader className="min-w-0 pr-6">
-              <DialogTitle className="truncate">Reset {currentBranch ?? "branch"}?</DialogTitle>
-              <DialogDescription>Moves this branch to the selected commit.</DialogDescription>
+              <DialogTitle className="truncate">{t("git.dynamic.resetBranch", { name: currentBranch ?? t("git.ui.branch") })}</DialogTitle>
+              <DialogDescription>{t("git.ui.moves_this_branch_to_the_selected_commit")}</DialogDescription>
             </DialogHeader>
             <CommitLine commit={resetTarget} />
             <div className="mt-3 flex flex-col gap-1">
@@ -582,18 +576,16 @@ export function HistoryPane() {
                     )}
                     onClick={() => setResetMode(mode.id)}
                   >
-                    <span className="text-sm font-medium">{mode.label}</span>
-                    <span className="mt-0.5 block text-xs text-muted-foreground">{mode.detail}</span>
+                    <span className="text-sm font-medium">{t(mode.labelKey)}</span>
+                    <span className="mt-0.5 block text-xs text-muted-foreground">{t(mode.detailKey)}</span>
                   </button>
                 );
               })}
             </div>
             <DialogFooter className="mt-4">
-              <Button type="button" variant="outline" onClick={() => setResetTarget(null)}>
-                Cancel
-              </Button>
+              <Button type="button" variant="outline" onClick={() => setResetTarget(null)}>{t("git.ui.cancel")}</Button>
               <Button type="submit" variant={resetMode === "hard" ? "destructive" : "default"}>
-                {resetMode === "hard" ? "Hard reset" : "Reset"}
+                {resetMode === "hard" ? t("git.ui.hard_reset") : t("git.ui.reset")}
               </Button>
             </DialogFooter>
           </form>
@@ -664,6 +656,7 @@ const CommitList = memo(function CommitList({
   onAction: (action: CommitRowAction) => void;
   getSelectedCommits: () => CommitSummary[];
 }) {
+  useTranslation();
   const graphCells = useMemo(
     () =>
       commits.map((_, index) =>
@@ -701,12 +694,10 @@ const CommitList = memo(function CommitList({
       {loading ? (
         <HistorySkeleton
           rows={3}
-          label={searchingMode ? "Searching" : "Loading history"}
+          label={searchingMode ? t("git.ui.searching") : t("git.ui.loading_history")}
         />
       ) : hasMore ? (
-        <div className="px-3 py-2 text-center text-[11px] text-muted-foreground">
-          Scroll for earlier commits
-        </div>
+        <div className="px-3 py-2 text-center text-[11px] text-muted-foreground">{t("git.ui.scroll_for_earlier_commits")}</div>
       ) : null}
     </>
   );
@@ -733,19 +724,20 @@ const CommitRow = memo(function CommitRow({
   onAction: (action: CommitRowAction) => void;
   getSelectedCommits: () => CommitSummary[];
 }) {
+  useTranslation();
   const message = [commit.summary, commit.body].filter(Boolean).join("\n\n");
   const isHead = (commit.refs ?? []).some((ref) => ref.kind === "head");
 
   async function copyText(value: string, success: string) {
     if (!value) {
-      toast.error("Nothing to copy");
+      toast.error(t("git.ui.nothing_to_copy"));
       return;
     }
     try {
       await navigator.clipboard.writeText(value);
       toast.success(success);
     } catch {
-      toast.error("Could not copy");
+      toast.error(t("git.ui.could_not_copy"));
     }
   }
 
@@ -781,7 +773,7 @@ const CommitRow = memo(function CommitRow({
                 commit.onCurrentBranch === false && "text-muted-foreground/50",
               )}
             >
-              {commit.summary || "(no message)"}
+              {commit.summary || t("git.ui.no_message")}
             </span>
           </span>
           <AuthorName name={commit.authorName} email={commit.authorEmail} />
@@ -795,84 +787,54 @@ const CommitRow = memo(function CommitRow({
         <>
         {isHead ? (
           <ContextMenuItem onClick={() => onAction({ type: "undo" })}>
-            <UndoDotIcon />
-            Undo
-          </ContextMenuItem>
+            <UndoDotIcon />{t("git.ui.undo")}</ContextMenuItem>
         ) : null}
         {canResetBranch ? (
           <ContextMenuItem onClick={() => onAction({ type: "reset", commit })}>
-            <RotateCcwIcon />
-            Reset
-          </ContextMenuItem>
+            <RotateCcwIcon />{t("git.ui.reset")}</ContextMenuItem>
         ) : null}
         {commit.onCurrentBranch ? null : (
           <ContextMenuItem onClick={() => onAction({ type: "cherry-pick", commit })}>
-            <CopyPlusIcon />
-            Cherry-pick
-          </ContextMenuItem>
+            <CopyPlusIcon />{t("git.ui.cherry_pick")}</ContextMenuItem>
         )}
         {canRebase && !commit.onCurrentBranch ? (
           <ContextMenuItem onClick={() => onAction({ type: "merge", commit })}>
-            <GitBranchIcon />
-            Merge
-          </ContextMenuItem>
+            <GitBranchIcon />{t("git.ui.merge")}</ContextMenuItem>
         ) : null}
         {commit.onCurrentBranch ? (
           <ContextMenuItem onClick={() => onAction({ type: "revert", commit })}>
-            <Undo2Icon />
-            Revert
-          </ContextMenuItem>
+            <Undo2Icon />{t("git.ui.revert")}</ContextMenuItem>
         ) : null}
         {canRebase && !commit.onCurrentBranch ? (
           <ContextMenuItem onClick={() => onAction({ type: "rebase", commit })}>
-            <GitBranchIcon />
-            Rebase onto
-          </ContextMenuItem>
+            <GitBranchIcon />{t("git.ui.rebase_onto")}</ContextMenuItem>
         ) : null}
         {canRebase && commit.onCurrentBranch && !commit.refs.some((ref) => ref.kind === "head") ? (
           <ContextMenuItem onClick={() => onAction({ type: "interactive", commit })}>
-            <ListOrderedIcon />
-            Interactive rebase
-          </ContextMenuItem>
+            <ListOrderedIcon />{t("git.ui.interactive_rebase")}</ContextMenuItem>
         ) : null}
         <ContextMenuItem onClick={() => onAction({ type: "branch", commit })}>
-          <GitBranchIcon />
-          Create branch
-        </ContextMenuItem>
+          <GitBranchIcon />{t("git.ui.create_branch")}</ContextMenuItem>
         <ContextMenuItem onClick={() => onAction({ type: "tag", commit })}>
-          <TagIcon />
-          Create tag
-        </ContextMenuItem>
+          <TagIcon />{t("git.ui.create_tag")}</ContextMenuItem>
         <ContextMenuItem onClick={() => onAction({ type: "patch", commit })}>
-          <FileDiffIcon />
-          Create patch
-        </ContextMenuItem>
+          <FileDiffIcon />{t("git.ui.create_patch")}</ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuSub>
           <ContextMenuSubTrigger>
-            <CopyIcon />
-            Copy
-          </ContextMenuSubTrigger>
+            <CopyIcon />{t("git.ui.copy")}</ContextMenuSubTrigger>
           <ContextMenuSubContent className="w-44">
-            <ContextMenuItem onClick={() => void copyText(commit.authorName, "Copied author")}>
-              <UserIcon />
-              Author
-            </ContextMenuItem>
+            <ContextMenuItem onClick={() => void copyText(commit.authorName, t("git.ui.copied_author"))}>
+              <UserIcon />{t("git.ui.author")}</ContextMenuItem>
             {commit.authorEmail ? (
-              <ContextMenuItem onClick={() => void copyText(commit.authorEmail, "Copied email")}>
-                <MailIcon />
-                Email
-              </ContextMenuItem>
+              <ContextMenuItem onClick={() => void copyText(commit.authorEmail, t("git.ui.copied_email"))}>
+                <MailIcon />{t("git.ui.email")}</ContextMenuItem>
             ) : null}
-            <ContextMenuItem onClick={() => void copyText(commit.id, "Copied commit hash")}>
-              <HashIcon />
-              Hash
-            </ContextMenuItem>
+            <ContextMenuItem onClick={() => void copyText(commit.id, t("git.ui.copied_commit_hash"))}>
+              <HashIcon />{t("git.ui.hash")}</ContextMenuItem>
             {message ? (
-              <ContextMenuItem onClick={() => void copyText(message, "Copied message")}>
-                <MessageSquareTextIcon />
-                Message
-              </ContextMenuItem>
+              <ContextMenuItem onClick={() => void copyText(message, t("git.ui.copied_message"))}>
+                <MessageSquareTextIcon />{t("git.ui.message")}</ContextMenuItem>
             ) : null}
           </ContextMenuSubContent>
         </ContextMenuSub>
@@ -890,6 +852,7 @@ function MultiCommitMenu({
   getCommits: () => CommitSummary[];
   onAction: (action: CommitRowAction) => void;
 }) {
+  useTranslation();
   const commits = getCommits();
   const canCherryPick = commits.every((commit) => !commit.onCurrentBranch);
   const canRevert = commits.every((commit) => commit.onCurrentBranch);
@@ -897,32 +860,25 @@ function MultiCommitMenu({
     <>
       {commits.length === 2 ? (
         <ContextMenuItem onClick={() => onAction({ type: "compare", commits })}>
-          <ArrowLeftRightIcon />
-          Compare
-        </ContextMenuItem>
+          <ArrowLeftRightIcon />{t("git.ui.compare")}</ContextMenuItem>
       ) : null}
       {canCherryPick ? (
         <ContextMenuItem onClick={() => onAction({ type: "cherry-pick-many", commits })}>
-          <CopyPlusIcon />
-          Cherry-pick
-        </ContextMenuItem>
+          <CopyPlusIcon />{t("git.ui.cherry_pick")}</ContextMenuItem>
       ) : null}
       {canRevert ? (
         <ContextMenuItem onClick={() => onAction({ type: "revert-many", commits })}>
-          <Undo2Icon />
-          Revert
-        </ContextMenuItem>
+          <Undo2Icon />{t("git.ui.revert")}</ContextMenuItem>
       ) : null}
       <ContextMenuSeparator />
       <ContextMenuItem onClick={() => onAction({ type: "copy-hashes", commits })}>
-        <HashIcon />
-        Copy hashes
-      </ContextMenuItem>
+        <HashIcon />{t("git.ui.copy_hashes")}</ContextMenuItem>
     </>
   );
 }
 
 function CommitRefs({ refs }: { refs: CommitRef[] }) {
+  useTranslation();
   if (refs.length === 0) return null;
 
   return (
@@ -972,6 +928,7 @@ function GraphCell({
   previous?: GraphRow;
   selected: boolean;
 }) {
+  useTranslation();
   const mid = ROW_HEIGHT / 2;
   const color = laneColor(row.lane);
   const mergeFrom = new Set(row.merges.map((line) => line.from));

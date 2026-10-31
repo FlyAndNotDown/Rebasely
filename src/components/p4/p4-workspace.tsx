@@ -1,3 +1,4 @@
+import { t, useTranslation } from "@/i18n";
 import { lazy, Suspense } from "react";
 import { WorkspaceSkeleton } from "@/components/skeletons";
 import { Button } from "@/components/ui/button";
@@ -9,6 +10,7 @@ const P4Pending = lazy(() => import("@/components/p4/p4-pending").then((module) 
 const P4Submitted = lazy(() => import("@/components/p4/p4-submitted").then((module) => ({ default: module.P4Submitted })));
 
 export function P4Workspace() {
+  useTranslation();
   const { view, loading, error, connection, reconnect } = useP4();
   const { setOpenPanel } = useGitPick(["setOpenPanel"]);
 
@@ -17,14 +19,14 @@ export function P4Workspace() {
       <div className="flex h-full items-center justify-center p-8">
         <div className="max-w-sm text-center">
           <p role={loading ? "status" : error ? "alert" : undefined} className="text-sm text-muted-foreground">
-            {loading ? "Connecting to Perforce…" : error || "This workspace is not connected."}
+            {loading ? t("p4.connectingToPerforce") : error || t("p4.thisWorkspaceIsNotConnected")}
           </p>
           {!loading ? (
             <div className="mt-4 flex justify-center gap-2">
               {error ? (
-                <Button onClick={() => setOpenPanel("settings")}>Settings</Button>
+                <Button onClick={() => setOpenPanel("settings")}>{t("p4.settings")}</Button>
               ) : null}
-              <Button variant={error ? "outline" : "default"} onClick={reconnect}>Try again</Button>
+              <Button variant={error ? "outline" : "default"} onClick={reconnect}>{t("p4.tryAgain")}</Button>
             </div>
           ) : null}
         </div>
@@ -33,7 +35,7 @@ export function P4Workspace() {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div key={JSON.stringify(connection)} className="flex h-full min-h-0 flex-col">
       <Suspense fallback={<WorkspaceSkeleton />}>
         {view === "submitted" ? <P4Submitted /> : view === "workspace" ? <P4Files /> : <P4Pending />}
       </Suspense>

@@ -1,3 +1,4 @@
+import { formatNumber, t, useTranslation } from "@/i18n";
 import { useEffect } from "react";
 import { isTauri } from "@tauri-apps/api/core";
 import { ArrowDownToLineIcon, CheckIcon, RefreshCwIcon } from "lucide-react";
@@ -14,25 +15,26 @@ function versionLabel(value: string) {
 }
 
 function statusLabel(state: UpdateSnapshot) {
-  if (state.request === "restart") return "Restarting Rebasely…";
-  if (state.request === "check" || state.status === "checking") return "Checking for updates…";
+  if (state.request === "restart") return t("desktop.appUpdates.restarting_rebasely");
+  if (state.request === "check" || state.status === "checking") return t("desktop.appUpdates.checking_for_updates");
   switch (state.status) {
-    case "current": return "You are up to date.";
-    case "available": return `${versionLabel(state.update?.version ?? "")} is available.`;
+    case "current": return t("desktop.appUpdates.you_are_up_to_date");
+    case "available": return t("desktop.appUpdates.availableVersion", { version: versionLabel(state.update?.version ?? "") });
     case "downloading": {
-      const downloaded = (state.downloadedBytes / 1_048_576).toFixed(1);
+      const downloaded = formatNumber(state.downloadedBytes / 1_048_576, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
       return state.totalBytes
-        ? `Downloading update: ${downloaded} / ${(state.totalBytes / 1_048_576).toFixed(1)} MB`
-        : `Downloading update: ${downloaded} MB`;
+        ? t("desktop.appUpdates.downloadingTotal", { downloaded, total: formatNumber(state.totalBytes / 1_048_576, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) })
+        : t("desktop.appUpdates.downloading", { downloaded });
     }
-    case "installing": return "Installing update. Rebasely may close to finish installation.";
-    case "installed": return "Update installed. Restart Rebasely when your work is saved.";
-    case "error": return "The update could not be completed.";
-    default: return state.request === "install" ? "Preparing update…" : "Check for a new version.";
+    case "installing": return t("desktop.appUpdates.installing_update_rebasely_may_close_to_finish_installation");
+    case "installed": return t("desktop.appUpdates.update_installed_restart_rebasely_when_your_work_is");
+    case "error": return t("desktop.appUpdates.the_update_could_not_be_completed");
+    default: return state.request === "install" ? t("desktop.appUpdates.preparing_update") : t("desktop.appUpdates.check_for_a_new_version");
   }
 }
 
 export function AppUpdateBanner() {
+  useTranslation();
   const state = useAppUpdates();
   useEffect(() => {
     if (isTauri()) void appUpdates.start();
@@ -41,21 +43,21 @@ export function AppUpdateBanner() {
     const notice = state.notice;
     if (!notice) return;
     if (notice.kind === "available") {
-      toast(`Rebasely ${versionLabel(notice.version)} is available`, {
+      toast(t("desktop.appUpdates.availableNotice", { version: versionLabel(notice.version) }), {
         id: "app-update", duration: Infinity,
-        action: { label: "Update", onClick: () => { void appUpdates.install(notice.version); } },
-        cancel: { label: "Later", onClick: () => {} },
+        action: { label: t("desktop.appUpdates.update"), onClick: () => { void appUpdates.install(notice.version); } },
+        cancel: { label: t("desktop.appUpdates.later"), onClick: () => {} },
       });
     } else if (notice.kind === "installed") {
-      toast.success("Update installed", {
-        id: "app-update", duration: Infinity, description: "Restart when your work is saved.",
-        action: { label: "Restart", onClick: () => { void appUpdates.restart(); } },
-        cancel: { label: "Later", onClick: () => {} },
+      toast.success(t("desktop.appUpdates.update_installed"), {
+        id: "app-update", duration: Infinity, description: t("desktop.appUpdates.restart_when_your_work_is_saved"),
+        action: { label: t("desktop.appUpdates.restart"), onClick: () => { void appUpdates.restart(); } },
+        cancel: { label: t("desktop.appUpdates.later"), onClick: () => {} },
       });
     } else {
-      toast.error("Update could not be completed", {
+      toast.error(t("desktop.appUpdates.update_could_not_be_completed"), {
         id: "app-update", description: notice.message, duration: 10_000,
-        action: { label: "Retry", onClick: () => {
+        action: { label: t("common.retry"), onClick: () => {
           const current = appUpdates.getSnapshot();
           if (notice.request === "restart") void appUpdates.restart();
           else if (notice.request === "install" && current.update) void appUpdates.install(current.update.version);
@@ -78,6 +80,7 @@ export function AppUpdateBanner() {
 }
 
 export function UpdatesSettings() {
+  useTranslation();
   const state = useAppUpdates();
   const busy = updateBusy(state);
   const update = state.update;
@@ -89,13 +92,13 @@ export function UpdatesSettings() {
     <section aria-labelledby="updates-title" className="grid gap-3">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h3 id="updates-title" className="text-sm font-medium">Application updates</h3>
-          <p className="mt-1 text-xs text-muted-foreground">Installed version {versionLabel(version)}</p>
+          <h3 id="updates-title" className="text-sm font-medium">{t("desktop.appUpdates.application_updates")}</h3>
+          <p className="mt-1 text-xs text-muted-foreground">{t("desktop.appUpdates.installed_version")}{" "}{versionLabel(version)}</p>
         </div>
-        <HoverTip label="Checks at startup. Check again at any time.">
+        <HoverTip label={t("desktop.appUpdates.checks_at_startup_check_again_at_any_time")}>
         <Button variant="outline" size="sm" disabled={busy || state.status === "installed"} onClick={() => void appUpdates.check()}>
           <RefreshCwIcon className={state.request === "check" || state.status === "checking" ? "motion-safe:animate-spin" : ""} />
-          {state.request === "check" || state.status === "checking" ? "Checking…" : "Check for updates"}
+          {state.request === "check" || state.status === "checking" ? t("desktop.appUpdates.checking") : t("desktop.appUpdates.check_for_updates")}
         </Button>
         </HoverTip>
       </div>
@@ -106,15 +109,15 @@ export function UpdatesSettings() {
         </p>
         {state.error ? (
           <details className="text-xs text-muted-foreground">
-            <summary className="w-fit cursor-pointer rounded-sm focus-visible:outline-2 focus-visible:outline-ring">Details</summary>
+            <summary className="w-fit cursor-pointer rounded-sm focus-visible:outline-2 focus-visible:outline-ring">{t("desktop.appUpdates.details")}</summary>
             <p className="mt-2 break-words">{state.error}</p>
           </details>
         ) : null}
-        {state.status === "error" ? <p className="text-xs text-muted-foreground">Check your connection and try again.</p> : null}
+        {state.status === "error" ? <p className="text-xs text-muted-foreground">{t("desktop.appUpdates.check_your_connection_and_try_again")}</p> : null}
         {state.status === "downloading" ? (
           <div
             role="progressbar"
-            aria-label="Update download"
+            aria-label={t("desktop.appUpdates.update_download")}
             aria-valuemin={0}
             aria-valuemax={100}
             aria-valuenow={percent ?? undefined}
@@ -129,17 +132,17 @@ export function UpdatesSettings() {
       </div>
       {update?.notes ? (
         <details className="text-xs text-muted-foreground">
-          <summary className="w-fit cursor-pointer rounded-sm focus-visible:outline-2 focus-visible:outline-ring">Release notes</summary>
+          <summary className="w-fit cursor-pointer rounded-sm focus-visible:outline-2 focus-visible:outline-ring">{t("desktop.appUpdates.release_notes")}</summary>
           <ScrollArea className="mt-2 rounded-md border bg-muted/30" viewportClassName="max-h-32" scrollbars="vertical">
             <p className="whitespace-pre-wrap break-words p-3 text-xs">{update.notes}</p>
           </ScrollArea>
         </details>
       ) : null}
       {canInstall ? (
-        <div><Button size="sm" disabled={busy} onClick={() => void appUpdates.install(update.version)}><ArrowDownToLineIcon />Update to {versionLabel(update.version)}</Button></div>
+        <div><Button size="sm" disabled={busy} onClick={() => void appUpdates.install(update.version)}><ArrowDownToLineIcon />{t("desktop.appUpdates.update_to")}{" "}{versionLabel(update.version)}</Button></div>
       ) : null}
       {state.status === "installed" ? (
-        <div><Button size="sm" disabled={busy} onClick={() => void appUpdates.restart()}>Restart Rebasely</Button></div>
+        <div><Button size="sm" disabled={busy} onClick={() => void appUpdates.restart()}>{t("desktop.appUpdates.restart_rebasely")}</Button></div>
       ) : null}
     </section>
   );

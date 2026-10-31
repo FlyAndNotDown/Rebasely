@@ -1,3 +1,4 @@
+import { t, useTranslation } from "@/i18n";
 import { useRef, useState } from "react";
 import { open as chooseFolder } from "@tauri-apps/plugin-dialog";
 import { FolderOpenIcon, InfoIcon, Loader2Icon } from "lucide-react";
@@ -20,6 +21,7 @@ export function InitializeRepositoryDialog({ open, onOpenChange }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+
   const [busy, setBusy] = useState(false);
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!busy) onOpenChange(next); }}>
@@ -39,6 +41,7 @@ function InitializeForm({ onOpenChange, onBusyChange }: {
   onOpenChange: (open: boolean) => void;
   onBusyChange: (busy: boolean) => void;
 }) {
+  useTranslation();
   const { openPath, setOpenPanel } = useGitPick(["openPath", "setOpenPanel"]);
   const [path, setPath] = useState("");
   const [branch, setBranch] = useState("main");
@@ -68,7 +71,7 @@ function InitializeForm({ onOpenChange, onBusyChange }: {
       const selected = await chooseFolder({
         directory: true,
         multiple: false,
-        title: "Choose a folder to initialize",
+        title: t("desktop.initializeRepositoryDialog.choose_a_folder_to_initialize"),
       });
       if (typeof selected === "string") setPath(selected);
     } catch (caught) {
@@ -94,16 +97,16 @@ function InitializeForm({ onOpenChange, onBusyChange }: {
   return (
     <form aria-busy={busy} onSubmit={(event) => { event.preventDefault(); void initialize(); }}>
       <DialogHeader>
-        <DialogTitle>Initialize Git repository</DialogTitle>
-        <DialogDescription>Create a Git repository in an existing folder.</DialogDescription>
+        <DialogTitle>{t("desktop.initializeRepositoryDialog.initialize_git_repository")}</DialogTitle>
+        <DialogDescription>{t("desktop.initializeRepositoryDialog.create_a_git_repository_in_an_existing_folder")}</DialogDescription>
       </DialogHeader>
-      <p role="status" className="sr-only">{activity === "initialize" ? "Initializing repository." : activity === "browse" ? "Choosing a folder." : ""}</p>
+      <p role="status" className="sr-only">{activity === "initialize" ? t("desktop.initializeRepositoryDialog.initializing_repository") : activity === "browse" ? t("desktop.initializeRepositoryDialog.choosing_a_folder") : ""}</p>
       <div className="my-4 grid gap-4">
         <div className="grid gap-2">
           <div className="flex items-center gap-1">
-            <Label htmlFor="initialize-path">Folder</Label>
-            <HoverTip label="Choose a folder outside an existing Git worktree. Its files are left unstaged.">
-              <Button variant="ghost" size="icon-xs" aria-label="Initialization scope"><InfoIcon /></Button>
+            <Label htmlFor="initialize-path">{t("desktop.initializeRepositoryDialog.folder")}</Label>
+            <HoverTip label={t("desktop.initializeRepositoryDialog.choose_a_folder_outside_an_existing_git_worktree")}>
+              <Button variant="ghost" size="icon-xs" aria-label={t("desktop.initializeRepositoryDialog.initialization_scope")}><InfoIcon /></Button>
             </HoverTip>
           </div>
           <div className="flex min-w-0 gap-2">
@@ -113,18 +116,18 @@ function InitializeForm({ onOpenChange, onBusyChange }: {
               autoFocus
               value={path}
               disabled={busy}
-              placeholder="Absolute folder path"
+              placeholder={t("desktop.initializeRepositoryDialog.absolute_folder_path")}
               aria-describedby={error ? "initialize-error" : undefined}
               onChange={(event) => { setPath(event.target.value); setError(null); }}
             />
             <Button variant="outline" disabled={busy} onClick={() => void browse()}>
               <FolderOpenIcon />
-              {activity === "browse" ? "Choosing" : "Browse"}
+              {activity === "browse" ? t("desktop.initializeRepositoryDialog.choosing") : t("desktop.cloneRepositoryDialog.browse")}
             </Button>
           </div>
         </div>
         <div className="grid gap-2">
-          <Label htmlFor="initialize-branch">Initial branch</Label>
+          <Label htmlFor="initialize-branch">{t("desktop.initializeRepositoryDialog.initial_branch")}</Label>
           <Input
             id="initialize-branch"
             className="font-mono"
@@ -139,15 +142,15 @@ function InitializeForm({ onOpenChange, onBusyChange }: {
         {error ? (
           <div id="initialize-error" role="alert" className="grid gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-xs text-destructive">
             <p className="break-words whitespace-pre-wrap">{error}</p>
-            {error === GIT_MISSING ? <Button variant="outline" size="sm" className="w-fit" onClick={() => { onOpenChange(false); setOpenPanel("settings"); }}>Open Settings</Button> : null}
+            {error === GIT_MISSING ? <Button variant="outline" size="sm" className="w-fit" onClick={() => { onOpenChange(false); setOpenPanel("settings"); }}>{t("desktop.initializeRepositoryDialog.open_settings")}</Button> : null}
           </div>
         ) : null}
       </div>
       <DialogFooter>
-        <Button variant="outline" disabled={busy} onClick={() => onOpenChange(false)}>Cancel</Button>
+        <Button variant="outline" disabled={busy} onClick={() => onOpenChange(false)}>{t("common.cancel")}</Button>
         <Button type="submit" disabled={busy || !path.trim() || !branch.trim()}>
           {activity === "initialize" ? <Loader2Icon className="animate-spin motion-reduce:animate-none" /> : null}
-          {activity === "initialize" ? "Initializing" : "Initialize"}
+          {activity === "initialize" ? t("desktop.initializeRepositoryDialog.initializing") : t("desktop.initializeRepositoryDialog.initialize")}
         </Button>
       </DialogFooter>
     </form>

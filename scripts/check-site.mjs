@@ -70,11 +70,11 @@ for (const [filename, content] of textFiles) {
   }
 }
 
-violations.push(...validateSiteDocument({
-  html: textFiles.get("index.html") ?? "",
-  sitemap: files.has("sitemap.xml") ? await readFile(path.join(root, "sitemap.xml"), "utf8") : "",
-  files,
-}));
+const sitemap = files.has("sitemap.xml") ? await readFile(path.join(root, "sitemap.xml"), "utf8") : "";
+for (const filename of ["index.html", "en/index.html", "zh-CN/index.html"]) {
+  if (!files.has(filename)) violations.push(`${filename}: missing crawlable language page`);
+  violations.push(...validateSiteDocument({ html: textFiles.get(filename) ?? "", sitemap, files, filename }));
+}
 
 if (violations.length) {
   console.error(violations.join("\n"));

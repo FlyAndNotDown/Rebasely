@@ -8,6 +8,7 @@ import { GitProvider } from "@/state/git-context";
 import { P4Provider } from "@/state/p4-context";
 import { isPlatformModifier } from "@/lib/shortcuts";
 import "./index.css";
+import "@/i18n";
 
 // WebView find, print, reload, zoom, and history. Shifted forms belong to the
 // app (fetch, pull, reflog), so only the plain browser chord is swallowed.

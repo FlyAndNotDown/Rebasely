@@ -1,3 +1,4 @@
+import { t, useTranslation } from "@/i18n";
 import { useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ClockIcon, DownloadIcon, FolderOpenIcon, InfoIcon, LogOutIcon, MenuIcon, PlusIcon, SettingsIcon } from "lucide-react";
@@ -21,6 +22,7 @@ import { asVcs } from "@/state/session";
 import { VcsIcon } from "@/components/vcs-icon";
 
 export function AppMenu() {
+  useTranslation();
   const { recents, openFolder, openPath, setOpenPanel } = useGitPick([
     "recents",
     "openFolder",
@@ -68,28 +70,26 @@ export function AppMenu() {
                 variant="ghost"
                 size="icon-sm"
                 className="size-8 text-muted-foreground"
-                aria-label="Options"
+                aria-label={t("desktop.appMenu.options")}
               >
                 <MenuIcon />
               </Button>
             </DropdownMenuTrigger>
           </TooltipTrigger>
-          <TooltipContent>Options</TooltipContent>
+          <TooltipContent>{t("desktop.appMenu.options")}</TooltipContent>
         </Tooltip>
         <DropdownMenuContent align="start" className="w-56">
           <DropdownMenuItem onSelect={() => void openFolder()}>
             <FolderOpenIcon />
-            Open local repository
-          </DropdownMenuItem>
+            {t("desktop.appMenu.open_local_repository")}</DropdownMenuItem>
           <DropdownMenuSub>
             <DropdownMenuSubTrigger>
               <ClockIcon />
-              Recent repositories
-            </DropdownMenuSubTrigger>
+              {t("desktop.appMenu.recent_repositories")}</DropdownMenuSubTrigger>
             <DropdownMenuSubContent className="w-72 p-0">
               <div className="max-h-80 overflow-y-auto p-1 [scrollbar-width:thin]">
                 {recents.length === 0 ? (
-                  <DropdownMenuItem disabled>No recent repositories</DropdownMenuItem>
+                  <DropdownMenuItem disabled>{t("desktop.appMenu.no_recent_repositories")}</DropdownMenuItem>
                 ) : (
                   recents.map((repo) => {
                     const label = asVcs(repo.vcs) === "perforce" ? repo.name : (labels.get(repo.path) ?? repo.name);
@@ -117,23 +117,19 @@ export function AppMenu() {
           </DropdownMenuSub>
           <DropdownMenuItem onSelect={() => setCloneOpen(true)}>
             <DownloadIcon />
-            Open remote repository
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => setInitializeOpen(true)}><PlusIcon />Create Git repository</DropdownMenuItem>
+            {t("desktop.appMenu.open_remote_repository")}</DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => setInitializeOpen(true)}><PlusIcon />{t("desktop.appMenu.create_git_repository")}</DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={() => setOpenPanel("settings")}>
             <SettingsIcon />
-            Settings
-          </DropdownMenuItem>
+            {t("common.settings")}</DropdownMenuItem>
           <DropdownMenuItem onSelect={() => setAboutOpen(true)}>
             <InfoIcon />
-            About
-          </DropdownMenuItem>
+            {t("desktop.appMenu.about")}</DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={() => void getCurrentWindow().close()}>
             <LogOutIcon />
-            Exit
-          </DropdownMenuItem>
+            {t("desktop.appMenu.exit")}</DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
       <CloneRepositoryDialog open={cloneOpen} onOpenChange={setCloneOpen} />

@@ -1,3 +1,4 @@
+import { formatNumber, t, useTranslation } from "@/i18n";
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { Columns2Icon, ExternalLinkIcon, PilcrowIcon, SquarePenIcon, XIcon } from "lucide-react";
 import { ConflictEditor } from "@/components/conflict-editor";
@@ -75,6 +76,7 @@ export interface DiffLineActions {
 }
 
 export function DiffViewer({ source }: { source: DiffSource }) {
+  useTranslation();
   const {
     changeSelection,
     historySelection,
@@ -127,7 +129,7 @@ export function DiffViewer({ source }: { source: DiffSource }) {
       ? selection.path
       : selection?.path
         ? selection.path
-        : "Diff";
+        : t("git-files.diff");
   const changeFile =
     source === "changes" && changeSelection
       ? (changeSelection.staged ? snapshot?.status.staged : snapshot?.status.unstaged)?.find(
@@ -172,36 +174,36 @@ export function DiffViewer({ source }: { source: DiffSource }) {
     if (!stashSelection) {
       return (
         <div className="absolute inset-0 flex items-center justify-center p-6 text-center text-sm text-muted-foreground">
-          Select a stash to see its diff
+          {t("git-files.selectStash")}
         </div>
       );
     }
     if (!stashDetails || stashDetails.id !== stashSelection.id) {
-      return <DiffSkeleton fill label="Loading files" />;
+      return <DiffSkeleton fill label={t("git-files.loadingFiles")} />;
     }
     if (!stashSelection.path) {
       return (
         <div className="absolute inset-0 flex items-center justify-center p-6 text-center text-sm text-muted-foreground">
-          {stashDetails.files.length === 0 ? "No changes in this stash" : "Select a file to see its diff"}
+          {stashDetails.files.length === 0 ? t("git-files.emptyStash") : t("git-files.selectDiff")}
         </div>
       );
     }
   } else if (comparing && comparison.files === null) {
-    return <DiffSkeleton fill label="Loading files" />;
+    return <DiffSkeleton fill label={t("git-files.loadingFiles")} />;
   } else if (comparing && !comparison.path) {
     return (
       <div className="absolute inset-0 flex items-center justify-center text-sm text-muted-foreground">
-        {comparison.files?.length ? "Select a file to see its diff" : "No differences"}
+        {comparison.files?.length ? t("git-files.selectDiff") : t("git-files.noDifferences")}
       </div>
     );
   } else if (!selection || (selection.type === "commit" && !selection.path)) {
     const loadingFiles =
       selection?.type === "commit" &&
       (!commitDetails || commitDetails.commit.id !== selection.id);
-    if (loadingFiles) return <DiffSkeleton fill label="Loading files" />;
+    if (loadingFiles) return <DiffSkeleton fill label={t("git-files.loadingFiles")} />;
     return (
       <div className="absolute inset-0 flex items-center justify-center text-sm text-muted-foreground">
-        Select a file to see its diff
+        {t("git-files.selectDiff")}
       </div>
     );
   }
@@ -215,25 +217,25 @@ export function DiffViewer({ source }: { source: DiffSource }) {
           <div className="truncate font-mono text-sm">{title}</div>
           {diff?.oldPath ? (
             <div className="truncate text-[11px] text-muted-foreground">
-              renamed from {diff.oldPath}
+              {t("git-files.renamedFrom", { path: diff.oldPath })}
             </div>
           ) : null}
         </div>
         <div className="flex shrink-0 items-center gap-1">
           {selection.type === "change" ? (
             <span className="mr-1 text-[11px] text-muted-foreground">
-              {selection.staged ? "Staged" : "Unstaged"}
+              {selection.staged ? t("git-files.staged") : t("git-files.unstaged")}
             </span>
           ) : null}
           {textual ? (
             <>
-              <HoverTip label="Side by side">
+              <HoverTip label={t("git-files.sideBySide")}>
                 <Button
                   type="button"
                   size="icon-xs"
                   variant={prefs.diffSplit ? "secondary" : "ghost"}
                   aria-pressed={prefs.diffSplit}
-                  aria-label="Side by side"
+                  aria-label={t("git-files.sideBySide")}
                   onClick={() => void setDiffOptions({ split: !prefs.diffSplit })}
                 >
                   <Columns2Icon />
@@ -242,8 +244,8 @@ export function DiffViewer({ source }: { source: DiffSource }) {
               <HoverTip
                 label={
                   ignoreWhitespace
-                    ? "Whitespace changes are hidden; line staging is off until they are shown"
-                    : "Hide whitespace changes"
+                    ? t("git-files.whitespaceHint")
+                    : t("git-files.hideWhitespace")
                 }
               >
                 <Button
@@ -251,7 +253,7 @@ export function DiffViewer({ source }: { source: DiffSource }) {
                   size="icon-xs"
                   variant={ignoreWhitespace ? "secondary" : "ghost"}
                   aria-pressed={ignoreWhitespace}
-                  aria-label="Hide whitespace changes"
+                  aria-label={t("git-files.hideWhitespace")}
                   onClick={() => void setDiffOptions({ ignoreWhitespace: !ignoreWhitespace })}
                 >
                   <PilcrowIcon />
@@ -260,12 +262,12 @@ export function DiffViewer({ source }: { source: DiffSource }) {
             </>
           ) : null}
           {fileSource && !conflicted && changeKind !== "untracked" ? (
-            <HoverTip label="Open in diff tool">
+            <HoverTip label={t("git-files.openDiffTool")}>
               <Button
                 type="button"
                 size="icon-xs"
                 variant="ghost"
-                aria-label="Open in diff tool"
+                aria-label={t("git-files.openDiffTool")}
                 onClick={() => fileSource && void openDifftool(fileSource)}
               >
                 <ExternalLinkIcon />
@@ -273,12 +275,12 @@ export function DiffViewer({ source }: { source: DiffSource }) {
             </HoverTip>
           ) : null}
           {selection.path ? (
-            <HoverTip label="Open in editor">
+            <HoverTip label={t("git-files.openEditor")}>
               <Button
                 type="button"
                 size="icon-xs"
                 variant="ghost"
-                aria-label="Open in editor"
+                aria-label={t("git-files.openEditor")}
                 onClick={() => {
                   const line = diff?.lines.find((item) => item.newLineno)?.newLineno ?? null;
                   void openInEditor(selection.path, line);
@@ -288,12 +290,12 @@ export function DiffViewer({ source }: { source: DiffSource }) {
               </Button>
             </HoverTip>
           ) : null}
-          <HoverTip label="Close">
+          <HoverTip label={t("git-files.close")}>
             <Button
               type="button"
               size="icon-xs"
               variant="ghost"
-              aria-label="Close"
+              aria-label={t("git-files.close")}
               onClick={() => closeFile(source)}
             >
               <XIcon />
@@ -311,13 +313,13 @@ export function DiffViewer({ source }: { source: DiffSource }) {
       ) : imageSource ? (
         <ImageDiff repoPath={snapshot?.repo.path ?? ""} source={imageSource} refreshIdentity={diff} />
       ) : diff?.binary ? (
-        <p className="p-4 text-sm text-muted-foreground">Binary file</p>
+        <p className="p-4 text-sm text-muted-foreground">{t("git-files.binaryFile")}</p>
       ) : !diff ? (
         <div className="relative min-h-0 flex-1 overflow-hidden">
           <DiffSkeleton fill />
         </div>
       ) : diff.lines.length === 0 ? (
-        <p className="p-4 text-sm text-muted-foreground">No textual diff</p>
+        <p className="p-4 text-sm text-muted-foreground">{t("git-files.noTextDiff")}</p>
       ) : (
         <DiffLines
           key={`${source}:${title}`}
@@ -336,6 +338,7 @@ export const DiffLines = memo(function DiffLines({
   diff: FileDiff;
   lineActions?: DiffLineActions;
 }) {
+  useTranslation();
   const split = useGitSelect((state) => state.prefs.diffSplit);
   const lineSpans = useMemo(() => diffLineSpans(diff.lines), [diff]);
   const syntax = useSyntaxRanges(diff, lineSpans);
@@ -457,7 +460,6 @@ export const DiffLines = memo(function DiffLines({
   }
 
   const forward: LineAction = lineActions?.staged ? "unstage" : "stage";
-  const forwardLabel = forward === "stage" ? "Stage" : "Unstage";
   const highlighted = Boolean(syntax);
 
   function gutterProps(index: number) {
@@ -466,7 +468,7 @@ export const DiffLines = memo(function DiffLines({
     return {
       role: "checkbox" as const,
       "aria-checked": picked.has(index),
-      "aria-label": `Select line ${line.newLineno ?? line.oldLineno}`,
+      "aria-label": t("git-files.selectLine", { number: line.newLineno ?? line.oldLineno }),
       onMouseDown: (event: MouseEvent) => pressLine(event, index),
       onMouseEnter: (event: MouseEvent) => enterLine(event, index),
     };
@@ -497,11 +499,11 @@ export const DiffLines = memo(function DiffLines({
     return (
       <span className="sticky right-2 ml-auto flex shrink-0 gap-1 pl-4 font-sans">
         <HunkButton disabled={busy} onClick={() => request(forward, hunkLines)}>
-          {`${forwardLabel} hunk`}
+          {t(forward === "stage" ? "git-files.stageHunk" : "git-files.unstageHunk")}
         </HunkButton>
         {lineActions.allowDiscard ? (
           <HunkButton disabled={busy} onClick={() => request("discard", hunkLines)}>
-            Discard hunk
+            {t("git-files.discardHunk")}
           </HunkButton>
         ) : null}
       </span>
@@ -592,18 +594,18 @@ export const DiffLines = memo(function DiffLines({
       {lineActions && picked.size > 0 ? (
         <div className="flex h-8 shrink-0 items-center gap-2 border-b bg-muted/40 px-3">
           <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
-            {picked.size === 1 ? "1 line selected" : `${picked.size} lines selected`}
+            {t("git-files.selectedLines", { count: picked.size, value: formatNumber(picked.size) })}
           </span>
           <Button size="xs" disabled={busy} onClick={() => request(forward, [...picked])}>
-            {forwardLabel} lines
+            {t(forward === "stage" ? "git-files.stageLines" : "git-files.unstageLines")}
           </Button>
           {lineActions.allowDiscard ? (
             <Button size="xs" variant="outline" disabled={busy} onClick={() => request("discard", [...picked])}>
-              Discard lines
+              {t("git-files.discardLines")}
             </Button>
           ) : null}
           <Button size="xs" variant="ghost" onClick={() => setPicked(NO_PICKS, null)}>
-            Clear
+            {t("git-files.clear")}
           </Button>
         </div>
       ) : null}
@@ -618,7 +620,7 @@ export const DiffLines = memo(function DiffLines({
             : diff.lines.slice(rows.start, rows.end).map((_, offset) => unifiedRow(rows.start + offset))}
           <div style={{ height: rows.after }} />
           {diff.truncated ? (
-            <div className="px-3 py-2 text-muted-foreground">Diff truncated</div>
+            <div className="px-3 py-2 text-muted-foreground">{t("git-files.truncated")}</div>
           ) : null}
         </pre>
       </ScrollArea>
@@ -626,15 +628,15 @@ export const DiffLines = memo(function DiffLines({
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              Discard {confirmDiscard?.length === 1 ? "this line" : `${confirmDiscard?.length ?? 0} lines`}?
+              {t("git-files.discardLineCount", { count: confirmDiscard?.length ?? 0, value: formatNumber(confirmDiscard?.length ?? 0) })}
             </DialogTitle>
             <DialogDescription>
-              The selected changes are removed from the working tree. This cannot be undone.
+              {t("git-files.discardDescription")}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setConfirmDiscard(null)}>
-              Cancel
+              {t("git-files.cancel")}
             </Button>
             <Button
               variant="destructive"
@@ -644,7 +646,7 @@ export const DiffLines = memo(function DiffLines({
                 void run("discard", indices);
               }}
             >
-              Discard
+              {t("git-files.discard")}
             </Button>
           </DialogFooter>
         </DialogContent>

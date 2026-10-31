@@ -1,3 +1,4 @@
+import { t, useTranslation } from "@/i18n";
 import {
   useEffect,
   useLayoutEffect,
@@ -49,6 +50,7 @@ import { useGitPick, type AppTab } from "@/state/git-context";
 import type { BranchInfo } from "@/types/git";
 
 export function AppHeader() {
+  useTranslation();
   const {
     snapshot,
     tabs,
@@ -111,8 +113,8 @@ export function AppHeader() {
       .slice(0, 80);
   }, [query, remote]);
   const current = repo?.isDetached
-    ? (repo.headId?.slice(0, 7) ?? "detached")
-    : (repo?.currentBranch ?? "unknown");
+    ? (repo.headId?.slice(0, 7) ?? t("desktop.appHeader.detached"))
+    : (repo?.currentBranch ?? t("desktop.appHeader.unknown"));
   const perforce = activeTab.kind === "repo" && activeTab.vcs === "perforce";
   const repoOpen = activeTab.kind === "repo";
   return (
@@ -154,11 +156,11 @@ export function AppHeader() {
                   value={branchQuery}
                   onChange={(event) => setBranchQuery(event.target.value)}
                   onKeyDown={(event) => event.stopPropagation()}
-                  placeholder="Filter branches"
+                  placeholder={t("desktop.appHeader.filter_branches")}
                   className="h-7"
                 />
               </div>
-              <DropdownMenuLabel>Local branches</DropdownMenuLabel>
+              <DropdownMenuLabel>{t("desktop.appHeader.local_branches")}</DropdownMenuLabel>
               {local
                 .filter((branch) => !query || branch.name.toLowerCase().includes(query))
                 .map((branch) => (
@@ -176,7 +178,7 @@ export function AppHeader() {
               {remote.length > 0 ? (
                 <>
                   <DropdownMenuSeparator />
-                  <DropdownMenuLabel>Remote branches</DropdownMenuLabel>
+                  <DropdownMenuLabel>{t("desktop.appHeader.remote_branches")}</DropdownMenuLabel>
                   {query
                     ? filteredRemote.map((branch) => (
                         <DropdownMenuItem
@@ -208,12 +210,11 @@ export function AppHeader() {
                 </>
               ) : null}
               <DropdownMenuSeparator />
-              <HoverTip label={repo?.headId ? undefined : "Create a commit first"}>
+              <HoverTip label={repo?.headId ? undefined : t("desktop.appHeader.create_a_commit_first")}>
                 <span className="block">
-                  <DropdownMenuItem disabled={!repo?.headId} aria-description={repo?.headId ? undefined : "Create a commit first"} onClick={() => setBranchOpen(true)}>
+                  <DropdownMenuItem disabled={!repo?.headId} aria-description={repo?.headId ? undefined : t("desktop.appHeader.create_a_commit_first")} onClick={() => setBranchOpen(true)}>
                     <PlusIcon />
-                    New branch
-                  </DropdownMenuItem>
+                    {t("desktop.appHeader.new_branch")}</DropdownMenuItem>
                 </span>
               </HoverTip>
             </DropdownMenuContent>
@@ -233,29 +234,29 @@ export function AppHeader() {
                 variant="ghost"
                 size="icon-sm"
                 className="ml-auto"
-                aria-label="Open in editor"
+                aria-label={t("desktop.appHeader.open_in_editor")}
                 onClick={() => void openInEditor()}
               >
                 <CodeXmlIcon />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Open in editor</TooltipContent>
+            <TooltipContent>{t("desktop.appHeader.open_in_editor")}</TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon-sm" aria-label="Open terminal" onClick={() => void openTerminal()}>
+              <Button variant="ghost" size="icon-sm" aria-label={t("desktop.appHeader.open_terminal")} onClick={() => void openTerminal()}>
                 <SquareTerminalIcon />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Open terminal</TooltipContent>
+            <TooltipContent>{t("desktop.appHeader.open_terminal")}</TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon-sm" aria-label="Open repository folder" onClick={() => void revealRepo()}>
+              <Button variant="ghost" size="icon-sm" aria-label={t("desktop.appHeader.open_repository_folder")} onClick={() => void revealRepo()}>
                 <FolderOpenIcon />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Open folder</TooltipContent>
+            <TooltipContent>{t("desktop.sshKeysSettings.open_folder")}</TooltipContent>
           </Tooltip>
         </>
       ) : null}
@@ -281,6 +282,7 @@ function TabStrip({
   reorderTabs: (fromId: string, toId: string, place: "before" | "after") => void;
   onOpenWelcome: () => void;
 }) {
+  useTranslation();
   const tabs = useMemo(
     () => allTabs.filter((tab) => tab.kind === "repo"),
     [allTabs],
@@ -408,7 +410,7 @@ function TabStrip({
   }
 
   function tabLabel(tab: AppTab) {
-    if (tab.kind === "welcome") return "Welcome";
+    if (tab.kind === "welcome") return t("desktop.appHeader.welcome");
     if (tab.kind === "repo" && tab.vcs === "perforce") return tab.name;
     return labels.get(tab.path) ?? tab.name;
   }
@@ -478,7 +480,7 @@ function TabStrip({
                       <button
                         type="button"
                         className="flex size-4 items-center justify-center rounded-sm hover:bg-muted"
-                        aria-label={`Close ${label}`}
+                        aria-label={t("common.closeNamed", { name: label })}
                         onClick={(event) => {
                           event.preventDefault();
                           event.stopPropagation();
@@ -501,13 +503,13 @@ function TabStrip({
               variant="ghost"
               size="icon-sm"
               className="size-8 shrink-0 text-muted-foreground"
-              aria-label="Welcome"
+              aria-label={t("desktop.appHeader.welcome")}
               onClick={onOpenWelcome}
             >
               <PlusIcon />
             </Button>
           </TooltipTrigger>
-          <TooltipContent>Welcome</TooltipContent>
+          <TooltipContent>{t("desktop.appHeader.welcome")}</TooltipContent>
         </Tooltip>
         <div
           className="h-full min-h-9 min-w-8 flex-1"
@@ -538,7 +540,8 @@ function TabButton({
   onClose: () => void;
   onPointerDown?: (event: PointerEvent<HTMLDivElement>) => void;
 }) {
-  const hint = tab.kind === "welcome" ? "Open or clone a repository" : tab.path;
+  useTranslation();
+  const hint = tab.kind === "welcome" ? t("desktop.appHeader.open_or_clone_a_repository") : tab.path;
   const interactive = Boolean(onPointerDown);
 
   function handleAuxClick(event: MouseEvent<HTMLButtonElement>) {
@@ -583,7 +586,7 @@ function TabButton({
               )}
               onPointerDown={(event) => event.stopPropagation()}
               onClick={onClose}
-              aria-label={`Close ${label}`}
+              aria-label={t("common.closeNamed", { name: label })}
             >
               <XIcon className="size-3" />
             </button>
@@ -604,6 +607,7 @@ function VirtualBranchList({
   remoteName: string;
   onPick: (name: string) => void;
 }) {
+  useTranslation();
   const [query, setQuery] = useState("");
   const row = 36;
   const filtered = useMemo(() => {
@@ -627,15 +631,14 @@ function VirtualBranchList({
             rows.viewport?.scrollTo({ top: 0 });
           }}
           onKeyDown={(event) => event.stopPropagation()}
-          placeholder="Filter branches"
+          placeholder={t("desktop.appHeader.filter_branches")}
           className="h-7"
         />
       </div>
       <ScrollArea viewportRef={rows.viewportRef} style={{ height }}>
         {filtered.length === 0 ? (
           <div className="flex h-full items-center justify-center px-3 text-xs text-muted-foreground">
-            No matching branches
-          </div>
+            {t("desktop.appHeader.no_matching_branches")}</div>
         ) : (
           <div>
             <div style={{ height: rows.before }} />

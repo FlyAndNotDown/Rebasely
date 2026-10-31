@@ -1,3 +1,4 @@
+import { t, useTranslation } from "@/i18n";
 import { useEffect, useState } from "react";
 import { EllipsisIcon } from "lucide-react";
 import { CreateBranchDialog } from "@/components/create-ref-dialogs";
@@ -28,6 +29,7 @@ import { useGitPick, type ResetMode } from "@/state/git-context";
 import type { ReflogEntry } from "@/types/git";
 
 export function ReflogDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+  useTranslation();
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex h-[min(40rem,calc(100vh-4rem))] flex-col gap-3 overflow-hidden sm:max-w-4xl">
@@ -45,6 +47,7 @@ function splitMessage(message: string) {
 }
 
 function ReflogList({ onClose }: { onClose: () => void }) {
+  useTranslation();
   const { snapshot, resetCommit, checkoutDetached, selectCommit } = useGitPick([
     "snapshot",
     "resetCommit",
@@ -86,22 +89,20 @@ function ReflogList({ onClose }: { onClose: () => void }) {
   return (
     <>
       <DialogHeader>
-        <DialogTitle>Reflog</DialogTitle>
-        <DialogDescription>
-          Recover work from recent HEAD positions.
-        </DialogDescription>
+        <DialogTitle>{t("git.ui.reflog")}</DialogTitle>
+        <DialogDescription>{t("git.ui.recover_work_from_recent_head_positions")}</DialogDescription>
       </DialogHeader>
       <ScrollArea className="min-h-0 flex-1 rounded-md border">
         <div className="sticky top-0 z-10 flex h-8 items-center gap-3 border-b bg-popover px-3 text-[11px] text-muted-foreground">
-          <span className="w-24 shrink-0">Ref</span>
-          <span className="w-16 shrink-0">Commit</span>
-          <span className="min-w-0 flex-1">Description</span>
-          <span className="w-20 shrink-0 text-right">When</span>
+          <span className="w-24 shrink-0">{t("git.ui.ref")}</span>
+          <span className="w-16 shrink-0">{t("git.ui.commit")}</span>
+          <span className="min-w-0 flex-1">{t("git.ui.description")}</span>
+          <span className="w-20 shrink-0 text-right">{t("git.ui.when")}</span>
           <span className="size-6 shrink-0" />
         </div>
         {error ? <p role="alert" className="p-4 text-sm text-destructive">{error}</p> : null}
-        {!error && entries === null ? <p role="status" className="p-4 text-sm text-muted-foreground">Loading…</p> : null}
-        {entries?.length === 0 ? <p className="p-4 text-sm text-muted-foreground">The reflog is empty.</p> : null}
+        {!error && entries === null ? <p role="status" className="p-4 text-sm text-muted-foreground">{t("git.ui.loading")}</p> : null}
+        {entries?.length === 0 ? <p className="p-4 text-sm text-muted-foreground">{t("git.ui.the_reflog_is_empty")}</p> : null}
         {entries?.map((entry) => {
           const { action, detail } = splitMessage(entry.message);
           const title = [entry.message, entry.summary].filter(Boolean).join("\n");
@@ -122,7 +123,7 @@ function ReflogList({ onClose }: { onClose: () => void }) {
               </HoverTip>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon-xs" aria-label={`Actions for ${entry.selector}`}>
+                  <Button variant="ghost" size="icon-xs" aria-label={t("git.dynamic.reflogActions", { ref: entry.selector })}>
                     <EllipsisIcon />
                   </Button>
                 </DropdownMenuTrigger>
@@ -132,29 +133,23 @@ function ReflogList({ onClose }: { onClose: () => void }) {
                       onClose();
                       void selectCommit(entry.id);
                     }}
-                  >
-                    Show in history
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setBranchFrom(entry)}>Create branch here…</DropdownMenuItem>
+                  >{t("git.ui.show_in_history")}</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setBranchFrom(entry)}>{t("git.ui.create_branch_here")}</DropdownMenuItem>
                   <DropdownMenuItem
                     onClick={() => {
                       onClose();
                       void checkoutDetached(entry.id);
                     }}
-                  >
-                    Check out without a branch
-                  </DropdownMenuItem>
+                  >{t("git.ui.check_out_without_a_branch")}</DropdownMenuItem>
                   {branch ? (
                     <>
                       <DropdownMenuSeparator />
                       <DropdownMenuSub>
-                        <DropdownMenuSubTrigger>Reset {branch} here</DropdownMenuSubTrigger>
+                        <DropdownMenuSubTrigger>{t("git.dynamic.resetHere", { branch })}</DropdownMenuSubTrigger>
                         <DropdownMenuSubContent>
-                          <DropdownMenuItem onClick={() => reset(entry, "soft")}>Soft · keep changes staged</DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => reset(entry, "mixed")}>Mixed · keep changes unstaged</DropdownMenuItem>
-                          <DropdownMenuItem variant="destructive" onClick={() => reset(entry, "hard")}>
-                            Hard · discard changes…
-                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => reset(entry, "soft")}>{t("git.ui.soft_keep_changes_staged")}</DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => reset(entry, "mixed")}>{t("git.ui.mixed_keep_changes_unstaged")}</DropdownMenuItem>
+                          <DropdownMenuItem variant="destructive" onClick={() => reset(entry, "hard")}>{t("git.ui.hard_discard_changes")}</DropdownMenuItem>
                         </DropdownMenuSubContent>
                       </DropdownMenuSub>
                     </>
@@ -173,16 +168,13 @@ function ReflogList({ onClose }: { onClose: () => void }) {
       <Dialog open={hardReset !== null} onOpenChange={(open) => !open && setHardReset(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Hard reset {branch}?</DialogTitle>
+            <DialogTitle>{t("git.dynamic.hardResetTitle", { branch })}</DialogTitle>
             <DialogDescription>
-              {branch} moves to {hardReset?.shortId} and every uncommitted change to tracked files is
-              discarded. This cannot be undone.
+              {t("git.dynamic.hardResetDescription", { branch, target: hardReset?.shortId })}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setHardReset(null)}>
-              Cancel
-            </Button>
+            <Button variant="outline" onClick={() => setHardReset(null)}>{t("git.ui.cancel")}</Button>
             <Button
               variant="destructive"
               onClick={() => {
@@ -192,9 +184,7 @@ function ReflogList({ onClose }: { onClose: () => void }) {
                 onClose();
                 void resetCommit(entry.id, "hard");
               }}
-            >
-              Reset
-            </Button>
+            >{t("git.ui.reset")}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

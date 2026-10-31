@@ -1,3 +1,4 @@
+import { t, useTranslation } from "@/i18n";
 import { useEffect, useMemo, useRef, useState, type UIEvent } from "react";
 import { CheckIcon, ChevronDownIcon } from "lucide-react";
 import { toast } from "sonner";
@@ -27,14 +28,14 @@ import type { P4Changelist } from "@/types/p4";
 
 async function copyText(value: string, success: string) {
   if (!value) {
-    toast.error("Nothing to copy");
+    toast.error(t("p4.nothingToCopy"));
     return;
   }
   try {
     await navigator.clipboard.writeText(value);
     toast.success(success);
   } catch {
-    toast.error("Could not copy");
+    toast.error(t("p4.couldNotCopy"));
   }
 }
 
@@ -48,6 +49,7 @@ interface SubmittedSearch {
 }
 
 export function P4Submitted() {
+  useTranslation();
   const p4 = useP4();
   const [query, setQuery] = useState("");
   const [picked, setPicked] = useState<string | null>(null);
@@ -81,9 +83,9 @@ export function P4Submitted() {
   const submittedLoading = p4.submittedLoading;
   const selectedRow = submitted.find((change) => change.id === selectedSubmitted) ?? null;
   const heading = detail
-    ? changeSummary(detail.description) || `Change ${detail.id}`
+    ? changeSummary(detail.description) || t("p4.changeNumber", { id: detail.id })
     : selectedRow
-      ? changeSummary(selectedRow.description) || `Change ${selectedRow.id}`
+      ? changeSummary(selectedRow.description) || t("p4.changeNumber", { id: selectedRow.id })
       : null;
   const meta = detail ?? selectedRow;
   const file =
@@ -265,10 +267,10 @@ export function P4Submitted() {
           <div className="grid shrink-0 gap-1.5 border-b p-2">
             <div className="grid grid-cols-2 gap-1.5">
               <FilterMenu
-                label="User"
+                label={t("p4.user")}
                 value={p4.submittedUser}
-                emptyLabel="All users"
-                pinned={currentUser ? { label: "Me", value: currentUser } : undefined}
+                emptyLabel={t("p4.allUsers")}
+                pinned={currentUser ? { label: t("p4.me"), value: currentUser } : undefined}
                 options={withCurrent(users, p4.submittedUser || currentUser)}
                 onOpen={ensureUsers}
                 onChange={(user) => {
@@ -279,9 +281,9 @@ export function P4Submitted() {
                 }}
               />
               <FilterMenu
-                label="Workspace"
+                label={t("p4.workspace")}
                 value={p4.submittedClient}
-                emptyLabel="All workspaces"
+                emptyLabel={t("p4.allWorkspaces")}
                 options={withCurrent(
                   p4.submittedUser ? clients : [],
                   p4.submittedClient || connection?.client || "",
@@ -293,17 +295,17 @@ export function P4Submitted() {
             <Input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Filter changelists"
+              placeholder={t("p4.filterChangelists")}
               className="h-8"
             />
           </div>
           <div ref={listRef} className="relative min-h-0 flex-1 overflow-auto px-1 py-1" onScroll={onScroll}>
             {changes.length === 0 ? (
               listBusy ? (
-                <HistorySkeleton fill label={needle ? "Searching changelists" : "Loading changelists"} />
+                <HistorySkeleton fill label={needle ? t("p4.searchingChangelists") : t("p4.loadingChangelists")} />
               ) : (
                 <p className="p-4 text-sm text-muted-foreground">
-                  {needle ? "No matching changelists." : "No changelists."}
+                  {needle ? t("p4.noMatchingChangelists") : t("p4.noChangelists")}
                 </p>
               )
             ) : (
@@ -323,7 +325,7 @@ export function P4Submitted() {
                       <RevisionDot />
                       <ChangeBadge id={change.id} />
                       <span className="min-w-0 flex-1 truncate text-xs">
-                        {changeSummary(change.description) || "No description"}
+                        {changeSummary(change.description) || t("p4.noDescription")}
                       </span>
                       <AuthorName name={change.user} />
                       <ExactTime time={change.time} />
@@ -332,7 +334,7 @@ export function P4Submitted() {
                 })}
                 {listBusy ? (
                   <p className="px-2 py-2 text-center text-xs text-muted-foreground">
-                    {needle ? "Searching older changelists" : "Loading"}
+                    {needle ? t("p4.searchingOlderChangelists") : t("p4.loading")}
                   </p>
                 ) : null}
               </>
@@ -349,11 +351,11 @@ export function P4Submitted() {
                 <div className="truncate text-sm">{heading}</div>
                 {meta ? (
                   <div className="mt-1 flex items-center gap-x-2 text-[11px] text-muted-foreground">
-                    <HoverTip label="Copy user">
+                    <HoverTip label={t("p4.copyUser")}>
                     <button
                       type="button"
                       className="inline-flex min-w-0 items-center gap-1.5 rounded-md px-1 py-0.5 hover:bg-muted hover:text-foreground"
-                      onClick={() => void copyText(meta.user, "Copied user")}
+                      onClick={() => void copyText(meta.user, t("p4.copiedUser"))}
                     >
                       <AuthorAvatar name={meta.user} email="" className="size-4" />
                       <span className="truncate">{meta.user}</span>
@@ -364,17 +366,17 @@ export function P4Submitted() {
                       <button
                         type="button"
                         className="shrink-0 rounded-md px-1 py-0.5 tabular-nums hover:bg-muted hover:text-foreground"
-                        onClick={() => void copyText(formatExactTime(meta.time), "Copied time")}
+                        onClick={() => void copyText(formatExactTime(meta.time), t("p4.copiedTime"))}
                       >
                         {formatAbsoluteTime(meta.time)}
                       </button>
                       </HoverTip>
                     ) : null}
-                    <HoverTip label="Copy changelist">
+                    <HoverTip label={t("p4.copyChangelist")}>
                     <button
                       type="button"
                       className="shrink-0 rounded-md px-1 py-0.5 font-mono hover:bg-muted hover:text-foreground"
-                      onClick={() => void copyText(meta.id, "Copied changelist")}
+                      onClick={() => void copyText(meta.id, t("p4.copiedChangelist"))}
                     >
                       #{meta.id}
                     </button>
@@ -398,7 +400,7 @@ export function P4Submitted() {
                     <FileStatusIcon status={item.status || p4ActionStatus(item.action)} />
                     <span className="min-w-0 flex-1 truncate font-mono">{depotBase(item.depotPath)}</span>
                     {item.binary || (diff?.binary && diff.path === item.depotPath) ? (
-                      <span className="shrink-0 text-muted-foreground">binary</span>
+                      <span className="shrink-0 text-muted-foreground">{t("p4.binary")}</span>
                     ) : null}
                   </button>
                 ))}
@@ -413,12 +415,12 @@ export function P4Submitted() {
               loading={diffLoading || (Boolean(p4.selectedSubmitted) && !detail)}
               empty={
                 !p4.selectedSubmitted
-                  ? "Select a changelist"
+                  ? t("p4.selectAChangelist")
                   : detail && detail.files.length === 0
-                    ? "No files in this changelist"
+                    ? t("p4.noFilesInThisChangelist")
                     : file
-                      ? "No differences in this file"
-                      : "Select a file to see its diff"
+                      ? t("p4.noDifferencesInThisFile")
+                      : t("p4.selectAFileToSeeItsDiff")
               }
             />
           </ResizablePanel>
@@ -472,6 +474,7 @@ function FilterMenu({
   onOpen: () => void;
   onChange: (value: string) => void;
 }) {
+  useTranslation();
   const [query, setQuery] = useState("");
   const needle = query.trim().toLowerCase();
   const listed = pinned ? options.filter((option) => option !== pinned.value) : options;
@@ -503,7 +506,7 @@ function FilterMenu({
           <Input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder={`Filter ${label.toLowerCase()}`}
+            placeholder={t("p4.filterField", { field: label })}
             className="h-7"
           />
         </div>
@@ -529,7 +532,7 @@ function FilterMenu({
           {canUseTyped ? (
             <DropdownMenuItem onClick={() => onChange(typed)}>
               <span className="min-w-4" />
-              <span className="truncate font-mono">Use {typed}</span>
+              <span className="truncate font-mono">{t("p4.useValue", { value: typed })}</span>
             </DropdownMenuItem>
           ) : null}
         </div>

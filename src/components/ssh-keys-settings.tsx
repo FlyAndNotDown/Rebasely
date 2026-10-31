@@ -1,3 +1,4 @@
+import { t, useTranslation } from "@/i18n";
 import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
 import { open as openFile } from "@tauri-apps/plugin-dialog";
 import { CheckIcon, ChevronDownIcon, CircleAlertIcon, FolderOpenIcon } from "lucide-react";
@@ -81,11 +82,12 @@ function joinSsh(directory: string, name: string) {
 function keygenMissingCopy() {
   const windows = typeof navigator !== "undefined" && /windows/i.test(navigator.userAgent);
   return windows
-    ? "Generating a key needs ssh-keygen. It ships with Git for Windows and with the Windows OpenSSH Client."
-    : "Generating a key needs ssh-keygen. Install OpenSSH to create keys.";
+    ? t("desktop.sshKeysSettings.generating_a_key_needs_ssh_keygen_it_ships")
+    : t("desktop.sshKeysSettings.generating_a_key_needs_ssh_keygen_install_openssh");
 }
 
 export function SshKeysSettings({ email }: { email: string }) {
+  useTranslation();
   const [list, setList] = useState<SshKeyList | null>(null);
   const [loadError, setLoadError] = useState("");
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -151,7 +153,7 @@ export function SshKeysSettings({ email }: { email: string }) {
         draft.comment.trim(),
         draft.passphrase,
       );
-      toast.success(`Created ${created.name}`);
+      toast.success(t("common.createdNamed", { name: created.name }));
       setDraft(null);
       await reload();
     } catch (error) {
@@ -162,13 +164,13 @@ export function SshKeysSettings({ email }: { email: string }) {
   }
 
   async function addExisting() {
-    const picked = await openFile({ multiple: false, title: "Private SSH key" });
+    const picked = await openFile({ multiple: false, title: t("desktop.sshKeysSettings.private_ssh_key") });
     if (typeof picked !== "string") return;
     setBusy(true);
     try {
       const preview = await gitApi.previewSshKey(picked);
       if (preview.inSshFolder && preview.hasPublic) {
-        toast.success("That key is already in your SSH folder");
+        toast.success(t("desktop.sshKeysSettings.that_key_is_already_in_your_ssh_folder"));
         await reload();
         return;
       }
@@ -183,7 +185,7 @@ export function SshKeysSettings({ email }: { email: string }) {
         return;
       }
       const added = await gitApi.importSshKey(picked, "");
-      toast.success(preview.inSshFolder ? `Created the public key for ${added.name}` : `Added ${added.name}`);
+      toast.success(preview.inSshFolder ? t("common.createdPublicKey", { name: added.name }) : t("common.addedNamed", { name: added.name }));
       setImporting(null);
       await reload();
     } catch (error) {
@@ -198,7 +200,7 @@ export function SshKeysSettings({ email }: { email: string }) {
     setBusy(true);
     try {
       const added = await gitApi.importSshKey(importing.path, importing.passphrase);
-      toast.success(importing.inFolder ? `Created the public key for ${added.name}` : `Added ${added.name}`);
+      toast.success(importing.inFolder ? t("common.createdPublicKey", { name: added.name }) : t("common.addedNamed", { name: added.name }));
       setImporting(null);
       await reload();
     } catch (error) {
@@ -212,7 +214,7 @@ export function SshKeysSettings({ email }: { email: string }) {
     setBusy(true);
     try {
       await gitApi.deleteSshKey(name);
-      toast.success(`Removed ${name}`);
+      toast.success(t("common.removedNamed", { name }));
       setPendingRemove(null);
       await reload();
     } catch (error) {
@@ -225,9 +227,9 @@ export function SshKeysSettings({ email }: { email: string }) {
   async function copyPublicKey(key: SshKeyInfo) {
     try {
       await navigator.clipboard.writeText(key.publicKey);
-      toast.success("Copied the public key");
+      toast.success(t("desktop.sshKeysSettings.copied_the_public_key"));
     } catch {
-      toast.error("Could not copy to the clipboard");
+      toast.error(t("desktop.sshKeysSettings.could_not_copy_to_the_clipboard"));
     }
   }
 
@@ -243,8 +245,8 @@ export function SshKeysSettings({ email }: { email: string }) {
   return (
     <>
       <DialogHeader>
-        <DialogTitle>SSH keys</DialogTitle>
-        <DialogDescription>Keys in your .ssh folder. Git uses them for SSH remotes.</DialogDescription>
+        <DialogTitle>{t("desktop.sshKeysSettings.ssh_keys")}</DialogTitle>
+        <DialogDescription>{t("desktop.sshKeysSettings.keys_in_your_ssh_folder_git_uses_them")}</DialogDescription>
       </DialogHeader>
       <div className="mt-6 grid min-w-0 gap-4">
         {list ? (
@@ -262,17 +264,16 @@ export function SshKeysSettings({ email }: { email: string }) {
               onClick={() => void showFolder()}
             >
               <FolderOpenIcon />
-              Open folder
-            </Button>
+              {t("desktop.sshKeysSettings.open_folder")}</Button>
           </div>
         ) : loadError ? (
           <div className="flex items-start gap-2" role="alert">
             <CircleAlertIcon className="mt-0.5 size-3.5 shrink-0 text-destructive" />
             <p className="min-w-0 flex-1 break-words text-sm text-destructive">{loadError}</p>
-            <Button variant="outline" size="sm" disabled={busy} onClick={() => void retryLoad()}>Retry</Button>
+            <Button variant="outline" size="sm" disabled={busy} onClick={() => void retryLoad()}>{t("common.retry")}</Button>
           </div>
         ) : (
-          <Skeleton className="h-8 w-full" role="status" aria-label="Loading SSH keys" />
+          <Skeleton className="h-8 w-full" role="status" aria-label={t("desktop.sshKeysSettings.loading_ssh_keys")} />
         )}
 
         {list && !list.keygenAvailable ? (
@@ -289,11 +290,9 @@ export function SshKeysSettings({ email }: { email: string }) {
             disabled={!list?.keygenAvailable || busy}
             onClick={() => list && openDraft("ed25519", list.keys)}
           >
-            Generate key
-          </Button>
+            {t("desktop.sshKeysSettings.generate_key")}</Button>
           <Button type="button" variant="outline" disabled={!list || busy} onClick={() => void addExisting()}>
-            Add existing key
-          </Button>
+            {t("desktop.sshKeysSettings.add_existing_key")}</Button>
         </div>
 
         <GenerateKeyDialog
@@ -308,13 +307,12 @@ export function SshKeysSettings({ email }: { email: string }) {
         {importing ? (
           <div className="grid gap-4 rounded-lg border p-4">
             <div className="grid gap-1">
-              <h3 className="text-sm font-medium">Passphrase for {importing.fileName}</h3>
+              <h3 className="text-sm font-medium">{t("desktop.sshKeysSettings.passphrase_for")}{" "}{importing.fileName}</h3>
               <p className="text-xs text-muted-foreground">
-                ssh-keygen uses this once to write the public key. It is not saved.
-              </p>
+                {t("desktop.sshKeysSettings.ssh_keygen_uses_this_once_to_write_the")}</p>
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="ssh-import-passphrase">Passphrase</Label>
+              <Label htmlFor="ssh-import-passphrase">{t("desktop.sshKeysSettings.passphrase")}</Label>
               <Input
                 id="ssh-import-passphrase"
                 type="password"
@@ -340,17 +338,16 @@ export function SshKeysSettings({ email }: { email: string }) {
                 disabled={busy || importing.passphrase.length === 0}
                 onClick={() => void confirmImport()}
               >
-                {importing.inFolder ? "Create public key" : "Add key"}
+                {importing.inFolder ? t("desktop.sshKeysSettings.create_public_key") : t("desktop.sshKeysSettings.add_key")}
               </Button>
               <Button type="button" variant="outline" disabled={busy} onClick={() => setImporting(null)}>
-                Cancel
-              </Button>
+                {t("common.cancel")}</Button>
             </div>
           </div>
         ) : null}
 
         {!list && !loadError ? (
-          <div className="grid gap-2" role="status" aria-label="Loading SSH keys">
+          <div className="grid gap-2" role="status" aria-label={t("desktop.sshKeysSettings.loading_ssh_keys")}>
             <Skeleton className="h-16 w-full" />
             <Skeleton className="h-16 w-full" />
           </div>
@@ -359,8 +356,8 @@ export function SshKeysSettings({ email }: { email: string }) {
         {list && list.keys.length === 0 ? (
           <p className="rounded-lg border px-3 py-8 text-center text-sm text-muted-foreground">
             {list.directoryExists
-              ? "No SSH keys in this folder."
-              : "Your SSH folder will be created when you generate or add a key."}
+              ? t("desktop.sshKeysSettings.no_ssh_keys_in_this_folder")
+              : t("desktop.sshKeysSettings.your_ssh_folder_will_be_created_when_you")}
           </p>
         ) : null}
 
@@ -377,11 +374,11 @@ export function SshKeysSettings({ email }: { email: string }) {
                     <span className="min-w-2 flex-1" />
                     {label ? <Badge variant="outline">{label}</Badge> : null}
                     {key.defaultIdentity ? (
-                      <HoverTip label="OpenSSH tries this file name on its own">
-                        <Badge variant="secondary">Default</Badge>
+                      <HoverTip label={t("desktop.sshKeysSettings.openssh_tries_this_file_name_on_its_own")}>
+                        <Badge variant="secondary">{t("desktop.sshKeysSettings.default")}</Badge>
                       </HoverTip>
                     ) : null}
-                    {key.encrypted ? <Badge variant="secondary">Passphrase</Badge> : null}
+                    {key.encrypted ? <Badge variant="secondary">{t("desktop.sshKeysSettings.passphrase")}</Badge> : null}
                   </div>
                   {key.comment ? (
                     <p className="w-max whitespace-nowrap text-xs text-muted-foreground">{key.comment}</p>
@@ -396,9 +393,7 @@ export function SshKeysSettings({ email }: { email: string }) {
                   {pendingRemove === key.name ? (
                     <div className="mt-1 flex flex-wrap items-center gap-2">
                       <span className="text-xs text-muted-foreground">
-                        Remove this key and its public key from your SSH folder? Git hosts that already have the public
-                        key keep it.
-                      </span>
+                        {t("desktop.sshKeysSettings.remove_this_key_and_its_public_key_from")}</span>
                       <Button
                         type="button"
                         size="sm"
@@ -406,8 +401,7 @@ export function SshKeysSettings({ email }: { email: string }) {
                         disabled={busy}
                         onClick={() => void removeKey(key.name)}
                       >
-                        Remove
-                      </Button>
+                        {t("desktop.sshKeysSettings.remove")}</Button>
                       <Button
                         type="button"
                         size="sm"
@@ -415,15 +409,13 @@ export function SshKeysSettings({ email }: { email: string }) {
                         disabled={busy}
                         onClick={() => setPendingRemove(null)}
                       >
-                        Cancel
-                      </Button>
+                        {t("common.cancel")}</Button>
                     </div>
                   ) : (
                     <div className="mt-1 flex flex-wrap gap-2">
                       {key.publicKey ? (
                         <Button type="button" size="sm" variant="outline" onClick={() => void copyPublicKey(key)}>
-                          Copy public key
-                        </Button>
+                          {t("desktop.sshKeysSettings.copy_public_key")}</Button>
                       ) : (
                         <Button
                           type="button"
@@ -444,14 +436,13 @@ export function SshKeysSettings({ email }: { email: string }) {
                             void gitApi
                               .importSshKey(joinSsh(list.directory, key.name), "")
                               .then(async () => {
-                                toast.success(`Created the public key for ${key.name}`);
+                                toast.success(t("common.createdPublicKey", { name: key.name }));
                                 await reload();
                               })
                               .catch((error: unknown) => toast.error(errorMessage(error)));
                           }}
                         >
-                          Create public key
-                        </Button>
+                          {t("desktop.sshKeysSettings.create_public_key")}</Button>
                       )}
                       <Button
                         type="button"
@@ -460,8 +451,7 @@ export function SshKeysSettings({ email }: { email: string }) {
                         disabled={busy}
                         onClick={() => setPendingRemove(key.name)}
                       >
-                        Remove
-                      </Button>
+                        {t("desktop.sshKeysSettings.remove")}</Button>
                     </div>
                   )}
                 </li>
@@ -489,6 +479,7 @@ function GenerateKeyDialog({
   onClose: () => void;
   onCreate: () => void;
 }) {
+  useTranslation();
   const nameInvalid = draft !== null && draft.name.trim() !== "" && !keyFileNameOk(draft.name);
   const passphraseMismatch = draft !== null && draft.passphrase !== draft.confirm;
 
@@ -524,12 +515,12 @@ function GenerateKeyDialog({
             }}
           >
             <DialogHeader>
-              <DialogTitle>Generate key</DialogTitle>
-              <DialogDescription>Creates an OpenSSH key in your .ssh folder.</DialogDescription>
+              <DialogTitle>{t("desktop.sshKeysSettings.generate_key")}</DialogTitle>
+              <DialogDescription>{t("desktop.sshKeysSettings.creates_an_openssh_key_in_your_ssh_folder")}</DialogDescription>
             </DialogHeader>
             <div className="mt-4 grid gap-4">
               <div className="grid gap-2">
-                <Label htmlFor="ssh-key-type">Key type</Label>
+                <Label htmlFor="ssh-key-type">{t("desktop.sshKeysSettings.key_type")}</Label>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button
@@ -539,7 +530,7 @@ function GenerateKeyDialog({
                       className="w-full justify-between font-normal"
                       disabled={busy}
                     >
-                      <span>{draft.algorithm === "rsa" ? "RSA 4096" : "Ed25519"}</span>
+                      <span>{draft.algorithm === "rsa" ? t("desktop.sshKeysSettings.rsa_4096") : t("desktop.sshKeysSettings.ed25519")}</span>
                       <ChevronDownIcon />
                     </Button>
                   </DropdownMenuTrigger>
@@ -548,24 +539,22 @@ function GenerateKeyDialog({
                       <span className="min-w-4">
                         {draft.algorithm === "ed25519" ? <CheckIcon className="size-3.5" /> : null}
                       </span>
-                      Ed25519
-                    </DropdownMenuItem>
+                      {t("desktop.sshKeysSettings.ed25519")}</DropdownMenuItem>
                     <DropdownMenuItem onClick={() => selectAlgorithm("rsa")}>
                       <span className="min-w-4">
                         {draft.algorithm === "rsa" ? <CheckIcon className="size-3.5" /> : null}
                       </span>
-                      RSA 4096
-                    </DropdownMenuItem>
+                      {t("desktop.sshKeysSettings.rsa_4096")}</DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
                 <p className="text-xs text-muted-foreground">
                   {draft.algorithm === "ed25519"
-                    ? "Ed25519 is the type Git hosts expect for a new key."
-                    : "RSA 4096 remains the type some older hosts require."}
+                    ? t("desktop.sshKeysSettings.ed25519_is_the_type_git_hosts_expect_for")
+                    : t("desktop.sshKeysSettings.rsa_4096_remains_the_type_some_older_hosts")}
                 </p>
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="ssh-key-name">File name</Label>
+                <Label htmlFor="ssh-key-name">{t("desktop.sshKeysSettings.file_name")}</Label>
                 <Input
                   id="ssh-key-name"
                   value={draft.name}
@@ -581,15 +570,14 @@ function GenerateKeyDialog({
                   }
                 />
                 {nameInvalid ? (
-                  <p className="text-xs text-destructive">Use letters, numbers, dots, hyphens, and underscores.</p>
+                  <p className="text-xs text-destructive">{t("desktop.sshKeysSettings.use_letters_numbers_dots_hyphens_and_underscores")}</p>
                 ) : (
                   <p className="text-xs text-muted-foreground">
-                    OpenSSH tries id_ed25519, id_ecdsa, and id_rsa on its own.
-                  </p>
+                    {t("desktop.sshKeysSettings.openssh_tries_id_ed25519_id_ecdsa_and_id")}</p>
                 )}
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="ssh-key-comment">Comment</Label>
+                <Label htmlFor="ssh-key-comment">{t("desktop.sshKeysSettings.comment")}</Label>
                 <Input
                   id="ssh-key-comment"
                   value={draft.comment}
@@ -603,7 +591,7 @@ function GenerateKeyDialog({
                 />
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="ssh-key-passphrase">Passphrase</Label>
+                <Label htmlFor="ssh-key-passphrase">{t("desktop.sshKeysSettings.passphrase")}</Label>
                 <Input
                   id="ssh-key-passphrase"
                   type="password"
@@ -615,11 +603,10 @@ function GenerateKeyDialog({
                   }
                 />
                 <p className="text-xs text-muted-foreground">
-                  Leave this empty to use the key without a prompt. A passphrase protects the file if it is copied.
-                </p>
+                  {t("desktop.sshKeysSettings.leave_this_empty_to_use_the_key_without")}</p>
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="ssh-key-passphrase-confirm">Confirm passphrase</Label>
+                <Label htmlFor="ssh-key-passphrase-confirm">{t("desktop.sshKeysSettings.confirm_passphrase")}</Label>
                 <Input
                   id="ssh-key-passphrase-confirm"
                   type="password"
@@ -631,17 +618,15 @@ function GenerateKeyDialog({
                   }
                 />
                 {passphraseMismatch && draft.confirm.length > 0 ? (
-                  <p className="text-xs text-destructive">Passphrases do not match.</p>
+                  <p className="text-xs text-destructive">{t("desktop.sshKeysSettings.passphrases_do_not_match")}</p>
                 ) : null}
               </div>
             </div>
             <DialogFooter className="mt-4">
               <Button type="button" variant="outline" disabled={busy} onClick={onClose}>
-                Cancel
-              </Button>
+                {t("common.cancel")}</Button>
               <Button type="submit" disabled={busy || !keyFileNameOk(draft.name) || passphraseMismatch}>
-                Create key
-              </Button>
+                {t("desktop.sshKeysSettings.create_key")}</Button>
             </DialogFooter>
           </form>
         ) : null}

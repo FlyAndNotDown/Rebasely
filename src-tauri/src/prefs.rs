@@ -31,6 +31,8 @@ pub struct PanelLayouts {
 #[serde(rename_all = "camelCase")]
 pub struct AppPrefs {
     #[serde(default)]
+    pub language: LanguagePreference,
+    #[serde(default)]
     pub http_proxy: crate::network::HttpProxy,
     #[serde(default)]
     pub avatar_provider: AvatarProvider,
@@ -90,6 +92,17 @@ pub enum AvatarProvider {
     Gitlab,
 }
 
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub enum LanguagePreference {
+    #[serde(rename = "en")]
+    English,
+    #[serde(rename = "zh-CN")]
+    SimplifiedChinese,
+    #[default]
+    #[serde(rename = "system", other)]
+    System,
+}
+
 fn default_p4_refresh_minutes() -> u32 {
     60
 }
@@ -118,6 +131,7 @@ fn default_sidebar_order() -> Vec<String> {
 impl Default for AppPrefs {
     fn default() -> Self {
         Self {
+            language: LanguagePreference::default(),
             http_proxy: crate::network::HttpProxy::default(),
             avatar_provider: AvatarProvider::default(),
             terminal_id: default_terminal_id(),
@@ -169,4 +183,24 @@ pub fn save_prefs(app: &AppHandle, mut prefs: AppPrefs) -> AppResult<AppPrefs> {
             .as_bytes(),
     )?;
     Ok(prefs)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn language_defaults_preserve_older_and_unknown_preferences() {
+        for text in [
+            r#"{"autoFetchMinutes":15}"#,
+            r#"{"language":"fr","autoFetchMinutes":15}"#,
+        ] {
+            let prefs: AppPrefs = serde_json::from_str(text).unwrap();
+            assert_eq!(prefs.language, LanguagePreference::System);
+            assert_eq!(prefs.auto_fetch_minutes, 15);
+        }
+        let prefs: AppPrefs = serde_json::from_str(r#"{"language":"zh-CN"}"#).unwrap();
+        assert_eq!(prefs.language, LanguagePreference::SimplifiedChinese);
+        assert_eq!(serde_json::to_value(prefs).unwrap()["language"], "zh-CN");
+    }
 }

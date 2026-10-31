@@ -1,3 +1,4 @@
+import { t, useTranslation } from "@/i18n";
 import { useState } from "react";
 import { XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -13,6 +14,7 @@ import { useActivities, useGitPick } from "@/state/git-context";
 import type { Activity } from "@/types/git";
 
 export function ActivityMeter() {
+  useTranslation();
   const { activeTabId } = useGitPick(["activeTabId"]);
   const activities = useActivities().filter((activity) => activity.tabId === activeTabId);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -39,7 +41,7 @@ export function ActivityMeter() {
           aria-label={
             activities.length === 1
               ? latest.label
-              : `${activities.length} operations running`
+              : t("desktop.activityMeter.operations", { count: activities.length })
           }
         >
           <ActivityBar activity={latest} />
@@ -52,7 +54,7 @@ export function ActivityMeter() {
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-96">
         <DropdownMenuLabel>
-          {activities.length === 1 ? "Running" : `${activities.length} running`}
+          {activities.length === 1 ? t("desktop.activityMeter.running") : t("desktop.activityMeter.running", { count: activities.length })}
         </DropdownMenuLabel>
         {activities.map((activity) => {
           const expanded = expandedId === activity.id;
@@ -68,7 +70,7 @@ export function ActivityMeter() {
               >
                 <div className="flex items-center gap-2">
                   <div className={cn("min-w-0 flex-1 text-sm", expanded ? "whitespace-pre-wrap break-words" : "truncate")}>
-                    {stopping ? `Cancelling: ${activity.label}` : activity.label}
+                    {stopping ? t("desktop.activityMeter.cancelling", { name: activity.label }) : activity.label}
                   </div>
                   {activity.progress != null ? (
                     <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
@@ -97,7 +99,7 @@ export function ActivityMeter() {
                   size="icon-xs"
                   className="mt-1 mr-1"
                   disabled={stopping}
-                  aria-label={`Cancel ${activity.label}`}
+                  aria-label={t("desktop.activityMeter.cancelNamed", { name: activity.label })}
                   onClick={() => cancel(activity.id)}
                 >
                   <XIcon />
@@ -112,6 +114,7 @@ export function ActivityMeter() {
 }
 
 export function ActivityBar({ activity }: { activity: Activity }) {
+
   const progress = activity.progress;
   return (
     <span className="relative block h-1 min-w-0 flex-1 overflow-hidden rounded-full bg-muted">

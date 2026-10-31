@@ -1,4 +1,5 @@
-import { lazy, Suspense, useSyncExternalStore } from "react";
+import { lazy, Suspense, useEffect, useSyncExternalStore } from "react";
+import { setLanguagePreference, t, useTranslation } from "@/i18n";
 import { CircleAlertIcon } from "lucide-react";
 import { AppHeader } from "@/components/app-header";
 import { AppSidebar } from "@/components/app-sidebar";
@@ -10,14 +11,15 @@ import { RepoKindDialog } from "@/components/repo-kind-dialog";
 import { WelcomeScreen } from "@/components/welcome-screen";
 import { WorkspaceSkeleton } from "@/components/skeletons";
 import { Button } from "@/components/ui/button";
-import { GIT_MISSING } from "@/lib/git";
-import { isP4Missing, P4_MISSING, subscribeP4Availability } from "@/lib/p4";
+import { isP4Missing, subscribeP4Availability } from "@/lib/p4";
 import { WELCOME_TAB_ID, useGitPick } from "@/state/git-context";
 
 const Workspace = lazy(() => import("@/components/workspace").then((module) => ({ default: module.Workspace })));
 const P4Workspace = lazy(() => import("@/components/p4/p4-workspace").then((module) => ({ default: module.P4Workspace })));
 
 export default function App() {
+  const { prefs } = useGitPick(["prefs"]);
+  useEffect(() => { setLanguagePreference(prefs.language); }, [prefs.language]);
   const { activeTab, activeTabId, loading, openPanel, setOpenPanel } = useGitPick([
     "activeTab",
     "activeTabId",
@@ -58,6 +60,7 @@ export default function App() {
 }
 
 function MissingToolsBanner() {
+  useTranslation();
   const { gitMissing, setOpenPanel } = useGitPick(["gitMissing", "setOpenPanel"]);
   const p4Missing = useSyncExternalStore(subscribeP4Availability, isP4Missing, isP4Missing);
   if (!gitMissing && !p4Missing) return null;
@@ -68,12 +71,11 @@ function MissingToolsBanner() {
     >
       <CircleAlertIcon className="size-4 shrink-0" />
       <div className="min-w-0 flex-1">
-        {gitMissing ? <p>{GIT_MISSING}</p> : null}
-        {p4Missing ? <p>{P4_MISSING}</p> : null}
+        {gitMissing ? <p>{t("desktop.dependencies.gitMissing")}</p> : null}
+        {p4Missing ? <p>{t("desktop.dependencies.p4Missing")}</p> : null}
       </div>
       <Button type="button" size="sm" onClick={() => setOpenPanel("settings")}>
-        Settings
-      </Button>
+        {t("common.settings")}</Button>
     </div>
   );
 }
