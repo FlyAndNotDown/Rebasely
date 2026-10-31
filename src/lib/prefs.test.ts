@@ -15,6 +15,15 @@ import { pathsIgnoreCase } from "./format";
 
 const changes = DEFAULT_PANEL_LAYOUTS.changes;
 
+describe("analytics preferences", () => {
+  it("defaults older preferences on and preserves saved opt-outs", () => {
+    expect(defaultPrefs.analyticsEnabled).toBe(true);
+    expect(normalizePrefs({ autoFetchMinutes: 15 }).analyticsEnabled).toBe(true);
+    expect(normalizePrefs({ analyticsEnabled: false }).analyticsEnabled).toBe(false);
+    expect(normalizePrefs({ analyticsEnabled: true }).analyticsEnabled).toBe(true);
+  });
+});
+
 describe("normalizeSidebarOrder", () => {
   it("drops unknown or repeated views and appends the missing ones", () => {
     expect(normalizeSidebarOrder(null)).toEqual(["changes", "history", "stash", "files"]);

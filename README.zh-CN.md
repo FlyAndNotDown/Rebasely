@@ -1,10 +1,20 @@
-![Rebasely — Git + Perforce](site/public/assets/hero.svg)
+<p align="center">
+  <img src="site/public/assets/mark.svg" width="80" height="80" alt="Rebasely 标志">
+</p>
+
+<h1 align="center">Rebasely</h1>
+
+<p align="center">面向 Git 与 Perforce 的开源桌面客户端。</p>
 
 <p align="center">
-  <strong>连接 Git 与 Perforce，看清每一次变更。</strong><br><br>
+  <a href="https://github.com/FlyAndNotDown/Rebasely/releases/latest"><img src="https://img.shields.io/github/v/release/FlyAndNotDown/Rebasely" alt="最新版本"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/FlyAndNotDown/Rebasely" alt="MIT 许可证"></a>
+  <a href="https://github.com/FlyAndNotDown/Rebasely/actions/workflows/check.yml"><img src="https://github.com/FlyAndNotDown/Rebasely/actions/workflows/check.yml/badge.svg?branch=dev&amp;event=pull_request" alt="Check CI"></a>
+</p>
+
+<p align="center">
   <a href="https://flyandnotdown.github.io/Rebasely/zh-CN/">官网</a> ·
   <a href="https://github.com/FlyAndNotDown/Rebasely/releases/latest">下载</a> ·
-  <a href="CONTRIBUTING.md">参与贡献</a> ·
   <a href="README.md">English</a>
 </p>
 
@@ -41,8 +51,12 @@ Tauri 和 Rust 构建。在专注的工作区中审阅细节、理解历史，�
 应用支持英语和简体中文，默认跟随系统语言，也可在设置中手动选择。
 官网优先使用浏览器语言，并提供语言切换入口。没有匹配的语言时使用英语。
 
-本地文件保留在你的设备上。远程操作连接你配置的服务器。
-诊断信息存储在本地，不会自动上传。
+使用情况统计默认开启。Google Analytics 会接收随机安装标识、概括性的应用使用情况与前台使用时长，
+以及基本设备信息，不包含仓库内容、路径或凭据。
+你可以在 **设置 → 常规 → 分享使用情况统计** 中关闭。
+
+诊断文件保留在你的设备上，不会自动上传。
+远程仓库操作连接你配置的服务器。
 
 ## 从源码构建
 

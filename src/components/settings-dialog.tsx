@@ -54,6 +54,8 @@ import { displayPath } from "@/lib/format";
 import { AUTO_FETCH_CHOICES, isGitFileName, isP4FileName, normalizePrefs, sameGitPath, sameP4Path } from "@/lib/prefs";
 import { cn } from "@/lib/utils";
 import { useGitPick } from "@/state/git-context";
+import { useAnalyticsSessionAllowed } from "@/state/use-analytics";
+import { setAnalyticsSessionAllowed } from "@/lib/analytics";
 import type { AppPrefs, TerminalOption, ToolConfig } from "@/types/git";
 import { t, type LanguagePreference , useTranslation} from "@/i18n";
 
@@ -89,6 +91,10 @@ function SettingsForm() {
   useTranslation();
   const { theme, setTheme } = useTheme();
   const { prefs, updatePrefs } = useGitPick(["prefs", "updatePrefs"]);
+  const analyticsAllowed = useAnalyticsSessionAllowed();
+  const [analyticsSaving, setAnalyticsSaving] = useState(false);
+  const [analyticsSaveFailed, setAnalyticsSaveFailed] = useState(false);
+  const analyticsSaveBusy = useRef(false);
   const [section, setSection] = useState<SettingsSection>("general");
   const [reload, setReload] = useState(0);
   const [loaded, setLoaded] = useState(false);
@@ -223,6 +229,22 @@ function SettingsForm() {
     } catch (error) {
       toast.error(errorMessage(error));
       return false;
+    }
+  }
+
+  async function changeAnalytics(enabled: boolean) {
+    if (analyticsSaveBusy.current) return;
+    analyticsSaveBusy.current = true;
+    setAnalyticsSaving(true);
+    setAnalyticsSaveFailed(false);
+    if (!enabled) setAnalyticsSessionAllowed(false);
+    try {
+      const saved = await persistPrefs({ analyticsEnabled: enabled });
+      if (saved) setAnalyticsSessionAllowed(enabled);
+      else setAnalyticsSaveFailed(true);
+    } finally {
+      analyticsSaveBusy.current = false;
+      setAnalyticsSaving(false);
     }
   }
 
@@ -574,6 +596,20 @@ function SettingsForm() {
                       if (!await persistPrefs({ avatarProvider })) throw new Error("Could not save the avatar provider.");
                     }}
                   />
+                </FieldGroup>
+                <FieldGroup title={t("analytics.title")}>
+                  <label className="flex items-center gap-2 text-sm">
+                    <Checkbox
+                      checked={prefs.analyticsEnabled && analyticsAllowed}
+                      disabled={analyticsSaving}
+                      aria-describedby="analytics-disclosure"
+                      onCheckedChange={(checked) => { void changeAnalytics(checked === true); }}
+                    />
+                    <span>{t("analytics.enabled")}</span>
+                  </label>
+                  <p id="analytics-disclosure" className="text-xs leading-relaxed text-muted-foreground">{t("analytics.disclosure")}</p>
+                  {analyticsSaving ? <p className="text-xs text-muted-foreground" role="status">{t("analytics.saving")}</p> : null}
+                  {analyticsSaveFailed ? <p className="text-sm text-destructive" role="alert">{t("analytics.saveFailed")}</p> : null}
                 </FieldGroup>
                 <FieldGroup title={t("desktop.settingsDialog.external_editor")}>
                   <AppPicker

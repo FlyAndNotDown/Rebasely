@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager};
 
 use crate::error::AppResult;
@@ -32,6 +32,8 @@ pub struct PanelLayouts {
 pub struct AppPrefs {
     #[serde(default)]
     pub language: LanguagePreference,
+    #[serde(default = "default_analytics_enabled")]
+    pub analytics_enabled: bool,
     #[serde(default)]
     pub http_proxy: crate::network::HttpProxy,
     #[serde(default)]
@@ -132,6 +134,7 @@ impl Default for AppPrefs {
     fn default() -> Self {
         Self {
             language: LanguagePreference::default(),
+            analytics_enabled: default_analytics_enabled(),
             http_proxy: crate::network::HttpProxy::default(),
             avatar_provider: AvatarProvider::default(),
             terminal_id: default_terminal_id(),
@@ -156,6 +159,10 @@ impl Default for AppPrefs {
     }
 }
 
+fn default_analytics_enabled() -> bool {
+    true
+}
+
 fn prefs_path(app: &AppHandle) -> AppResult<PathBuf> {
     let dir = app.path().app_data_dir().map_err(|err| {
         crate::error::AppError::msg(format!("Could not resolve app data directory: {err}"))
@@ -166,11 +173,22 @@ fn prefs_path(app: &AppHandle) -> AppResult<PathBuf> {
 
 pub fn load_prefs(app: &AppHandle) -> AppResult<AppPrefs> {
     let path = prefs_path(app)?;
-    if !path.exists() {
-        return Ok(AppPrefs::default());
-    }
-    let data = fs::read_to_string(&path)?;
-    Ok(serde_json::from_str(&data).unwrap_or_default())
+    load_prefs_file(&path)
+}
+
+fn load_prefs_file(path: &Path) -> AppResult<AppPrefs> {
+    let data = match fs::read_to_string(path) {
+        Ok(data) => data,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(AppPrefs::default())
+        }
+        Err(error) => return Err(error.into()),
+    };
+    Ok(serde_json::from_str(&data).unwrap_or_else(|_| AppPrefs {
+        // Corrupt saved data cannot establish that an earlier opt-out is absent.
+        analytics_enabled: false,
+        ..AppPrefs::default()
+    }))
 }
 
 pub fn save_prefs(app: &AppHandle, mut prefs: AppPrefs) -> AppResult<AppPrefs> {
@@ -188,6 +206,62 @@ pub fn save_prefs(app: &AppHandle, mut prefs: AppPrefs) -> AppResult<AppPrefs> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn analytics_defaults_on_and_preserves_an_explicit_opt_out() {
+        let older: AppPrefs = serde_json::from_str(r#"{"autoFetchMinutes":15}"#).unwrap();
+        assert!(older.analytics_enabled);
+        assert_eq!(older.auto_fetch_minutes, 15);
+        let disabled: AppPrefs = serde_json::from_str(r#"{"analyticsEnabled":false}"#).unwrap();
+        assert!(!disabled.analytics_enabled);
+        assert_eq!(
+            serde_json::to_value(disabled).unwrap()["analyticsEnabled"],
+            false
+        );
+    }
+
+    #[test]
+    fn saved_preferences_distinguish_first_launch_from_corrupt_data() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("prefs.json");
+        assert!(load_prefs_file(&path).unwrap().analytics_enabled);
+
+        for data in [
+            r#"{"autoFetchMinutes":15}"#,
+            r#"{"analyticsEnabled":true,"autoFetchMinutes":15}"#,
+        ] {
+            fs::write(&path, data).unwrap();
+            let prefs = load_prefs_file(&path).unwrap();
+            assert!(prefs.analytics_enabled);
+            assert_eq!(prefs.auto_fetch_minutes, 15);
+        }
+        fs::write(&path, r#"{"analyticsEnabled":false,"autoFetchMinutes":15}"#).unwrap();
+        let disabled = load_prefs_file(&path).unwrap();
+        assert!(!disabled.analytics_enabled);
+        assert_eq!(disabled.auto_fetch_minutes, 15);
+
+        for data in [
+            "",
+            "{",
+            "null",
+            r#"{"analyticsEnabled":false,"autoFetchMinutes":"invalid"}"#,
+        ] {
+            fs::write(&path, data).unwrap();
+            let recovered = load_prefs_file(&path).unwrap();
+            assert!(!recovered.analytics_enabled);
+            assert_eq!(recovered.auto_fetch_minutes, default_auto_fetch_minutes());
+            assert_eq!(recovered.language, LanguagePreference::System);
+        }
+    }
+
+    #[test]
+    fn unreadable_saved_preferences_are_not_treated_as_a_first_launch() {
+        let directory = tempfile::tempdir().unwrap();
+        assert!(load_prefs_file(directory.path()).is_err());
+        let path = directory.path().join("prefs.json");
+        fs::write(&path, [0xff, 0xfe]).unwrap();
+        assert!(load_prefs_file(&path).is_err());
+    }
 
     #[test]
     fn language_defaults_preserve_older_and_unknown_preferences() {

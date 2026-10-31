@@ -71,6 +71,20 @@ for (const [filename, content] of textFiles) {
 }
 
 const sitemap = files.has("sitemap.xml") ? await readFile(path.join(root, "sitemap.xml"), "utf8") : "";
+const analytics = textFiles.get("analytics/index.html");
+if (!analytics) violations.push("analytics/index.html: missing isolated analytics bridge");
+else {
+  if (!/<meta\s+name="robots"\s+content="noindex, nofollow, noarchive"\s*\/?\s*>/.test(analytics)) {
+    violations.push("analytics/index.html: the bridge must not be indexed");
+  }
+  if (!/<meta\s+name="referrer"\s+content="no-referrer"\s*\/?\s*>/.test(analytics)) {
+    violations.push("analytics/index.html: the bridge must not disclose its parent referrer");
+  }
+  if (/<script\b[^>]*\bsrc="https?:/.test(analytics)) {
+    violations.push("analytics/index.html: remote tags must load only after a validated app handshake");
+  }
+}
+if (/<loc>[^<]*\/analytics\//.test(sitemap)) violations.push("sitemap.xml: the internal analytics bridge must not be listed");
 for (const filename of ["index.html", "en/index.html", "zh-CN/index.html"]) {
   if (!files.has(filename)) violations.push(`${filename}: missing crawlable language page`);
   violations.push(...validateSiteDocument({ html: textFiles.get(filename) ?? "", sitemap, files, filename }));

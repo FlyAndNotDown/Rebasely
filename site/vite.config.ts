@@ -11,6 +11,14 @@ export default defineConfig({
   root,
   base: "./",
   plugins: [react(), tailwindcss(), productMetadata(), prerender(root)],
+  build: {
+    rolldownOptions: {
+      input: {
+        main: path.resolve(root, "index.html"),
+        analytics: path.resolve(root, "analytics/index.html"),
+      },
+    },
+  },
   resolve: {
     alias: { "@": path.resolve(root, "../src") },
   },

@@ -1,10 +1,20 @@
-![Rebasely — a unified version control client](site/public/assets/hero.svg)
+<p align="center">
+  <img src="site/public/assets/mark.svg" width="80" height="80" alt="Rebasely logo">
+</p>
+
+<h1 align="center">Rebasely</h1>
+
+<p align="center">An open-source desktop client for Git and Perforce.</p>
 
 <p align="center">
-  <strong>Git and Perforce. A clearer view of every change.</strong><br><br>
+  <a href="https://github.com/FlyAndNotDown/Rebasely/releases/latest"><img src="https://img.shields.io/github/v/release/FlyAndNotDown/Rebasely" alt="Latest release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/FlyAndNotDown/Rebasely" alt="MIT license"></a>
+  <a href="https://github.com/FlyAndNotDown/Rebasely/actions/workflows/check.yml"><img src="https://github.com/FlyAndNotDown/Rebasely/actions/workflows/check.yml/badge.svg?branch=dev&amp;event=pull_request" alt="Check CI"></a>
+</p>
+
+<p align="center">
   <a href="https://flyandnotdown.github.io/Rebasely/en/">Website</a> ·
   <a href="https://github.com/FlyAndNotDown/Rebasely/releases/latest">Download</a> ·
-  <a href="CONTRIBUTING.md">Contribute</a> ·
   <a href="README.zh-CN.md">Chinese</a>
 </p>
 
@@ -47,8 +57,13 @@ The app supports English and Simplified Chinese, follows your system language
 by default, and lets you choose a language in Settings. The website follows
 your browser language and includes a language switcher. English is the fallback.
 
-Your local files stay on your device. Remote operations connect to the servers
-you configure. Diagnostics are stored locally and are not uploaded automatically.
+Usage analytics is enabled by default. Google Analytics receives a random
+installation ID, coarse app usage and foreground time, and basic device
+information. Repository content, paths, and credentials are excluded. Turn it
+off in **Settings → General → Share usage analytics**.
+
+Diagnostic files stay on your device and are not uploaded automatically.
+Remote repository operations connect to the servers you configure.
 
 ## Build from source
 

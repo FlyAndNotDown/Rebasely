@@ -8,8 +8,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { HoverTip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { laneColor, type GraphRow } from "@/lib/commit-graph";
 import { allHunkIds, demoCommits, demoFiles, type DemoCommit, type DemoFile } from "./demo-data";
 import { DemoFileRow, DiffPane, EmptyPane, PaneHeader } from "./demo-shared";
+import { DEMO_GRAPH_ROW_HEIGHT, demoGraphPath, demoGraphSegments, demoGraphWidth, demoGraphX, layoutDemoHistoryGraph } from "./demo-history-graph";
 
 type GitView = "changes" | "history" | "stash" | "files";
 type FileScope = "unstaged" | "staged";
@@ -72,7 +74,7 @@ export function GitDemo({ onNotice }: { onNotice: (notice: string) => void }) {
 
   function commit() {
     if (!staged.size || !message.trim()) return;
-    const next: DemoCommit = { hash: (0xd31a720 + commits.length - demoCommits.length).toString(16), summary: message.trim(), ref: "main", time: "demo.justNow", fileIds: stagedFiles.map((item) => item.id), hunkIds: [...staged] };
+    const next: DemoCommit = { hash: (0xd31a720 + commits.length - demoCommits.length).toString(16), parents: [commits[0].hash], summary: message.trim(), ref: "main", time: "demo.justNow", fileIds: stagedFiles.map((item) => item.id), hunkIds: [...staged] };
     setCommits((current) => [next, ...current.map((item) => ({ ...item, ref: item.ref === "main" ? undefined : item.ref }))]);
     setRemaining((current) => new Set([...current].filter((id) => !staged.has(id))));
     setStaged(new Set());
@@ -128,6 +130,8 @@ function GitHistory({ commits, selectedHash, onSelect }: { commits: DemoCommit[]
   const [query, setQuery] = useState("");
   const [pickedFile, setPickedFile] = useState("navigation");
   const filtered = commits.filter((commit) => `${commit.summary} ${commit.hash} ${commit.ref ?? ""}`.toLowerCase().includes(query.trim().toLowerCase()));
+  const graph = layoutDemoHistoryGraph(filtered);
+  const graphWidth = demoGraphWidth(graph);
   const selected = filtered.find((commit) => commit.hash === selectedHash) ?? filtered[0];
   const files = demoFiles.filter((file) => selected?.fileIds.includes(file.id));
   const file = files.find((item) => item.id === pickedFile) ?? files[0];
@@ -137,12 +141,24 @@ function GitHistory({ commits, selectedHash, onSelect }: { commits: DemoCommit[]
       <div className="demo-history-main">
         <PaneHeader><span>{t("demo.history")}</span><Input aria-label={t("demo.filterCommitsLabel")} placeholder={t("demo.filterCommits")} value={query} onChange={(event) => setQuery(event.target.value)} className="demo-history-filter" /></PaneHeader>
         <ScrollArea className="demo-history-list" gutter={false}>
-          {filtered.map((commit) => <button type="button" key={commit.hash} className={cn("demo-commit-row", selected?.hash === commit.hash && "selected")} aria-pressed={selected?.hash === commit.hash} onClick={() => onSelect(commit.hash)}><span className={cn("demo-graph", commit.graph)} aria-hidden="true"><i /><b /></span><span className="demo-commit-summary">{commit.ref ? <span className="demo-ref">{commit.ref}</span> : null}{commit.summary}</span><code>{commit.hash}</code><time>{t(commit.time)}</time></button>)}
+          {filtered.map((commit, index) => <button type="button" key={commit.hash} className={cn("demo-commit-row", selected?.hash === commit.hash && "selected")} aria-pressed={selected?.hash === commit.hash} onClick={() => onSelect(commit.hash)}><DemoHistoryGraph row={graph[index]} previous={graph[index - 1]} width={graphWidth} selected={selected?.hash === commit.hash} /><span className="demo-commit-summary">{commit.ref ? <span className="demo-ref">{commit.ref}</span> : null}{commit.summary}</span><code>{commit.hash}</code><time>{t(commit.time)}</time></button>)}
           {!filtered.length ? <p className="demo-no-results">{t("demo.noCommits")}</p> : null}
         </ScrollArea>
         {selected && file ? <div className="demo-history-detail"><div className="demo-history-files"><PaneHeader>{t("demo.changedFilesLabel")} <span>{files.length}</span></PaneHeader>{files.map((item) => <DemoFileRow key={item.id} file={item} active={file.id === item.id} onSelect={() => setPickedFile(item.id)} />)}<div className="demo-commit-meta"><strong>{selected.summary}</strong><span>{selected.hash} · Alice · {t(selected.time)}</span></div></div><div className="demo-history-diff"><div className="demo-mobile-file-picker"><label htmlFor="demo-history-file">{t("demo.changedFile")}</label><select id="demo-history-file" value={file.id} onChange={(event) => setPickedFile(event.target.value)}>{files.map((item) => <option key={item.id} value={item.id}>{item.path}</option>)}</select></div><DiffPane file={file} hunks={selected.hunkIds ? file.hunks.filter((hunk) => selected.hunkIds?.includes(hunk.id)) : file.hunks} /></div></div> : <EmptyPane title={t("demo.noCommits")} detail={t("demo.tryCommit")} />}
       </div>
     </div>
+  );
+}
+
+function DemoHistoryGraph({ row, previous, width, selected }: { row: GraphRow; previous?: GraphRow; width: number; selected: boolean }) {
+  const color = laneColor(row.lane);
+  return (
+    <span className="demo-history-graph" style={{ width }} aria-hidden="true">
+      <svg width={width} height="100%" viewBox={`0 0 ${width} ${DEMO_GRAPH_ROW_HEIGHT}`} preserveAspectRatio="none">
+        {demoGraphSegments(row, previous).map((segment, index) => <path key={index} d={demoGraphPath(segment)} fill="none" stroke={laneColor(segment.color)} strokeWidth="1.5" vectorEffect="non-scaling-stroke" />)}
+        <circle cx={demoGraphX(row.lane)} cy={DEMO_GRAPH_ROW_HEIGHT / 2} r="3" fill={selected ? color : "var(--background)"} stroke={color} strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+      </svg>
+    </span>
   );
 }
 

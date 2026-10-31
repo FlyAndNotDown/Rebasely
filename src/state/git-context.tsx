@@ -139,6 +139,7 @@ interface GitContextValue {
   /** An app-wide overlay that any view or the command palette can open. */
   openPanel: Panel | null;
   prefs: AppPrefs;
+  prefsReady: boolean;
   /** No usable Git executable is selected. */
   gitMissing: boolean;
   /** A folder that is both a Git repository and a Perforce workspace. */
@@ -323,12 +324,14 @@ export function GitProvider({ children }: { children: ReactNode }) {
   const [publishPrompt, setPublishPrompt] = useState<PublishPrompt | null>(null);
   const [openPanel, setOpenPanel] = useState<Panel | null>(null);
   const [prefs, setPrefs] = useState<AppPrefs>(defaultPrefs);
+  const [prefsReady, setPrefsReady] = useState(false);
   const [gitMissing, setGitMissing] = useState(false);
   const [kindPrompt, setKindPromptState] = useState<RepoKindPrompt | null>(null);
   const kindPromptRef = useRef<RepoKindPrompt | null>(null);
   const restoredRef = useRef(false);
   const refreshAfterReplayRef = useRef<(tabId?: string) => Promise<void>>(async () => {});
   const prefsRef = useRef(prefs);
+  const prefsRevisionRef = useRef(0);
   const persistPrefsTimer = useRef<number | null>(null);
 
   const tabsRef = useRef(tabs);
@@ -533,17 +536,24 @@ export function GitProvider({ children }: { children: ReactNode }) {
   }, [setOpenPanel]);
 
   useEffect(() => {
+    const prefsRevision = prefsRevisionRef.current;
+    const preferences = gitApi.getPrefs().then((loadedPrefs) => {
+      if (prefsRevision !== prefsRevisionRef.current) return;
+      const nextPrefs = normalizePrefs(loadedPrefs);
+      prefsRef.current = nextPrefs;
+      setPrefs(nextPrefs);
+      setPrefsReady(true);
+    }).catch(() => {
+      // Keep analytics stopped if saved preferences could not be read.
+    });
     void (async () => {
       try {
-        const [recentsList, session, loadedPrefs, executables] = await Promise.all([
+        const [recentsList, session, , executables] = await Promise.all([
           gitApi.listRecents(),
           gitApi.loadSession(),
-          gitApi.getPrefs().catch(() => defaultPrefs),
+          preferences,
           gitApi.gitExecutables().catch(() => null),
         ]);
-        const nextPrefs = normalizePrefs(loadedPrefs);
-        prefsRef.current = nextPrefs;
-        setPrefs(nextPrefs);
         setRecents(recentsList);
         restoreSession(session, recentsList);
         if (executables) {
@@ -2744,6 +2754,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
   );
 
   const flushPrefs = useCallback(async (next: AppPrefs) => {
+    prefsRevisionRef.current += 1;
     if (persistPrefsTimer.current !== null) {
       window.clearTimeout(persistPrefsTimer.current);
       persistPrefsTimer.current = null;
@@ -2751,6 +2762,7 @@ export function GitProvider({ children }: { children: ReactNode }) {
     const saved = normalizePrefs(await gitApi.setPrefs(next));
     prefsRef.current = saved;
     setPrefs(saved);
+    setPrefsReady(true);
     try {
       const executables = await gitApi.gitExecutables();
       setGitMissing(executables.active === null);
@@ -2885,12 +2897,13 @@ export function GitProvider({ children }: { children: ReactNode }) {
       commitDraft: session?.commitDraft ?? null,
       openPanel,
       prefs,
+      prefsReady,
       gitMissing,
       kindPrompt,
       loading,
       publishPrompt,
     }),
-    [activeTab, activeTabId, gitMissing, kindPrompt, loading, openPanel, prefs, publishPrompt, recents, session, tabs],
+    [activeTab, activeTabId, gitMissing, kindPrompt, loading, openPanel, prefs, prefsReady, publishPrompt, recents, session, tabs],
   );
 
   // Every action reads refs rather than render state, so this object keeps its

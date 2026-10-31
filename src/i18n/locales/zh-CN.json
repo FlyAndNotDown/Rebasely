@@ -1,4 +1,11 @@
 {
+  "analytics": {
+    "title": "使用情况统计",
+    "enabled": "分享使用情况统计",
+    "saving": "正在保存…",
+    "disclosure": "默认开启。Google Analytics 会接收随机安装标识、基本设备信息和概括性的应用使用情况，不包含仓库内容、路径或凭据。你可以随时关闭。",
+    "saveFailed": "无法保存你的选择。本次运行期间，统计保持关闭。"
+  },
   "validation": {
     "proxy": {
       "validUrl": "请输入有效的代理地址。",
@@ -338,7 +345,7 @@
       "manual_proxy": "手动代理",
       "could_not_save_the_proxy_your_entries_are": "无法保存代理。已保留输入内容，请重试。",
       "client_network": "客户端网络",
-      "applies_to_application_http_requests_git_and_perforce": "适用于应用的 HTTP 请求。Git 和 Perforce 使用各自的设置。系统模式使用静态 HTTP/HTTPS 代理；PAC 或仅 SOCKS 配置请使用手动模式。",
+      "applies_to_application_http_requests_git_and_perforce": "适用于更新检查、头像等内置 HTTP 请求。Git 和 Perforce 使用各自的设置。使用统计在独立的 WebView 中运行，遵循操作系统和 WebView 的网络设置。系统模式使用静态 HTTP/HTTPS 代理；PAC 或仅 SOCKS 配置请使用手动模式。",
       "about_client_network_settings": "关于客户端网络设置",
       "proxy": "代理",
       "proxy_url": "代理地址",

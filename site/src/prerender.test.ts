@@ -7,13 +7,16 @@ describe("website prerender", () => {
   it("renders product facts and working download URLs without a browser", async () => {
     const html = await render();
     expect(html).toContain('<main id="main"');
-    expect(html).toContain("Every change.");
+    expect(html).toContain(siteResources.en["hero.title"].split("\n")[0]);
     expect(html).toContain("macOS Apple Silicon");
     expect(html).toContain("Windows x64");
     expect(html).toContain("Git and Perforce");
     expect(html).toContain("open source under the MIT License.");
     expect(html.split(`href="${LATEST_RELEASE_URL}"`)).toHaveLength(4);
     expect(html).toContain("Enable JavaScript to try the interactive demo.");
+    expect(html).toContain('id="demo-commit-message"');
+    expect(html).not.toContain('id="demo-changelist-description"');
+    expect(html).not.toContain(siteResources.en["demo.loadingPerforce"]);
     expect(html).not.toMatch(/<script\b/i);
   });
 

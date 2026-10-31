@@ -13,11 +13,13 @@ import { WorkspaceSkeleton } from "@/components/skeletons";
 import { Button } from "@/components/ui/button";
 import { isP4Missing, subscribeP4Availability } from "@/lib/p4";
 import { WELCOME_TAB_ID, useGitPick } from "@/state/git-context";
+import { useAnalytics } from "@/state/use-analytics";
 
 const Workspace = lazy(() => import("@/components/workspace").then((module) => ({ default: module.Workspace })));
 const P4Workspace = lazy(() => import("@/components/p4/p4-workspace").then((module) => ({ default: module.P4Workspace })));
 
 export default function App() {
+  useAnalytics();
   const { prefs } = useGitPick(["prefs"]);
   useEffect(() => { setLanguagePreference(prefs.language); }, [prefs.language]);
   const { activeTab, activeTabId, loading, openPanel, setOpenPanel } = useGitPick([
