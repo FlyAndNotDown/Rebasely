@@ -5,7 +5,6 @@ import {
   ChevronRightIcon,
   CodeXmlIcon,
   CommandIcon,
-  FolderGit2Icon,
   GitBranchIcon,
   LanguagesIcon,
   LayersIcon,
@@ -114,7 +113,8 @@ export function Site({ rootPage = false }: { rootPage?: boolean }) {
         <nav className="site-navigation" aria-label={t("nav.main")}>
           <Button variant="ghost" size="sm" asChild className="overview-link"><a href="#features">{t("nav.features")}</a></Button>
           <Button variant="ghost" size="sm" asChild className="overview-link"><a href="#workflows">{t("nav.workflow")}</a></Button>
-          <HoverTip label={t("nav.source")}><Button variant="ghost" size="icon-sm" asChild><a href={REPOSITORY} aria-label={t("nav.source")}><CodeXmlIcon /></a></Button></HoverTip>
+          <Button variant="ghost" size="sm" asChild className="overview-link"><a href="#start">{t("nav.start")}</a></Button>
+          <HoverTip label={t("nav.source")}><Button variant="ghost" size="icon-sm" asChild className="site-source-link"><a href={REPOSITORY} aria-label={t("nav.source")}><CodeXmlIcon /></a></Button></HoverTip>
           <LanguageMenu rootPage={rootPage} />
           <ThemeMenu />
           <Button size="sm" asChild className="site-nav-download"><a href={LATEST_RELEASE_URL} onClick={openDownload}>{t("nav.download")}<ArrowDownToLineIcon /></a></Button>
@@ -123,60 +123,104 @@ export function Site({ rootPage = false }: { rootPage?: boolean }) {
 
       <main id="main" className="site-container">
         <section className="site-hero" aria-labelledby="hero-title">
-          <div className="site-hero-copy">
-            <p className="site-eyebrow site-hero-eyebrow"><span aria-hidden="true" />{t("hero.eyebrow")}</p>
-            <h1 id="hero-title">{t("hero.title").split("\n").map((line, index) => <span key={line} className={index ? "site-hero-title-secondary" : undefined}>{line}</span>)}</h1>
-            <p className="site-hero-description">{t("hero.description")}</p>
-            <div className="site-actions">
-              <Button size="lg" asChild><a href={LATEST_RELEASE_URL} onClick={openDownload}><ArrowDownToLineIcon />{t("hero.download")}</a></Button>
-              <Button variant="ghost" size="lg" asChild><a href="#features">{t("hero.explore")}<ChevronRightIcon /></a></Button>
-            </div>
-            <p className="site-platforms">{t("hero.platforms")}</p>
+          <p className="site-eyebrow">{t("hero.eyebrow")}</p>
+          <h1 id="hero-title">{t("hero.title").split("\n").map((line, index) => <span key={line} className={index ? "site-hero-title-secondary" : undefined}>{line}</span>)}</h1>
+          <p className="site-hero-description">{t("hero.description")}</p>
+          <div className="site-actions">
+            <Button size="lg" asChild><a href={LATEST_RELEASE_URL} onClick={openDownload}><ArrowDownToLineIcon />{t("hero.download")}</a></Button>
+            <Button variant="outline" size="lg" asChild><a href="#features">{t("hero.explore")}<ChevronRightIcon /></a></Button>
           </div>
-          <div className="site-hero-map" aria-hidden="true">
-            <svg viewBox="0 0 240 300" fill="none"><path d="M74 0v300M166 0v80c0 44-92 48-92 92M166 300v-64c0-44-92-48-92-92" /><circle cx="74" cy="42" r="7" /><circle cx="166" cy="80" r="7" /><circle cx="74" cy="145" r="9" /><circle cx="166" cy="236" r="7" /><circle cx="74" cy="272" r="7" /></svg>
-            <span className="site-route-label route-review">{t("hero.stage")}</span><span className="site-route-label route-prepare">{t("hero.commit")}</span><span className="site-route-label route-understand">{t("hero.history")}</span>
-          </div>
-          <div className="site-hero-footnote"><span>Git <span aria-hidden="true">+</span> Perforce</span><p>{t("hero.note")}</p><a href={REPOSITORY}>GitHub <ArrowUpRightIcon /></a></div>
+          <p className="site-platforms"><span className="site-supported-platforms">{t("hero.platforms")}</span><span className="site-platform-separator" aria-hidden="true">·</span><span className="site-license-note">{t("hero.note")}</span></p>
         </section>
 
         <section id="features" className="site-workspace" aria-labelledby="workspace-title">
-          <div className="site-preview-label"><div><p className="site-eyebrow">{t("preview.eyebrow")}</p><h2 id="workspace-title">{t("preview.title")}</h2></div><span><i aria-hidden="true" />{t("preview.label")}</span></div>
-          <noscript className="site-preview-caption">{t("preview.noscript")}</noscript>
-          <WorkspacePreview />
+          <div className="site-preview-label">
+            <div><p className="site-eyebrow">{t("preview.eyebrow")}</p><h2 id="workspace-title">{t("preview.title")}</h2></div>
+            <p>{t("preview.intro")}</p>
+          </div>
+          <div className="site-preview-frame">
+            <noscript className="site-preview-caption">{t("preview.noscript")}</noscript>
+            <WorkspacePreview />
+          </div>
+          <div className="site-preview-guides">
+            <div><GitBranchIcon aria-hidden="true" /><p><strong>Git</strong>{t("preview.gitGuide")}</p></div>
+            <div><LayersIcon aria-hidden="true" /><p><strong>Perforce</strong>{t("preview.p4Guide")}</p></div>
+          </div>
           <p className="site-preview-caption">{t("preview.caption")}</p>
         </section>
 
-        <section className="site-features" aria-label={t("features.label")}>
-          <Feature icon={GitBranchIcon} title={t("features.review.title")}>{t("features.review.body")}</Feature>
-          <Feature icon={FolderGit2Icon} title={t("features.history.title")}>{t("features.history.body")}</Feature>
-          <Feature icon={CommandIcon} title={t("features.context.title")}>{t("features.context.body")}</Feature>
-        </section>
-
-        <section id="workflows" className="site-workflows" aria-labelledby="workflows-title">
-          <div className="site-section-intro"><p className="site-eyebrow">{t("workflow.eyebrow")}</p><h2 id="workflows-title">{t("workflow.title")}</h2><p>{t("workflow.intro")}</p></div>
+        <section id="workflows" className="site-workflows site-section" aria-labelledby="workflows-title">
+          <div className="site-section-intro">
+            <p className="site-eyebrow">{t("workflow.eyebrow")}</p>
+            <h2 id="workflows-title">{t("workflow.title")}</h2>
+            <p>{t("workflow.intro")}</p>
+          </div>
           <div className="site-workflow-pair">
-            {([{ kind: "git", label: "Git", Icon: GitBranchIcon }, { kind: "p4", label: "Perforce", Icon: LayersIcon }] as const).map(({ kind, label, Icon }) => <article key={kind} className="site-workflow-card"><div className="site-workflow-top"><Icon /><span>{label}</span><code>{kind === "git" ? "01" : "02"}</code></div><p className="site-eyebrow">{t(`workflow.${kind}.tag`)}</p><h3>{t(`workflow.${kind}.title`)}</h3><p>{t(`workflow.${kind}.body`)}</p><ul>{[1, 2, 3].map((point) => <li key={point}><span aria-hidden="true" />{t(`workflow.${kind}.point${point}`)}</li>)}</ul></article>)}
+            <WorkflowPath kind="git" />
+            <WorkflowPath kind="p4" />
           </div>
         </section>
 
-        <section className="site-principles" aria-labelledby="principles-title"><div className="site-section-intro"><p className="site-eyebrow">{t("principles.eyebrow")}</p><h2 id="principles-title">{t("principles.title")}</h2></div><div className="site-principle-list">{([{ kind: "cli", Icon: TerminalIcon }, { kind: "local", Icon: ShieldCheckIcon }, { kind: "open", Icon: CodeXmlIcon }] as const).map(({ kind, Icon }) => <article key={kind}><Icon /><div><h3>{t(`principles.${kind}.title`)}</h3><p>{t(`principles.${kind}.body`)}</p></div></article>)}</div></section>
+        <section className="site-capabilities site-section" aria-labelledby="capabilities-title">
+          <div className="site-section-intro">
+            <p className="site-eyebrow">{t("capabilities.eyebrow")}</p>
+            <h2 id="capabilities-title">{t("capabilities.title")}</h2>
+            <p>{t("capabilities.intro")}</p>
+          </div>
+          <table className="site-capability-table">
+            <caption className="sr-only">{t("capabilities.caption")}</caption>
+            <thead><tr><th scope="col">{t("capabilities.category")}</th><th scope="col"><GitBranchIcon aria-hidden="true" />Git</th><th scope="col"><LayersIcon aria-hidden="true" />Perforce</th></tr></thead>
+            <tbody>{["review", "organize", "history", "advanced", "tools"].map((kind) => <tr key={kind}>
+              <th scope="row">{t(`capabilities.${kind}.title`)}</th>
+              <td data-label="Git">{t(`capabilities.${kind}.git`)}</td>
+              <td data-label="Perforce">{t(`capabilities.${kind}.p4`)}</td>
+            </tr>)}</tbody>
+          </table>
+        </section>
 
-        <section className="site-get-started" aria-labelledby="start-title"><div className="site-section-intro"><p className="site-eyebrow">{t("start.eyebrow")}</p><h2 id="start-title">{t("start.title")}</h2></div><ol>{[1, 2, 3].map((step) => <li key={step}><span>0{step}</span><div><h3>{t(`start.step${step}.title`)}</h3><p>{t(`start.step${step}.body`)}</p></div></li>)}</ol></section>
+        <section className="site-tooling site-section" aria-labelledby="tooling-title">
+          <div className="site-section-intro"><p className="site-eyebrow">{t("tooling.eyebrow")}</p><h2 id="tooling-title">{t("tooling.title")}</h2><p>{t("tooling.intro")}</p></div>
+          <div className="site-tool-list">
+            {([{ kind: "cli", Icon: TerminalIcon }, { kind: "editor", Icon: CodeXmlIcon }, { kind: "access", Icon: ShieldCheckIcon }, { kind: "comfort", Icon: CommandIcon }] as const).map(({ kind, Icon }) => <article key={kind}><Icon aria-hidden="true" /><div><h3>{t(`tooling.${kind}.title`)}</h3><p>{t(`tooling.${kind}.body`)}</p></div></article>)}
+          </div>
+          <p className="site-local-note">{t("principles.local.body")} {t("principles.open.body")}</p>
+        </section>
 
-        <section className="site-faq" aria-labelledby="faq-title"><div className="site-section-intro"><p className="site-eyebrow">{t("faq.eyebrow")}</p><h2 id="faq-title">{t("faq.title")}</h2></div><div>{["systems", "tools", "accounts", "demo"].map((key) => <details key={key}><summary>{t(`faq.${key}.question`)}<ChevronRightIcon /></summary><p>{t(`faq.${key}.answer`)}</p></details>)}</div></section>
+        <section id="start" className="site-get-started site-section" aria-labelledby="start-title">
+          <div className="site-section-intro"><p className="site-eyebrow">{t("start.eyebrow")}</p><h2 id="start-title">{t("start.title")}</h2></div>
+          <ol>{[1, 2, 3].map((step) => <li key={step}><span>0{step}</span><h3>{t(`start.step${step}.title`)}</h3><p>{t(`start.step${step}.body`)}</p>{step === 2 ? <div className="site-tool-links"><a href="https://git-scm.com/downloads/">Git<ArrowUpRightIcon aria-hidden="true" /></a><a href="https://www.perforce.com/downloads/helix-command-line-client-p4">Perforce CLI<ArrowUpRightIcon aria-hidden="true" /></a></div> : null}</li>)}</ol>
+        </section>
 
-        <section className="site-download" aria-labelledby="download-title"><AppMark className="site-download-mark size-12" iconClassName="size-6" /><div><h2 id="download-title">{t("download.title")}</h2><p>{t("download.body")}</p></div><Button size="lg" asChild><a href={LATEST_RELEASE_URL} onClick={openDownload}>{t("download.action")}<ArrowDownToLineIcon /></a></Button></section>
+        <section className="site-faq site-section" aria-labelledby="faq-title">
+          <div className="site-section-intro"><p className="site-eyebrow">{t("faq.eyebrow")}</p><h2 id="faq-title">{t("faq.title")}</h2></div>
+          <div>{["systems", "tools", "accounts", "demo"].map((key) => <details key={key}><summary>{t(`faq.${key}.question`)}<ChevronRightIcon aria-hidden="true" /></summary><p>{t(`faq.${key}.answer`)}</p></details>)}</div>
+        </section>
+
+        <section className="site-download" aria-labelledby="download-title">
+          <div><p className="site-eyebrow">Rebasely</p><h2 id="download-title">{t("download.title")}</h2><p>{t("download.body")}</p></div>
+          <Button size="lg" asChild><a href={LATEST_RELEASE_URL} onClick={openDownload}>{t("download.action")}<ArrowDownToLineIcon /></a></Button>
+        </section>
       </main>
 
-      <footer className="site-footer site-container"><div className="site-footer-brand"><span>Rebasely</span><p>{t("footer.tagline")}</p></div><nav aria-label={t("nav.footer")}><a href={`${REPOSITORY}/issues`}>{t("nav.feedback")}</a><a href={`${REPOSITORY}/blob/dev/CONTRIBUTING.md`}>{t("nav.contribute")}</a><a href={`${REPOSITORY}/blob/dev/LICENSE`}>{t("nav.license")}</a></nav><div className="site-footer-languages">{SITE_LOCALES.map((locale) => <a key={locale} href={localeHref(locale, rootPage)} hrefLang={locale} onClick={() => rememberSiteLanguage(locale)}>{t(`language.${locale}`)}</a>)}</div></footer>
+      <footer className="site-footer site-container">
+        <div className="site-footer-brand"><a href={rootPage ? "./" : "../"}>Rebasely</a><p>{t("footer.tagline")}</p></div>
+        <nav aria-label={t("nav.footer")}><a href={`${REPOSITORY}/issues`}>{t("nav.feedback")}</a><a href={`${REPOSITORY}/blob/dev/CONTRIBUTING.md`}>{t("nav.contribute")}</a><a href={`${REPOSITORY}/blob/dev/LICENSE`}>{t("nav.license")}</a></nav>
+        <div className="site-footer-languages">{SITE_LOCALES.map((locale) => <a key={locale} href={localeHref(locale, rootPage)} hrefLang={locale} onClick={() => rememberSiteLanguage(locale)}>{t(`language.${locale}`)}</a>)}</div>
+      </footer>
       <DownloadDialog open={downloadOpen} onOpenChange={changeDownloadOpen} returnFocusTo={downloadTrigger} state={downloads} onRefresh={() => loadDownloads(true)} />
     </>
   );
 }
 
-function Feature({ icon: Icon, title, children }: { icon: typeof GitBranchIcon; title: string; children: React.ReactNode }) {
-  return <div className="site-feature"><Icon aria-hidden="true" /><h3>{title}</h3><p>{children}</p></div>;
+function WorkflowPath({ kind }: { kind: "git" | "p4" }) {
+  const { t } = useTranslation();
+  const Icon = kind === "git" ? GitBranchIcon : LayersIcon;
+  return <article className="site-workflow-path">
+    <div className="site-workflow-heading"><Icon aria-hidden="true" /><span>{kind === "git" ? "Git" : "Perforce"}</span><p>{t(`workflow.${kind}.tag`)}</p></div>
+    <h3>{t(`workflow.${kind}.title`)}</h3>
+    <p>{t(`workflow.${kind}.body`)}</p>
+    <ol>{[1, 2, 3].map((step) => <li key={step}><span>{step}</span><div><h4>{t(`workflow.${kind}.step${step}.title`)}</h4><p>{t(`workflow.${kind}.step${step}.body`)}</p></div></li>)}</ol>
+  </article>;
 }
 
 function LanguageMenu({ rootPage }: { rootPage: boolean }) {

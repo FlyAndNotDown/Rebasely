@@ -78,20 +78,20 @@ export const demoFiles: DemoFile[] = [
 
 export type DemoCommit = {
   hash: string;
+  parents: string[];
   summary: string;
   ref?: string;
   time: string;
-  graph?: "merge" | "side";
   fileIds: string[];
   hunkIds?: string[];
 };
 
 export const demoCommits: DemoCommit[] = [
-  { hash: "a6f203d", summary: "Refine workspace navigation", ref: "main", time: "demo.time.twoMinutes", fileIds: ["navigation", "test"] },
-  { hash: "9e72bc1", summary: "Merge branch 'feature/search'", graph: "merge", time: "demo.time.eighteenMinutes", fileIds: ["navigation"] },
-  { hash: "c4d810a", summary: "Keep search results in view", ref: "feature/search", graph: "side", time: "demo.time.thirtyTwoMinutes", fileIds: ["navigation"] },
-  { hash: "0b73e6f", summary: "Follow the system appearance", time: "demo.time.oneHour", fileIds: ["theme"] },
-  { hash: "d891e3a", summary: "Cover keyboard navigation", time: "demo.time.twoHours", fileIds: ["test"] },
+  { hash: "a6f203d", parents: ["9e72bc1"], summary: "Refine workspace navigation", ref: "main", time: "demo.time.twoMinutes", fileIds: ["navigation", "test"] },
+  { hash: "9e72bc1", parents: ["0b73e6f", "c4d810a"], summary: "Merge branch 'feature/search'", time: "demo.time.eighteenMinutes", fileIds: ["navigation"] },
+  { hash: "c4d810a", parents: ["0b73e6f"], summary: "Keep search results in view", ref: "feature/search", time: "demo.time.thirtyTwoMinutes", fileIds: ["navigation"] },
+  { hash: "0b73e6f", parents: ["d891e3a"], summary: "Follow the system appearance", time: "demo.time.oneHour", fileIds: ["theme"] },
+  { hash: "d891e3a", parents: [], summary: "Cover keyboard navigation", time: "demo.time.twoHours", fileIds: ["test"] },
 ];
 
 export const allHunkIds = demoFiles.flatMap((file) => file.hunks.map((hunk) => hunk.id));
