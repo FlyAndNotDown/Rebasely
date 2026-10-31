@@ -1,9 +1,12 @@
 mod askpass;
+mod avatars;
+mod diagnostics;
 mod editor;
 mod error;
 mod fsutil;
 mod git;
 mod locate;
+mod network;
 mod p4;
 mod platform;
 mod prefs;
@@ -59,7 +62,10 @@ where
     T: Send + 'static,
     F: FnOnce(&mut git::Repository) -> AppResult<T> + Send + 'static,
 {
-    blocking(move || with_repo(&path, f)).await
+    let started = std::time::Instant::now();
+    let result = blocking(move || with_repo(&path, f)).await;
+    diagnostics::record_slow_or_failed(diagnostics::Code::GitOperation, started, &result);
+    result
 }
 
 #[tauri::command]
@@ -75,6 +81,42 @@ async fn forget_recent(path: String, app: AppHandle) -> AppResult<Vec<RecentRepo
 #[tauri::command]
 async fn load_session(app: AppHandle) -> AppResult<AppSession> {
     blocking(move || session::load_session(&app)).await
+}
+
+#[tauri::command]
+async fn get_diagnostic_summary(app: AppHandle) -> AppResult<diagnostics::Summary> {
+    blocking(move || diagnostics::summary(&app)).await
+}
+
+#[tauri::command]
+async fn export_diagnostic_logs(
+    destination: String,
+    app: AppHandle,
+) -> AppResult<diagnostics::ExportResult> {
+    blocking(move || diagnostics::export(&app, Path::new(&destination))).await
+}
+
+#[tauri::command]
+async fn open_diagnostic_directory(app: AppHandle) -> AppResult<()> {
+    blocking(move || diagnostics::open_directory(&app)).await
+}
+
+#[tauri::command]
+async fn open_diagnostic_issues() -> AppResult<()> {
+    blocking(diagnostics::open_issues).await
+}
+
+#[tauri::command]
+async fn get_author_avatar(
+    email: String,
+    provider: prefs::AvatarProvider,
+    app: AppHandle,
+) -> AppResult<Option<String>> {
+    let prefs = blocking(move || prefs::load_prefs(&app)).await?;
+    if prefs.avatar_provider != provider {
+        return Ok(None);
+    }
+    Ok(avatars::lookup(prefs, email).await)
 }
 
 // Kept synchronous so rapid saves land in the order they were sent.
@@ -1404,6 +1446,7 @@ fn set_prefs(mut prefs: AppPrefs, app: AppHandle) -> AppResult<AppPrefs> {
     prefs.p4_user = clean_setting(&prefs.p4_user);
     prefs.p4_charset = p4::normalize_charset(&prefs.p4_charset);
     let saved = prefs::save_prefs(&app, prefs)?;
+    avatars::preferences_changed(&saved);
     git::set_git_executable(&saved.git_path);
     p4::set_p4_executable(&saved.p4_path);
     Ok(saved)
@@ -1581,12 +1624,18 @@ pub fn run() {
             }
             let window = webview.window();
             reveal_main_window(|| {
+                diagnostics::record(
+                    diagnostics::Code::UiReady,
+                    diagnostics::Status::Success,
+                    None,
+                );
                 let _ = window.show();
                 let _ = window.set_focus();
                 let _ = webview.set_focus();
             });
         })
         .setup(|app| {
+            let _ = diagnostics::initialize(app.handle());
             if let Ok(prefs) = prefs::load_prefs(app.handle()) {
                 git::set_git_executable(&prefs.git_path);
                 p4::set_p4_executable(&prefs.p4_path);
@@ -1617,6 +1666,11 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            get_author_avatar,
+            get_diagnostic_summary,
+            export_diagnostic_logs,
+            open_diagnostic_directory,
+            open_diagnostic_issues,
             updater::get_update_state,
             updater::check_for_update,
             updater::install_update,

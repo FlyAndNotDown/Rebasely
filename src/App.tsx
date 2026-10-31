@@ -10,7 +10,6 @@ import { RepoKindDialog } from "@/components/repo-kind-dialog";
 import { WelcomeScreen } from "@/components/welcome-screen";
 import { WorkspaceSkeleton } from "@/components/skeletons";
 import { Button } from "@/components/ui/button";
-import { WindowResizeBorders } from "@/components/window-controls";
 import { GIT_MISSING } from "@/lib/git";
 import { isP4Missing, P4_MISSING, subscribeP4Availability } from "@/lib/p4";
 import { WELCOME_TAB_ID, useGitPick } from "@/state/git-context";
@@ -30,7 +29,6 @@ export default function App() {
 
   return (
     <div className="relative flex h-full min-h-0 flex-col bg-background">
-      <WindowResizeBorders />
       <AppHeader />
       <MissingToolsBanner />
       <AppUpdateBanner />

@@ -1,54 +1,13 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { cn } from "@/lib/utils";
-
-type ResizeDirection =
-  | "East"
-  | "North"
-  | "NorthEast"
-  | "NorthWest"
-  | "South"
-  | "SouthEast"
-  | "SouthWest"
-  | "West";
-
-const RESIZE_EDGES: { direction: ResizeDirection; className: string }[] = [
-  { direction: "North", className: "top-0 right-2 left-2 h-1 cursor-ns-resize" },
-  { direction: "South", className: "right-2 bottom-0 left-2 h-1 cursor-ns-resize" },
-  { direction: "West", className: "top-2 bottom-2 left-0 w-1 cursor-ew-resize" },
-  { direction: "East", className: "top-2 right-0 bottom-2 w-1 cursor-ew-resize" },
-  { direction: "NorthWest", className: "top-0 left-0 size-2 cursor-nw-resize" },
-  { direction: "NorthEast", className: "top-0 right-0 size-2 cursor-ne-resize" },
-  { direction: "SouthWest", className: "bottom-0 left-0 size-2 cursor-sw-resize" },
-  { direction: "SouthEast", className: "right-0 bottom-0 size-2 cursor-se-resize" },
-];
-
-function isLinuxDesktop() {
-  if (typeof navigator === "undefined") return false;
-  const agent = navigator.userAgent;
-  return /linux/i.test(agent) && !/android/i.test(agent);
-}
-
-/** Undecorated windows on Linux cannot be resized from the window frame. */
-export function WindowResizeBorders() {
-  if (!isLinuxDesktop()) return null;
-  return (
-    <>
-      {RESIZE_EDGES.map((edge) => (
-        <div
-          key={edge.direction}
-          className={cn("absolute z-50", edge.className)}
-          onMouseDown={(event) => {
-            event.preventDefault();
-            void getCurrentWindow().startResizeDragging(edge.direction);
-          }}
-        />
-      ))}
-    </>
-  );
-}
+import { desktopPlatform } from "@/lib/desktop-platform";
 
 export function WindowControls() {
+  return desktopPlatform() === "windows" ? <WindowsControls /> : null;
+}
+
+function WindowsControls() {
   const [maximized, setMaximized] = useState(false);
 
   useEffect(() => {
@@ -115,7 +74,7 @@ function CaptionButton({
       className={cn(
         "flex h-full w-[46px] items-center justify-center text-foreground/80",
         tone === "danger"
-          ? "hover:bg-[#c42b1c] hover:text-white"
+          ? "hover:bg-destructive hover:text-white"
           : "hover:bg-black/10 hover:text-foreground dark:hover:bg-white/10",
       )}
     >
