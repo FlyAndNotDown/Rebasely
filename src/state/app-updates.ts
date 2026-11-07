@@ -5,7 +5,7 @@ export type UpdateNotice =
   | { id: number; kind: "available"; version: string }
   | { id: number; kind: "installed" }
   | { id: number; kind: "error"; request: Request; message: string };
-export type UpdateSnapshot = UpdateState & { request: Request | null; notice: UpdateNotice | null };
+export type UpdateSnapshot = UpdateState & { request: Request | null; lastRequest: Request | null; notice: UpdateNotice | null };
 
 export interface UpdateClient {
   getState(): Promise<UpdateState>;
@@ -28,6 +28,7 @@ export function createUpdateStore(client: UpdateClient) {
     totalBytes: null,
     error: null,
     request: null,
+    lastRequest: null,
     notice: null,
   };
   const listeners = new Set<() => void>();
@@ -63,7 +64,7 @@ export function createUpdateStore(client: UpdateClient) {
 
   function receive(state: UpdateState) {
     if (state.revision < snapshot.revision) return;
-    snapshot = { ...state, request: snapshot.request, notice: snapshot.notice };
+    snapshot = { ...state, request: snapshot.request, lastRequest: snapshot.lastRequest, notice: snapshot.notice };
     publish({ ...snapshot, notice: snapshot.request === null ? notification(null, false) ?? snapshot.notice : snapshot.notice });
   }
 
@@ -87,7 +88,7 @@ export function createUpdateStore(client: UpdateClient) {
       return operation;
     }
     interactive = !background;
-    publish({ ...snapshot, request, error: null, notice: null });
+    publish({ ...snapshot, request, lastRequest: request, error: null, notice: null });
     operation = (async () => {
       try {
         await initialize();

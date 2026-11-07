@@ -10,6 +10,7 @@ function ScrollArea({
   onScroll,
   viewportRef,
   viewportClassName,
+  viewportProps,
   gutter = true,
   type = "scroll",
   scrollbars = "both",
@@ -18,6 +19,8 @@ function ScrollArea({
   onScroll?: React.UIEventHandler<HTMLDivElement>
   viewportRef?: React.Ref<HTMLDivElement>
   viewportClassName?: string
+  /** Accessible names and keyboard focus belong to the scrolling viewport. */
+  viewportProps?: Omit<React.ComponentPropsWithoutRef<typeof ScrollAreaPrimitive.Viewport>, "children" | "className" | "onScroll">
   gutter?: boolean
   /** `vertical` leaves horizontal overflow to a child. Both axes on one viewport relayout forever once the pane overflows. */
   scrollbars?: "both" | "vertical"
@@ -30,6 +33,7 @@ function ScrollArea({
       {...props}
     >
       <ScrollAreaPrimitive.Viewport
+        {...viewportProps}
         ref={viewportRef}
         data-slot="scroll-area-viewport"
         onScroll={onScroll}

@@ -1,112 +1,110 @@
-import { useEffect, useState } from "react";
+import { t, useTranslation } from "@/i18n";
+import { useEffect, useRef, useState } from "react";
+import { GitMergeIcon, LoaderCircleIcon } from "lucide-react";
 import { P4Diff } from "@/components/p4/p4-diff";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { HoverTip } from "@/components/ui/tooltip";
 import { errorMessage } from "@/lib/git";
 import { depotBase } from "@/lib/p4";
+import { p4DisplayText } from "@/lib/p4-display";
 import { useP4 } from "@/state/p4-context";
 import type { P4ResolveView } from "@/types/p4";
 
-export function P4Resolve({
-  path,
-  onResolved,
-}: {
-  path: string;
-  onResolved: () => void;
-}) {
+type ResolveMode = "yours" | "theirs" | "merge";
+
+const choices = [
+  { mode: "merge", get label() { return t("p4.autoMerge"); }, get tip() { return t("p4.autoMergeHint"); } },
+  { mode: "yours", get label() { return t("p4.acceptYours"); }, get tip() { return t("p4.acceptYoursHint"); } },
+  { mode: "theirs", get label() { return t("p4.acceptTheirs"); }, get tip() { return t("p4.acceptTheirsHint"); } },
+] as const;
+
+export function P4Resolve({ path, onClose }: { path: string; onClose: () => void }) {
+  useTranslation();
   const { resolveView, resolveAccept, busy: workspaceBusy } = useP4();
   const [view, setView] = useState<P4ResolveView | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState<"yours" | "theirs" | "merge" | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  const [mode, setMode] = useState<ResolveMode | null>(null);
+  const [busy, setBusy] = useState(false);
+  const running = useRef(false);
   const loading = view === null && error === null;
 
   useEffect(() => {
-    let cancelled = false;
+    let live = true;
     void resolveView(path)
       .then((next) => {
-        if (cancelled) return;
-        if (!next) {
-          setError("This file does not need resolve.");
-          return;
-        }
-        setView(next);
+        if (!live) return;
+        if (next) setView(next);
+        else setError(t("p4.thisFileDoesNotNeedResolve"));
       })
       .catch((caught: unknown) => {
-        if (!cancelled) setError(errorMessage(caught) || "Could not open this resolve");
+        if (live) setError(p4DisplayText(errorMessage(caught)) || t("p4.couldNotOpenThisResolve"));
       });
-    return () => {
-      cancelled = true;
-    };
-  }, [path, resolveView]);
+    return () => { live = false; };
+  }, [attempt, path, resolveView]);
 
-  async function accept(mode: "yours" | "theirs" | "merge") {
-    if (busy || workspaceBusy) return;
-    setBusy(mode);
-    const ok = await resolveAccept(path, mode);
-    setBusy(null);
-    if (ok) onResolved();
+  async function accept() {
+    if (!view || !mode || workspaceBusy || running.current) return;
+    running.current = true;
+    setBusy(true);
+    try {
+      if (await resolveAccept(path, mode)) onClose();
+    } finally {
+      running.current = false;
+      setBusy(false);
+    }
   }
 
-  const content = view?.content ?? false;
-  const name = depotBase(view?.path || path);
-
   return (
-    <div className="absolute inset-0 flex min-h-0 flex-col">
-      <div className="flex h-10 shrink-0 items-center border-b px-3">
-        <span className="min-w-0 truncate font-mono text-sm" title={view?.path || path}>
-          {name}
-        </span>
-      </div>
-      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b px-3 py-2">
-        <p role={loading ? "status" : undefined} className="min-w-0 flex-1 truncate text-xs text-muted-foreground" title={view?.summary}>
-          {loading ? "Loading resolve" : (view?.summary ?? "Needs resolve")}
-        </p>
-        <div className="flex items-center gap-1.5">
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={loading || busy !== null || workspaceBusy}
-            onClick={() => void accept("yours")}
-          >
-            Accept yours
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={loading || busy !== null || workspaceBusy}
-            onClick={() => void accept("theirs")}
-          >
-            Accept theirs
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            disabled={loading || busy !== null || workspaceBusy || Boolean(error) || !content}
-            onClick={() => void accept("merge")}
-          >
-            Merge
-          </Button>
+    <Dialog open onOpenChange={(open) => !open && !running.current && onClose()}>
+      <DialogContent className="flex max-h-[90vh] flex-col sm:max-w-4xl" showCloseButton={!busy}>
+        <DialogHeader>
+          <DialogTitle>{t("p4.resolveFile", { file: depotBase(path) })}</DialogTitle>
+          <DialogDescription className="truncate font-mono text-xs" title={path}>{path}</DialogDescription>
+        </DialogHeader>
+        {view?.summary ? <p className="truncate text-xs text-muted-foreground" title={p4DisplayText(view.summary)}>{p4DisplayText(view.summary)}</p> : null}
+        <div className="relative flex h-[min(42vh,24rem)] min-h-24 min-w-0 flex-col overflow-hidden rounded-lg border">
+          {error ? (
+            <div role="alert" className="flex flex-1 flex-col items-center justify-center gap-2 p-4 text-center text-sm text-destructive">
+              {error}
+              <Button variant="outline" size="sm" onClick={() => { setError(null); setAttempt((current) => current + 1); }}>{t("common.retry")}</Button>
+            </div>
+          ) : (
+            <P4Diff
+              diff={view?.comparable ? view.diff : null}
+              loading={loading}
+              empty={view?.comparable ? t("p4.noTextDifferences") : t("p4.theTwoSidesCantBeComparedHere")}
+              split
+              captions={view?.workingCopy
+                ? [t("p4.incomingRevision"), t("p4.workspaceFile")]
+                : [t("p4.syncedRevision"), t("p4.incomingRevision")]}
+              chrome={false}
+            />
+          )}
         </div>
-      </div>
-      {error ? (
-        <div role="alert" className="flex flex-1 items-center justify-center p-6 text-center text-sm text-destructive">
-          {error}
-        </div>
-      ) : view?.comparable ? (
-        <P4Diff
-          diff={view.diff}
-          loading={false}
-          empty="Yours and theirs have the same text."
-          split
-          captions={["Yours", "Theirs"]}
-          chrome={false}
-        />
-      ) : (
-        <div className="flex flex-1 items-center justify-center p-6 text-center text-sm text-muted-foreground">
-          {loading ? "Loading resolve" : "The two sides can't be compared here."}
-        </div>
-      )}
-    </div>
+        {view && view.pendingResolves > 1 ? (
+          <p className="text-xs text-muted-foreground">{t("p4.multipleResolves", { count: view.pendingResolves })}</p>
+        ) : null}
+        <fieldset className="flex flex-wrap gap-2" disabled={!view || busy || workspaceBusy}>
+          <legend className="sr-only">{t("p4.resolve")}</legend>
+          {choices.map((choice) => choice.mode !== "merge" || view?.content ? (
+            <HoverTip key={choice.mode} label={choice.tip}>
+              <label className="flex min-h-8 items-center gap-1.5 rounded-md border px-2.5 text-sm has-checked:border-foreground/50 has-checked:bg-muted has-disabled:opacity-50">
+                <input type="radio" name="p4-resolve-mode" className="size-3.5 accent-foreground" checked={mode === choice.mode} onChange={() => setMode(choice.mode)} />
+                {choice.label}
+              </label>
+            </HoverTip>
+          ) : null)}
+        </fieldset>
+        <DialogFooter>
+          <Button variant="outline" disabled={busy} onClick={onClose}>{t("common.cancel")}</Button>
+          <Button disabled={!view || !mode || busy || workspaceBusy} onClick={() => void accept()}>
+            {busy ? <LoaderCircleIcon className="motion-safe:animate-spin" /> : <GitMergeIcon />}
+            {t("p4.resolve")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

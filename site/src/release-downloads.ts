@@ -1,6 +1,5 @@
-export const REPOSITORY_URL = "https://github.com/FlyAndNotDown/Rebasely";
+export const REPOSITORY_URL = "https://github.com/FlyAndNotDown/RebaseRaven";
 export const LATEST_RELEASE_URL = `${REPOSITORY_URL}/releases/latest`;
-export const LATEST_RELEASE_API = "https://api.github.com/repos/FlyAndNotDown/Rebasely/releases/latest";
 
 export type ReleaseDownloads = {
   tag: string;
@@ -19,8 +18,8 @@ export function parseReleaseDownloads(value: unknown): ReleaseDownloads {
   }
   const tag = value.tag_name;
   const filenames = {
-    macos: [`Rebasely_${tag}_macos_arm64.dmg`],
-    windows: [`Rebasely_${tag}_windows_x64.exe`, `Rebasely_${tag}_windows_x64.msi`],
+    macos: [`RebaseRaven_${tag}_macos_arm64.dmg`],
+    windows: [`RebaseRaven_${tag}_windows_x64.exe`, `RebaseRaven_${tag}_windows_x64.msi`],
   };
   const result: ReleaseDownloads = { tag };
   for (const platform of ["macos", "windows"] as const) {
@@ -37,19 +36,11 @@ export function parseReleaseDownloads(value: unknown): ReleaseDownloads {
   return result;
 }
 
-export async function fetchReleaseDownloads(signal: AbortSignal, fetcher: typeof fetch = fetch): Promise<ReleaseDownloads> {
-  const response = await fetcher(LATEST_RELEASE_API, {
-    signal,
-    credentials: "omit",
-    redirect: "error",
-    cache: "no-store",
-    headers: { Accept: "application/vnd.github+json" },
-  });
-  if (!response.ok) {
-    await response.body?.cancel();
-    throw new Error("Latest release information is unavailable.");
+export function readBundledReleaseDownloads(metadata: string | undefined): ReleaseDownloads | null {
+  if (!metadata) return null;
+  try {
+    return parseReleaseDownloads(JSON.parse(metadata));
+  } catch {
+    return null;
   }
-  let value: unknown;
-  try { value = await response.json(); } catch { throw new Error("Latest release information is unavailable."); }
-  return parseReleaseDownloads(value);
 }

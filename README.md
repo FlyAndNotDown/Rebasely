@@ -1,33 +1,92 @@
-![Rebasely — a unified version control client](site/public/assets/hero.svg)
-
 <p align="center">
-  Review changes. Follow history. Keep your work in view.<br><br>
-  <a href="https://flyandnotdown.github.io/Rebasely/">Website</a> ·
-  <a href="https://github.com/FlyAndNotDown/Rebasely/releases">Download</a> ·
-  <a href="CONTRIBUTING.md">Contribute</a>
+  <img src="assets/brand/readme-banner.png" width="1200" alt="RebaseRaven — Git + Perforce desktop client">
 </p>
 
-Rebasely brings your repositories into one desktop workspace. Move between
-projects, inspect a diff, and make the next change with context.
+<p align="center">
+  <a href="https://github.com/FlyAndNotDown/RebaseRaven/releases/latest"><img src="https://img.shields.io/github/v/release/FlyAndNotDown/RebaseRaven" alt="Latest release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/FlyAndNotDown/RebaseRaven" alt="MIT license"></a>
+  <a href="https://github.com/FlyAndNotDown/RebaseRaven/actions/workflows/check.yml"><img src="https://github.com/FlyAndNotDown/RebaseRaven/actions/workflows/check.yml/badge.svg?branch=dev&amp;event=pull_request" alt="Check CI"></a>
+</p>
 
-- **Review precisely.** Inspect unified or split text diffs, compare images, and stage a file, hunk, or line.
-- **Follow the work.** Explore commit graphs, branches, file history, and changelists.
-- **Stay in flow.** Keep projects in tabs, with a command palette, keyboard shortcuts, and light or dark themes.
+<p align="center">
+  <a href="https://rebaseraven.flyandnotdown.com/en/">Website</a> ·
+  <a href="https://github.com/FlyAndNotDown/RebaseRaven/releases/latest">Download</a> ·
+  <a href="README.zh-CN.md">Chinese</a>
+</p>
 
-Try the [interactive feature demo](https://flyandnotdown.github.io/Rebasely/#features)
-to explore example Git and Perforce workflows.
+RebaseRaven is an open-source desktop client for **Git and Perforce**, built with
+React, TypeScript, Tauri, and Rust. Review the details, understand the history,
+and prepare your next change in one focused workspace.
 
-Supports Git and Perforce. Available for **macOS Apple Silicon** and **Windows x64**.
+## See the work clearly
+
+- **Review precisely.** Read unified or split text diffs, compare images, and
+  stage Git changes by file, hunk, or individual line.
+- **Understand the context.** Explore Git commit graphs, branches, and file
+  history; review Perforce changelists and file revisions.
+- **Keep projects close.** Switch repository tabs, find actions in the command
+  palette, and use familiar shortcuts with light or dark themes.
+- **Use your existing tools.** Repository operations run through Git and the
+  Perforce CLI, preserving their configuration and command-line behavior.
+
+| Git | Perforce |
+| --- | --- |
+| Open, clone, or initialize repositories | Connect or create a workspace |
+| Stage, commit, and inspect history | Organize pending changelists and review revisions |
+| Work with branches, stashes, and worktrees | Sync, reconcile, shelve, and submit |
+| Review submodules and Git LFS workflows | Browse workspace and depot files |
+| Rename branches, set upstreams, and edit remote URLs | Rename or move files, lock submissions, and undo revisions |
+| Merge, rebase, and cherry-pick commits | Preview single-file integration in classic workspaces |
+
+Try the [interactive Git and Perforce demo](https://rebaseraven.flyandnotdown.com/en/#features).
+It uses invented data and never changes a real repository.
 
 ## Get started
 
-1. [Download a release](https://github.com/FlyAndNotDown/Rebasely/releases) for your platform.
-2. Install Git for Git repositories, or the Perforce CLI (`p4`) for Perforce workspaces.
-3. Open or clone a Git repository, or connect an existing Perforce workspace.
+1. [Download the latest release](https://github.com/FlyAndNotDown/RebaseRaven/releases/latest)
+   for **macOS Apple Silicon** or **Windows x64**.
+2. Install **Git** for Git repositories, or the **Perforce CLI (`p4`)** for
+   Perforce workspaces. Select the executable in Settings if needed.
+3. Open a local folder, clone a Git repository, or connect to Perforce.
 
-To build or contribute, see the [development guide](docs/development.md).
-Bug reports and ideas are welcome in
-[Issues](https://github.com/FlyAndNotDown/Rebasely/issues).
+The app supports English and Simplified Chinese, follows your system language
+by default, and lets you choose a language in Settings. The website follows
+your browser language and includes a language switcher. English is the fallback.
+
+Usage analytics is enabled by default. Google Analytics receives a random
+installation ID, coarse app usage and foreground time, and basic device
+information. Repository content, paths, and credentials are excluded. Turn it
+off in **Settings → Diagnostics → Share usage analytics**.
+
+Diagnostic files stay on your device and are not uploaded automatically.
+Remote repository operations connect to the servers you configure.
+
+## Build from source
+
+Install Node.js 22.13+ on the 22.x line, 24.x, or 26+, stable Rust, and the
+[Tauri platform prerequisites](https://v2.tauri.app/start/prerequisites/).
+Linux builds require the Linux platform dependencies.
+
+```sh
+npm ci
+npm run dev
+```
+
+To produce an application bundle:
+
+```sh
+npm run build
+```
+
+See the [development guide](docs/development.md) for the project structure and
+checks. Contributions follow [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Feedback and security
+
+Report reproducible problems or suggest improvements in
+[Issues](https://github.com/FlyAndNotDown/RebaseRaven/issues). Remove credentials,
+private hosts, repository details, and local paths from attachments.
+For vulnerabilities, follow the [security policy](SECURITY.md).
 
 ## License
 

@@ -303,16 +303,38 @@ mod structure_tests {
             .unwrap();
         assert!(Path::new(&created).is_absolute());
         assert!(same_folder(&created, &expected));
-        assert!(list_worktrees(&repo)
-            .unwrap()
+        let trees = list_worktrees(&repo).unwrap();
+        // Git and the native filesystem may use different Windows separators.
+        assert!(
+            trees
+                .iter()
+                .any(|tree| same_folder(&tree.path, Path::new(&created))
+                    && tree.branch.as_deref() == Some("side")
+                    && !tree.current
+                    && !tree.main),
+            "created={created:?}, trees={trees:#?}"
+        );
+        assert!(trees.iter().any(|tree| tree.main && tree.current));
+        let linked = open_at(Path::new(&created)).unwrap();
+        let linked_trees = list_worktrees(&linked).unwrap();
+        assert!(
+            linked_trees.iter().any(|tree| tree.current
+                && !tree.main
+                && tree.branch.as_deref() == Some("side")
+                && same_folder(&tree.path, Path::new(&created))),
+            "created={created:?}, linked_trees={linked_trees:#?}"
+        );
+        assert!(linked_trees
             .iter()
-            .any(|tree| tree.path == created && tree.branch.as_deref() == Some("side")));
+            .any(|tree| tree.main && !tree.current && same_folder(&tree.path, repo.workdir())));
+        drop(linked);
         fs::write(Path::new(&created).join("file.txt"), "dirty\n").unwrap();
         assert!(remove_worktree(&repo, &created, false).is_err());
         assert!(Path::new(&created).join("file.txt").is_file());
         remove_worktree(&repo, &created, true).unwrap();
         assert!(!Path::new(&created).exists());
         assert!(ref_exists(&repo, "refs/heads/side"));
+        assert_eq!(list_worktrees(&repo).unwrap().len(), 1);
     }
 
     #[cfg(unix)]

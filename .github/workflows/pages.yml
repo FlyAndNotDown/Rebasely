@@ -2,6 +2,10 @@ name: Website
 
 on:
   workflow_call:
+    inputs:
+      release_tag:
+        type: string
+        required: false
     secrets:
       GOOGLE_WORKLOAD_IDENTITY_PROVIDER:
         required: false
@@ -46,8 +50,33 @@ jobs:
           package-manager-cache: false
       - name: Dependencies
         run: npm ci
+      - name: Resolve installer links
+        id: downloads
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          endpoint="latest"
+          if [[ -n "$RELEASE_TAG" ]]; then
+            [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 1
+            endpoint="tags/$RELEASE_TAG"
+          fi
+          gh api "repos/$GITHUB_REPOSITORY/releases/$endpoint" |
+            node scripts/site-release-downloads.mjs
       - name: Build site
-        run: npm run check:site
+        env:
+          VITE_GA_APP_MEASUREMENT_ID: ${{ vars.GA_APP_MEASUREMENT_ID }}
+          VITE_GA_WEBSITE_MEASUREMENT_ID: ${{ vars.GA_WEBSITE_MEASUREMENT_ID }}
+          VITE_RELEASE_DOWNLOADS: ${{ steps.downloads.outputs.release }}
+        run: |
+          node --input-type=module <<'JS'
+          import assert from "node:assert/strict";
+          const app = process.env.VITE_GA_APP_MEASUREMENT_ID ?? "";
+          const website = process.env.VITE_GA_WEBSITE_MEASUREMENT_ID ?? "";
+          for (const id of [app, website]) assert.match(id, /^G-[A-Z0-9]{4,20}$/, "Missing or invalid analytics destination.");
+          assert.notEqual(app, website, "Desktop and website analytics must use separate destinations.");
+          JS
+          npm run check:site
       - name: Configure Pages
         uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
       - name: Upload site
@@ -111,4 +140,5 @@ jobs:
         env:
           GOOGLE_ACCESS_TOKEN: ${{ steps.google.outputs.access_token }}
           SITE_URL: ${{ needs.deploy.outputs.page_url }}
+          SEARCH_CONSOLE_PROPERTY: ${{ vars.GOOGLE_SEARCH_CONSOLE_PROPERTY }}
         run: node scripts/submit-sitemap.mjs

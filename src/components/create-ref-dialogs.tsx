@@ -1,3 +1,4 @@
+import { t, useTranslation } from "@/i18n";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { HoverTip } from "@/components/ui/tooltip";
@@ -20,6 +21,7 @@ function commitSubject(summary: string) {
 }
 
 export function CommitLine({ commit }: { commit?: { shortId: string; summary: string } | null }) {
+  useTranslation();
   if (!commit) return null;
   const subject = commitSubject(commit.summary);
   return (
@@ -44,6 +46,7 @@ export function CreateBranchDialog({
   onOpenChange: (open: boolean) => void;
   commit?: CommitLike | null;
 }) {
+  useTranslation();
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
@@ -55,6 +58,7 @@ export function CreateBranchDialog({
 }
 
 function BranchForm({ commit, onDone }: { commit: CommitLike | null; onDone: () => void }) {
+  useTranslation();
   const { createBranch } = useGitPick(["createBranch"]);
   const [name, setName] = useState("");
   const [checkout, setCheckout] = useState(true);
@@ -75,30 +79,26 @@ function BranchForm({ commit, onDone }: { commit: CommitLike | null; onDone: () 
       }}
     >
       <DialogHeader className="min-w-0">
-        <DialogTitle>Create branch</DialogTitle>
+        <DialogTitle>{t("git.ui.create_branch")}</DialogTitle>
         <DialogDescription>
-          {commit ? "Starts a branch at this commit." : "Starts a branch at the current HEAD."}
+          {commit ? t("git.ui.starts_a_branch_at_this_commit") : t("git.ui.starts_a_branch_at_the_current_head")}
         </DialogDescription>
       </DialogHeader>
       <CommitLine commit={commit} />
       <Input
         className="mt-3 font-mono"
         autoFocus
-        placeholder="foo"
+        placeholder={t("git.dynamic.branchExample")}
         value={name}
         onChange={(event) => setName(event.target.value)}
       />
       <label className="mt-3 flex items-center gap-2 text-sm">
         <Checkbox checked={checkout} onCheckedChange={(value) => setCheckout(value === true)} />
-        <span>Check out after creating</span>
+        <span>{t("git.ui.check_out_after_creating")}</span>
       </label>
       <DialogFooter className="mt-4">
-        <Button type="button" variant="outline" onClick={onDone}>
-          Cancel
-        </Button>
-        <Button type="submit" disabled={!name.trim() || busy}>
-          Create
-        </Button>
+        <Button type="button" variant="outline" onClick={onDone}>{t("git.ui.cancel")}</Button>
+        <Button type="submit" disabled={!name.trim() || busy}>{t("git.ui.create")}</Button>
       </DialogFooter>
     </form>
   );
@@ -114,6 +114,7 @@ export function CreateTagDialog({
   onOpenChange: (open: boolean) => void;
   commit?: CommitLike | null;
 }) {
+  useTranslation();
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
@@ -124,6 +125,7 @@ export function CreateTagDialog({
 }
 
 function TagForm({ commit, onDone }: { commit: CommitLike | null; onDone: () => void }) {
+  useTranslation();
   const { createTag } = useGitPick(["createTag"]);
   const [name, setName] = useState("");
   const [message, setMessage] = useState("");
@@ -144,33 +146,27 @@ function TagForm({ commit, onDone }: { commit: CommitLike | null; onDone: () => 
       }}
     >
       <DialogHeader className="min-w-0">
-        <DialogTitle>Create tag</DialogTitle>
+        <DialogTitle>{t("git.ui.create_tag")}</DialogTitle>
         <DialogDescription>
-          {commit ? "Tags this commit." : "Tags the current commit."} A message makes it an annotated
-          tag.
-        </DialogDescription>
+          {commit ? t("git.ui.tags_this_commit") : t("git.ui.tags_the_current_commit")}{" "}{t("git.ui.a_message_makes_it_an_annotated_tag")}</DialogDescription>
       </DialogHeader>
       <CommitLine commit={commit} />
       <Input
         className="mt-3 font-mono"
         autoFocus
-        placeholder="v1.0.0"
+        placeholder={t("git.dynamic.tagExample")}
         value={name}
         onChange={(event) => setName(event.target.value)}
       />
       <Input
         className="mt-3"
-        placeholder="Message (optional)"
+        placeholder={t("git.ui.message_optional")}
         value={message}
         onChange={(event) => setMessage(event.target.value)}
       />
       <DialogFooter className="mt-4">
-        <Button type="button" variant="outline" onClick={onDone}>
-          Cancel
-        </Button>
-        <Button type="submit" disabled={!name.trim() || busy}>
-          Create
-        </Button>
+        <Button type="button" variant="outline" onClick={onDone}>{t("git.ui.cancel")}</Button>
+        <Button type="submit" disabled={!name.trim() || busy}>{t("git.ui.create")}</Button>
       </DialogFooter>
     </form>
   );

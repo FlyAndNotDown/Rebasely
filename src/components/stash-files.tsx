@@ -1,3 +1,4 @@
+import { formatNumber, t, useTranslation } from "@/i18n";
 import { memo, useCallback } from "react";
 import { LayersArrowDownIcon, LayersArrowUpIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -10,6 +11,7 @@ import { useGitPick } from "@/state/git-context";
 import type { CommitFile } from "@/types/git";
 
 export function StashFiles() {
+  useTranslation();
   const { stashSelection, stashDetails, stashes, selectStashFile, stashApply, stashPop, closeStash } = useGitPick([
     "stashSelection",
     "stashDetails",
@@ -30,15 +32,16 @@ export function StashFiles() {
   if (!stashSelection) {
     return (
       <div className="absolute inset-0 flex items-center justify-center p-4 text-center text-sm text-muted-foreground">
-        Select a stash to see its diff
+        {t("git-files.selectStash")}
       </div>
     );
   }
 
   const ready = stashDetails?.id === stashSelection.id ? stashDetails : null;
   const listed = stashes.find((stash) => stash.id === stashSelection.id);
-  const message = ready?.message || listed?.message || "(no message)";
+  const message = ready?.message || listed?.message || t("git-files.noMessage");
   const count = ready?.files.length;
+  const reference = `stash@{${stashSelection.index}}`;
 
   return (
     <div className="absolute inset-0 flex min-h-0 min-w-0 flex-col">
@@ -46,37 +49,37 @@ export function StashFiles() {
         <HoverTip label={message}>
           <span className="min-w-0 flex-1 truncate text-sm">{message}</span>
         </HoverTip>
-        <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{`stash@{${stashSelection.index}}`}</span>
+        <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{reference}</span>
         <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{stashSelection.id.slice(0, 7)}</span>
         {count != null ? (
           <span className="shrink-0 text-[11px] text-muted-foreground">
-            {count === 1 ? "1 file" : `${count} files`}
+            {t("git-files.fileCount", { count, value: formatNumber(count) })}
           </span>
         ) : null}
-        <HoverTip label="Apply">
+        <HoverTip label={t("git-files.apply")}>
           <Button
             type="button"
             size="icon-xs"
             variant="ghost"
-            aria-label="Apply"
+            aria-label={t("git-files.apply")}
             onClick={() => void stashApply(stashSelection.id)}
           >
             <LayersArrowDownIcon />
           </Button>
         </HoverTip>
-        <HoverTip label="Pop">
+        <HoverTip label={t("git-files.pop")}>
           <Button
             type="button"
             size="icon-xs"
             variant="ghost"
-            aria-label="Pop"
+            aria-label={t("git-files.pop")}
             onClick={() => void stashPop(stashSelection.id)}
           >
             <LayersArrowUpIcon />
           </Button>
         </HoverTip>
-        <HoverTip label="Close">
-          <Button type="button" size="icon-xs" variant="ghost" aria-label="Close" onClick={closeStash}>
+        <HoverTip label={t("git-files.close")}>
+          <Button type="button" size="icon-xs" variant="ghost" aria-label={t("git-files.close")} onClick={closeStash}>
             <XIcon />
           </Button>
         </HoverTip>
@@ -85,7 +88,7 @@ export function StashFiles() {
         <StashFilesSkeleton />
       ) : ready.files.length === 0 ? (
         <div className="flex min-h-0 flex-1 items-center justify-center p-4 text-center text-sm text-muted-foreground">
-          No changes in this stash
+          {t("git-files.emptyStash")}
         </div>
       ) : (
         <ScrollArea className="min-h-0 min-w-0 flex-1">
@@ -106,8 +109,9 @@ export function StashFiles() {
 }
 
 function StashFilesSkeleton() {
+  useTranslation();
   return (
-    <div role="status" aria-label="Loading stash files" className="relative min-h-0 flex-1">
+    <div role="status" aria-label={t("git-files.loadingStash")} className="relative min-h-0 flex-1">
       <div className="absolute inset-0 overflow-hidden px-3 py-2">
         {Array.from({ length: 80 }, (_, index) => (
           <div key={index} className="flex h-7 items-center gap-2">
@@ -129,6 +133,7 @@ const StashFileRow = memo(function StashFileRow({
   selected: boolean;
   onSelect: (path: string) => void;
 }) {
+  useTranslation();
   return (
     <li>
       <button
@@ -143,7 +148,7 @@ const StashFileRow = memo(function StashFileRow({
           {fileKindLabel(file.kind)}
         </span>
         <span className="min-w-0 flex-1 truncate font-mono">{file.path}</span>
-        {file.binary ? <span className="shrink-0 text-muted-foreground">binary</span> : null}
+        {file.binary ? <span className="shrink-0 text-muted-foreground">{t("git-files.binary")}</span> : null}
       </button>
     </li>
   );

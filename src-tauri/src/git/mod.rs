@@ -60,6 +60,7 @@ pub use status::*;
 pub use structure::*;
 pub use tools::*;
 
+pub(crate) use repo::open_for_detection;
 use repo::{
     cat_blob, commit_info, config_get, config_get_file, config_get_global, config_get_local,
     config_get_system, config_set_file, config_set_global, config_set_local, config_unset_file,

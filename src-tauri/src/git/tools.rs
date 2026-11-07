@@ -18,7 +18,7 @@ fn config_value(repo: Option<&Repository>, key: &str) -> Option<String> {
 }
 
 /// The tools git would use, GUI variants first, as this repository sees them.
-/// A custom executable saved as `rebasely-diff` / `rebasely-merge` comes back as the path.
+/// A custom executable saved as `rebaseraven-diff` / `rebaseraven-merge` comes back as the path.
 pub fn read_tool_config(repo: Option<&Repository>) -> ToolConfig {
     ToolConfig {
         diff_tool: shown_tool(
@@ -38,8 +38,8 @@ pub fn read_tool_config(repo: Option<&Repository>) -> ToolConfig {
     }
 }
 
-const CUSTOM_DIFF: &str = "rebasely-diff";
-const CUSTOM_MERGE: &str = "rebasely-merge";
+const CUSTOM_DIFF: &str = "rebaseraven-diff";
+const CUSTOM_MERGE: &str = "rebaseraven-merge";
 
 fn shown_tool(repo: Option<&Repository>, kind: &str, name: String) -> String {
     let custom = if kind == "diff" {
@@ -551,7 +551,7 @@ mod tests {
             .unwrap()
             .as_nanos();
         let path = std::env::temp_dir().join(format!(
-            "rebasely-tool-{label}-{}-{unique}.gitconfig",
+            "rebaseraven-tool-{label}-{}-{unique}.gitconfig",
             std::process::id()
         ));
         std::fs::write(&path, "").unwrap();
@@ -578,7 +578,7 @@ mod tests {
                 config_get_file(&path, "diff.tool").as_deref(),
                 Some(CUSTOM_DIFF)
             );
-            let command = config_get_file(&path, "difftool.rebasely-diff.cmd").unwrap();
+            let command = config_get_file(&path, "difftool.rebaseraven-diff.cmd").unwrap();
             let expected = if cfg!(windows) {
                 exe.replace('\\', "/")
             } else {

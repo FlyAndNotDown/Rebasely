@@ -18,11 +18,19 @@ export function pendingDiffRequest(connection: P4Connection, change: string, fil
     : p4Api.openedDiff(connection, file);
 }
 
+/** Passive reads must never turn an expired ticket into a login prompt. */
+export function p4ReadRequest<T>(
+  request: () => Promise<T>,
+  quiet: boolean,
+  interactive: (request: () => Promise<T>) => Promise<T>,
+) {
+  return quiet ? request() : interactive(request);
+}
+
 export function pendingRefreshRequest(
   connection: P4Connection,
   quiet: boolean,
   interactive: (request: () => Promise<P4Changelist[]>) => Promise<P4Changelist[]>,
 ) {
-  const request = () => p4Api.refreshPending(connection);
-  return quiet ? request() : interactive(request);
+  return p4ReadRequest(() => p4Api.refreshPending(connection), quiet, interactive);
 }

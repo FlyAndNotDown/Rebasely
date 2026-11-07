@@ -82,7 +82,7 @@ async function assertCheckedRevision(github, context) {
     const annotations = await github.paginate(github.rest.checks.listAnnotations, {
       owner, repo, check_run_id: Number(id), per_page: 100,
     });
-    const notices = annotations.filter((annotation) => annotation.title === "Rebasely checked source");
+    const notices = annotations.filter((annotation) => annotation.title === "RebaseRaven checked source");
     if (notices.length !== 1 || notices[0].annotation_level !== "notice" || notices[0].message !== tree) {
       throw new Error(`Native check does not prove the current master source tree: ${job.name}. Update the pull request against master and rerun its checks.`);
     }
@@ -116,7 +116,7 @@ export async function createDraft({ github, context, core, tag }) {
   validateReleaseVersion(tag, await checkVersions(), [...tags.map((value) => value.name), ...releases.map((value) => value.tag_name)]);
   const { data: release } = await github.rest.repos.createRelease({
     ...context.repo, tag_name: tag, target_commitish: context.sha,
-    name: `Rebasely ${tag}`, draft: true, prerelease: false,
+    name: `RebaseRaven ${tag}`, draft: true, prerelease: false,
     body: `Source revision: \`${context.sha}\`.`,
     generate_release_notes: true,
   });
@@ -126,7 +126,7 @@ export async function createDraft({ github, context, core, tag }) {
 
 export function releaseAssets(tag) {
   parseReleaseTag(tag);
-  const prefix = `Rebasely_${tag}_`;
+  const prefix = `RebaseRaven_${tag}_`;
   return [
     { platform: "windows-x86_64", name: `${prefix}windows_x64.exe` },
     { platform: "darwin-aarch64", name: `${prefix}macos_arm64.app.tar.gz`, installer: `${prefix}macos_arm64.dmg` },
@@ -252,5 +252,5 @@ export async function publishRelease({ github, context, core, tag, releaseId }) 
     headers: { "content-type": "application/json", "content-length": data.length },
   });
   await github.rest.repos.updateRelease({ owner, repo, release_id, draft: false, make_latest: "true" });
-  core.info(`Published Rebasely ${tag} with all updater packages.`);
+  core.info(`Published RebaseRaven ${tag} with all updater packages.`);
 }

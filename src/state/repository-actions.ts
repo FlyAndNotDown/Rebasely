@@ -1,6 +1,7 @@
+import { t } from "@/i18n";
 /** Delayed notifications keep the repository that created them. */
 export function repositoryUndoAction(tabId: string, undo: (tabId: string) => Promise<boolean>) {
-  return { label: "Undo", onClick: () => { void undo(tabId); } };
+  return { label: t("operations.undo"), onClick: () => { void undo(tabId); } };
 }
 
 /** Git date-order keeps children before parents, even when author timestamps tie or move backwards. */

@@ -20,8 +20,8 @@ use zeroize::Zeroizing;
 
 use crate::error::{AppError, AppResult};
 
-const ENV_ENDPOINT: &str = "REBASELY_ASKPASS";
-const ENV_ACTIVITY: &str = "REBASELY_ASKPASS_ACTIVITY";
+const ENV_ENDPOINT: &str = "REBASERAVEN_ASKPASS";
+const ENV_ACTIVITY: &str = "REBASERAVEN_ASKPASS_ACTIVITY";
 const MAX_MESSAGE_BYTES: usize = 64 * 1024;
 const MAX_CONNECTIONS: usize = 32;
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -220,7 +220,7 @@ impl SecretPrompt {
         vec![
             ("SSH_ASKPASS", self.executable.clone()),
             ("SSH_ASKPASS_REQUIRE", "force".to_string()),
-            ("DISPLAY", "rebasely-askpass".to_string()),
+            ("DISPLAY", "rebaseraven-askpass".to_string()),
             (ENV_ENDPOINT, self.endpoint.clone()),
             (ENV_ACTIVITY, "ssh-keygen".to_string()),
         ]
@@ -256,9 +256,9 @@ pub(crate) fn test_helper_executable() -> Option<std::path::PathBuf> {
     let current = std::env::current_exe().ok()?;
     let directory = current.parent()?.parent()?;
     let executable = directory.join(if cfg!(windows) {
-        "rebasely.exe"
+        "rebaseraven.exe"
     } else {
-        "rebasely"
+        "rebaseraven"
     });
     executable.is_file().then_some(executable)
 }

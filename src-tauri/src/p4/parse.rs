@@ -655,7 +655,7 @@ pub fn classic_client_spec(client: &str, user: &str, root: &str, depot_path: &st
         view
     };
     format!(
-        "Client:\t{client}\nOwner:\t{user}\nRoot:\t{root}\nDescription:\n\tCreated by Rebasely.\n\nOptions:\tnoallwrite noclobber nocompress unlocked nomodtime normdir noaltsync\nSubmitOptions:\tsubmitunchanged\nLineEnd:\tlocal\nView:\n\t{view} //{client}/...\n"
+        "Client:\t{client}\nOwner:\t{user}\nRoot:\t{root}\nDescription:\n\tCreated by RebaseRaven.\n\nOptions:\tnoallwrite noclobber nocompress unlocked nomodtime normdir noaltsync\nSubmitOptions:\tsubmitunchanged\nLineEnd:\tlocal\nView:\n\t{view} //{client}/...\n"
     )
 }
 

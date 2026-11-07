@@ -4,7 +4,9 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::error::{AppError, AppResult};
 
-use super::cli::{git_output_error, require_git, run_git, run_git_input_output, run_git_stdout};
+use super::cli::{
+    git_output_error, require_git, run_git, run_git_env, run_git_input_output, run_git_stdout,
+};
 use super::strip_verbatim_prefix;
 
 /// A non-bare repository addressed by the paths git itself reports.
@@ -92,22 +94,37 @@ pub fn open_at(path: &Path) -> AppResult<Repository> {
     open_repository(Path::new(&path))
 }
 
+/// Repository detection classifies missing-repository diagnostics. Pin only
+/// these read-only invocations to C; regular commands and hooks retain the
+/// user's language and environment.
+pub(crate) fn open_for_detection(path: &Path) -> AppResult<Repository> {
+    let path = strip_verbatim_prefix(&path.to_string_lossy());
+    open_repository_with_env(
+        Path::new(&path),
+        &[("LC_ALL", "C"), ("LANG", "C"), ("LANGUAGE", "C")],
+    )
+}
+
 fn open_repository(path: &Path) -> AppResult<Repository> {
+    open_repository_with_env(path, &[])
+}
+
+fn open_repository_with_env(path: &Path, env: &[(&str, &str)]) -> AppResult<Repository> {
     let start = if path.is_file() {
         path.parent().unwrap_or(path)
     } else {
         path
     };
-    let bare = run_git(start, &["rev-parse", "--is-bare-repository"])?;
+    let bare = run_git_env(start, &["rev-parse", "--is-bare-repository"], env)?;
     if !bare.status.success() {
         return Err(git_output_error(bare));
     }
     if String::from_utf8_lossy(&bare.stdout).trim() == "true" {
         return Err(AppError::msg("Bare repositories are not supported yet"));
     }
-    let workdir = require_git_path(start, "--show-toplevel")?;
-    let git_dir = require_git_path(&workdir, "--git-dir")?;
-    let common_dir = require_git_path(&workdir, "--git-common-dir")?;
+    let workdir = require_git_path(start, "--show-toplevel", env)?;
+    let git_dir = require_git_path(&workdir, "--git-dir", env)?;
+    let common_dir = require_git_path(&workdir, "--git-common-dir", env)?;
     Ok(Repository {
         workdir,
         git_dir,
@@ -115,11 +132,11 @@ fn open_repository(path: &Path) -> AppResult<Repository> {
     })
 }
 
-fn require_git_path(root: &Path, flag: &str) -> AppResult<PathBuf> {
+fn require_git_path(root: &Path, flag: &str, env: &[(&str, &str)]) -> AppResult<PathBuf> {
     let absolute = ["rev-parse", "--path-format=absolute", flag];
     let plain = ["rev-parse", flag];
     for args in [absolute.as_slice(), plain.as_slice()] {
-        let output = run_git(root, args)?;
+        let output = run_git_env(root, args, env)?;
         if !output.status.success() {
             continue;
         }

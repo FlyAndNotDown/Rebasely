@@ -332,7 +332,7 @@ pub(super) fn run_interactive_rebase(
 
 pub(super) fn rebase_scratch_dir() -> AppResult<PathBuf> {
     let dir = std::env::temp_dir().join(format!(
-        "rebasely-rebase-{}-{}",
+        "rebaseraven-rebase-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -601,8 +601,8 @@ mod tests {
     #[test]
     fn runs_editor_scripts_through_the_shell() {
         assert_eq!(
-            super::unix_editor_command(Path::new("/tmp/rebasely/message-editor")),
-            "/bin/sh '/tmp/rebasely/message-editor'"
+            super::unix_editor_command(Path::new("/tmp/rebaseraven/message-editor")),
+            "/bin/sh '/tmp/rebaseraven/message-editor'"
         );
         assert_eq!(
             super::unix_editor_command(Path::new("/tmp/my dir/script")),

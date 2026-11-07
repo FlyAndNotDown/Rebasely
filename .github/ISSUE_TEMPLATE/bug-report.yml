@@ -8,7 +8,7 @@ body:
     id: environment
     attributes:
       label: App version and operating system
-      placeholder: Rebasely version, OS version, architecture
+      placeholder: RebaseRaven version, OS version, architecture
     validations:
       required: true
   - type: textarea

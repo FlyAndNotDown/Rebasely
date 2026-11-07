@@ -8,6 +8,37 @@ use std::process::Stdio;
 
 use crate::error::{AppError, AppResult};
 
+#[cfg(target_os = "macos")]
+mod macos_titlebar;
+#[cfg(target_os = "macos")]
+pub(crate) use macos_titlebar::watch_main_titlebar;
+
+#[cfg(windows)]
+mod windows_probe;
+#[cfg(windows)]
+pub(crate) use windows_probe::{spawn_probe_command, ProbeProcessTreeGuard};
+
+#[cfg(not(windows))]
+pub(crate) struct ProbeProcessTreeGuard;
+
+#[cfg(not(windows))]
+impl ProbeProcessTreeGuard {
+    pub(crate) fn disarm(&self) -> std::io::Result<()> {
+        Ok(())
+    }
+
+    pub(crate) fn terminate(&self, pid: u32) -> bool {
+        kill_process_tree(pid)
+    }
+}
+
+#[cfg(not(windows))]
+pub(crate) fn spawn_probe_command(
+    command: &mut Command,
+) -> std::io::Result<(std::process::Child, ProbeProcessTreeGuard)> {
+    Ok((command.spawn()?, ProbeProcessTreeGuard))
+}
+
 // Preserve WKWebView's opaque painting path; document CSS supplies the theme.
 #[cfg(target_os = "macos")]
 pub(crate) fn configure_main_webview(config: &mut tauri::Config) {
@@ -21,8 +52,10 @@ pub(crate) fn configure_main_webview(config: &mut tauri::Config) {
         window.decorations = true;
         window.title_bar_style = tauri::TitleBarStyle::Overlay;
         window.hidden_title = true;
+        // Reserve the full web titlebar height. AppKit's button origin varies
+        // across macOS versions; macos_titlebar aligns the actual native views.
         window.traffic_light_position =
-            Some(tauri::utils::config::LogicalPosition { x: 16.0, y: 22.0 });
+            Some(tauri::utils::config::LogicalPosition { x: 16.0, y: 30.0 });
     }
 }
 
@@ -127,7 +160,7 @@ pub(crate) fn reveal_path(path: &Path) -> AppResult<()> {
 }
 
 fn allowed_url(value: &str) -> AppResult<url::Url> {
-    if value.chars().any(char::is_control) {
+    if value.len() > 8192 || value.chars().any(char::is_control) {
         return Err(AppError::msg("The link is invalid."));
     }
     let parsed = url::Url::parse(value).map_err(|_| AppError::msg("The link is invalid."))?;
@@ -168,10 +201,12 @@ mod tests {
             "data:text/html,content",
             "https://alice:password@example.com/repo.git",
             "https://example.com/\nnext",
+            "https://example.com/\u{0000}next",
             "not a URL",
         ] {
             assert!(allowed_url(link).is_err(), "{link}");
         }
+        assert!(allowed_url(&format!("https://example.com/{}", "a".repeat(8192))).is_err());
     }
 
     #[test]
@@ -182,7 +217,9 @@ mod tests {
             current.join(".")
         );
         assert!(existing_absolute_path(Path::new("")).is_err());
-        assert!(existing_absolute_path(&current.join("missing-rebasely-native-target")).is_err());
+        assert!(
+            existing_absolute_path(&current.join("missing-rebaseraven-native-target")).is_err()
+        );
         assert!(!kill_process_tree(0));
     }
 

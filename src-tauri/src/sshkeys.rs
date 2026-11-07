@@ -140,7 +140,7 @@ fn generate_at(
     }
     let keygen = require_keygen()?;
     let temporary = tempfile::Builder::new()
-        .prefix(".rebasely-key-")
+        .prefix(".rebaseraven-key-")
         .tempdir_in(dir)?;
     #[cfg(windows)]
     restrict_windows_key(temporary.path())?;
@@ -1223,6 +1223,6 @@ mod tests {
     }
 
     fn temp_dir(name: &str) -> PathBuf {
-        std::env::temp_dir().join(format!("rebasely-ssh-{name}-{}", std::process::id()))
+        std::env::temp_dir().join(format!("rebaseraven-ssh-{name}-{}", std::process::id()))
     }
 }

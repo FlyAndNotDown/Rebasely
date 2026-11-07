@@ -1,3 +1,4 @@
+import { t, useTranslation } from "@/i18n";
 import { memo, useCallback } from "react";
 import { ArrowLeftRightIcon, XIcon } from "lucide-react";
 import { toast } from "sonner";
@@ -13,6 +14,7 @@ import { useGitPick } from "@/state/git-context";
 import type { CommitFile } from "@/types/git";
 
 export function CommitFiles() {
+  useTranslation();
   const {
     commitDetails,
     historySelection,
@@ -45,16 +47,16 @@ export function CommitFiles() {
       <div className="absolute inset-0 flex min-h-0 flex-col">
         <div className="flex shrink-0 items-center gap-2 px-3 py-2">
           <div className="min-w-0 flex-1">
-            <div className="text-sm font-medium">Compare</div>
+            <div className="text-sm font-medium">{t("git-files.compare")}</div>
             <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
               <HoverTip label={comparison.base.rev}>
                 <span className="min-w-0 truncate font-mono">{comparison.base.label}</span>
               </HoverTip>
-              <HoverTip label="Swap sides">
+              <HoverTip label={t("git-files.swapSides")}>
                 <Button
                   variant="ghost"
                   size="icon-xs"
-                  aria-label="Swap sides"
+                  aria-label={t("git-files.swapSides")}
                   type="button"
                   className="flex size-5 shrink-0 items-center justify-center rounded-sm hover:bg-muted hover:text-foreground"
                   onClick={swapComparison}
@@ -67,11 +69,11 @@ export function CommitFiles() {
               </HoverTip>
             </div>
           </div>
-          <HoverTip label="Close compare">
+          <HoverTip label={t("git-files.closeCompare")}>
             <Button
               variant="ghost"
               size="icon-xs"
-              aria-label="Close comparison"
+              aria-label={t("git-files.closeComparison")}
               type="button"
               className="flex size-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground"
               onClick={closeComparison}
@@ -84,7 +86,7 @@ export function CommitFiles() {
           <CommitFilesSkeleton />
         ) : comparison.files.length === 0 ? (
           <div className="flex min-h-0 flex-1 items-center justify-center border-t p-4 text-sm text-muted-foreground">
-            No differences
+            {t("git-files.noDifferences")}
           </div>
         ) : (
           <ScrollArea className="min-h-0 flex-1 border-t">
@@ -111,7 +113,7 @@ export function CommitFiles() {
         </div>
       ) : (
         <div className="absolute inset-0 flex items-center justify-center p-4 text-sm text-muted-foreground">
-          Select a commit to see its files
+          {t("git-files.selectCommitFiles")}
         </div>
       )
     );
@@ -123,7 +125,7 @@ export function CommitFiles() {
       await navigator.clipboard.writeText(value);
       toast.success(success);
     } catch {
-      toast.error("Could not copy");
+      toast.error(t("git-files.copyError"));
     }
   }
 
@@ -132,18 +134,18 @@ export function CommitFiles() {
       <div className="shrink-0 px-3 py-2">
         <div className="flex items-start gap-2">
           <div className="min-w-0 flex-1 text-sm font-medium">{commit.summary}</div>
-          <HoverTip label="Close">
-            <Button type="button" size="icon-xs" variant="ghost" aria-label="Close" onClick={closeCommit}>
+          <HoverTip label={t("git-files.close")}>
+            <Button type="button" size="icon-xs" variant="ghost" aria-label={t("git-files.close")} onClick={closeCommit}>
               <XIcon />
             </Button>
           </HoverTip>
         </div>
         <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
-          <HoverTip label="Copy author">
+          <HoverTip label={t("git-files.copyAuthor")}>
           <button
             type="button"
             className="inline-flex items-center gap-1.5 rounded-md px-1 py-0.5 hover:bg-muted hover:text-foreground"
-            onClick={() => void copyText(commit.authorName, "Copied author")}
+            onClick={() => void copyText(commit.authorName, t("git-files.copiedAuthor"))}
           >
             <AuthorAvatar
               name={commit.authorName}
@@ -152,20 +154,20 @@ export function CommitFiles() {
             {commit.authorName}
           </button>
           </HoverTip>
-          <HoverTip label="Copy time">
+          <HoverTip label={t("git-files.copyTime")}>
           <button
             type="button"
             className="rounded-md px-1 py-0.5 tabular-nums hover:bg-muted hover:text-foreground"
-            onClick={() => void copyText(formatAbsoluteTime(commit.timestamp), "Copied time")}
+            onClick={() => void copyText(formatAbsoluteTime(commit.timestamp), t("git-files.copiedTime"))}
           >
             {formatAbsoluteTime(commit.timestamp)}
           </button>
           </HoverTip>
-          <HoverTip label="Copy full hash">
+          <HoverTip label={t("git-files.copyHash")}>
           <button
             type="button"
             className="rounded-md px-1 py-0.5 font-mono hover:bg-muted hover:text-foreground"
-            onClick={() => void copyText(commit.id, "Copied commit hash")}
+            onClick={() => void copyText(commit.id, t("git-files.copiedHash"))}
           >
             {commit.shortId}
           </button>
@@ -205,6 +207,7 @@ const CommitFileRow = memo(function CommitFileRow({
   selected: boolean;
   onSelect: (path: string) => void;
 }) {
+  useTranslation();
   return (
     <li>
       <button
@@ -219,7 +222,7 @@ const CommitFileRow = memo(function CommitFileRow({
           {fileKindLabel(file.kind)}
         </span>
         <span className="min-w-0 flex-1 truncate font-mono">{file.path}</span>
-        {file.binary ? <span className="shrink-0 text-muted-foreground">binary</span> : null}
+        {file.binary ? <span className="shrink-0 text-muted-foreground">{t("git-files.binary")}</span> : null}
       </button>
     </li>
   );

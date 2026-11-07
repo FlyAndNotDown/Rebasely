@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { emptyBinaryDiff } from "@/lib/git";
 import type { P4Changelist, P4File } from "@/types/p4";
-import { defaultChange, fileKey, refreshPendingSession, sameP4Connection, shownFile, updateP4Session, usableP4Session, type P4Session } from "./p4-session";
+import { defaultChange, fileKey, pendingChangeDescription, refreshPendingSession, savePendingDescription, sameP4Connection, showP4OperationResult, shownFile, updateP4Session, usableP4Session, type P4Session } from "./p4-session";
 
 function file(name: string): P4File {
   return {
@@ -52,6 +52,28 @@ describe("initial pending changelist selection", () => {
     expect(defaultChange([change("42", "Empty", []), change("default", "", [])])).toBe("default");
     expect(defaultChange([change("42", "Empty", []), change("43", "Empty", [])])).toBe("42");
     expect(defaultChange([])).toBe("default");
+  });
+});
+
+describe("previewed Perforce operation results", () => {
+  it("opens the affected pending target and its existing resolve workflow", () => {
+    const target = { ...file("b.txt"), status: "conflict" };
+    const current = { ...session(), pending: [change("42", "Saved description", [target])], view: "workspace" as const, description: "Unsaved description" };
+    const next = showP4OperationResult(current, target.localPath, "42", 7);
+    expect(next.view).toBe("pending");
+    expect(next.selectedFile).toBe(target.depotPath);
+    expect(next.resolveRequest).toEqual({ id: 7, change: "42", path: target.depotPath });
+    expect(next.description).toBe("Unsaved description");
+    expect(current.view).toBe("workspace");
+  });
+
+  it("does not auto-resolve an unrelated file when the target is clean or absent", () => {
+    const unrelated = { ...file("a.txt"), status: "conflict" };
+    const target = file("b.txt");
+    const current = { ...session(), pending: [change("42", "Saved", [unrelated, target])] };
+    expect(showP4OperationResult(current, target.localPath, "42", 8).resolveRequest).toBeNull();
+    expect(showP4OperationResult(current, "C:\\work\\client\\missing.txt", "42", 9).resolveRequest).toBeNull();
+    expect(showP4OperationResult(current, target.localPath, "43", 10).resolveRequest).toBeNull();
   });
 });
 
@@ -110,6 +132,43 @@ describe("pending workspace refreshes", () => {
     expect(refreshed.description).toBe("");
     expect(refreshed.selectedFile).toBeNull();
     expect(refreshed.diff).toBeNull();
+  });
+});
+
+describe("saving a pending changelist description", () => {
+  it("captures the target's description and reconciles selecting it while the save is running", () => {
+    const started = { ...session(), pending: [change(), change("43", "Another description")] };
+    const baseline = pendingChangeDescription(started, "43");
+    expect(baseline).toBe("Another description");
+    const selected = { ...started, selectedChange: "43", description: "Another description" };
+    const saved = savePendingDescription(selected, "43", "Saved in the modal", baseline);
+    expect(saved.description).toBe("Saved in the modal");
+    expect(refreshPendingSession(saved, [change(), change("43", "Saved in the modal")]).description).toBe("Saved in the modal");
+  });
+
+  it("updates the modal target without replacing another changelist's draft", () => {
+    const current = { ...session(), pending: [change(), change("43", "Another description")], selectedChange: "43", description: "Keep my draft" };
+    const saved = savePendingDescription(current, "42", "Saved in the modal", "Saved description");
+    expect(saved.pending.find((item) => item.id === "42")?.description).toBe("Saved in the modal");
+    expect(saved.selectedChange).toBe("43");
+    expect(saved.description).toBe("Keep my draft");
+    expect(current.pending[0].description).toBe("Saved description");
+  });
+
+  it("reconciles the selected description so a later refresh cannot restore the old draft", () => {
+    const current = { ...session(), description: "An older unsaved draft" };
+    const saved = savePendingDescription(current, "42", "Saved in the modal", current.description);
+    expect(saved.description).toBe("Saved in the modal");
+    const refreshed = refreshPendingSession(saved, [change("42", "Saved in the modal")]);
+    expect(refreshed.description).toBe("Saved in the modal");
+  });
+
+  it("preserves an edit made after the save started", () => {
+    const current = { ...session(), description: "A newer unsaved draft" };
+    const saved = savePendingDescription(current, "42", "Saved in the modal", "Saved description");
+    expect(saved.pending[0].description).toBe("Saved in the modal");
+    expect(saved.description).toBe("A newer unsaved draft");
+    expect(refreshPendingSession(saved, [change("42", "Saved in the modal")]).description).toBe("A newer unsaved draft");
   });
 });
 

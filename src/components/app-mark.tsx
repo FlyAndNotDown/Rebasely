@@ -1,21 +1,23 @@
-import { GitBranchIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export function AppMark({
   className,
-  iconClassName,
+  src = `${import.meta.env.BASE_URL}assets/mark.png`,
 }: {
   className?: string;
-  iconClassName?: string;
+  src?: string;
 }) {
   return (
-    <div
-      className={cn(
-        "flex items-center justify-center rounded-[22%] bg-zinc-900 text-zinc-100",
-        className,
-      )}
-    >
-      <GitBranchIcon className={iconClassName} />
+    <div className={cn("shrink-0", className)}>
+      <img
+        src={src}
+        alt=""
+        aria-hidden="true"
+        width={256}
+        height={256}
+        draggable={false}
+        className="block size-full object-contain"
+      />
     </div>
   );
 }

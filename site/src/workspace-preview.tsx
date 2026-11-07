@@ -1,34 +1,70 @@
-import { useState } from "react";
-import { FolderTreeIcon, GitBranchIcon, MenuIcon, MinusIcon, RotateCcwIcon, SquareIcon, XIcon } from "lucide-react";
+import { useTranslation } from "react-i18next";
+import { useEffect, useState, useSyncExternalStore } from "react";
+import { MenuIcon, MinusIcon, RotateCcwIcon, SquareIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { VcsIcon } from "@/components/vcs-icon";
 import { desktopPlatform } from "@/lib/desktop-platform";
 import { GitDemo } from "./demo-git";
-import { PerforceDemo } from "./demo-perforce";
+
+type PerforceDemoComponent = typeof import("./demo-perforce").PerforceDemo;
+
+const subscribePlatform = () => () => {};
+const serverPlatform = () => "macos" as const;
 
 export function WorkspacePreview() {
-  const platform = desktopPlatform();
+  const { t } = useTranslation();
+  const platform = useSyncExternalStore(subscribePlatform, desktopPlatform, serverPlatform);
   const [repository, setRepository] = useState("git");
   const [generation, setGeneration] = useState(0);
-  const [notice, setNotice] = useState("Select a file, stage a hunk, then create a sample commit.");
+  const [notice, setNotice] = useState(t("demo.gitIntro"));
+  const [perforceRequested, setPerforceRequested] = useState(false);
+  const [perforceAttempt, setPerforceAttempt] = useState(0);
+  const [PerforceDemo, setPerforceDemo] = useState<PerforceDemoComponent | null>(null);
+  const [perforceFailed, setPerforceFailed] = useState(false);
+
+  useEffect(() => {
+    if (!perforceRequested) return;
+    let current = true;
+    void import("./demo-perforce").then(({ PerforceDemo: Demo }) => {
+      if (current) setPerforceDemo(() => Demo);
+    }, () => {
+      if (current) setPerforceFailed(true);
+    });
+    return () => { current = false; };
+  }, [perforceRequested, perforceAttempt]);
+
+  function reset() {
+    setGeneration((current) => current + 1);
+    setNotice(t("demo.resetNotice"));
+  }
 
   return (
     <>
-      <Tabs value={repository} onValueChange={(value) => { setRepository(value); setNotice(value === "git" ? "Select a file, stage a hunk, then create a sample commit." : "Review a pending changelist, shelve its files, or explore History."); }} className="workspace-preview" data-platform={platform}>
-        {platform === "linux" ? <div className="demo-system-frame" aria-hidden="true">Rebasely</div> : null}
+      <Tabs value={repository} onValueChange={(value) => { setRepository(value); if (value === "perforce") setPerforceRequested(true); setNotice(value === "git" ? t("demo.gitIntro") : t("demo.p4Intro")); }} className="workspace-preview" data-platform={platform}>
+        {platform === "linux" ? <div className="demo-system-frame" aria-hidden="true">RebaseRaven</div> : null}
         <div className="demo-titlebar">
           {platform === "macos" ? <span className="demo-traffic-lights" aria-hidden="true"><i /><i /><i /></span> : null}
-          <span className="demo-options" aria-hidden="true"><MenuIcon /></span>
-          <TabsList aria-label="Demo repositories" className="demo-repository-tabs">
-            <TabsTrigger value="git"><GitBranchIcon /><span>atlas</span><span className="demo-vcs-label">Git</span></TabsTrigger>
-            <TabsTrigger value="perforce"><FolderTreeIcon /><span>studio</span><span className="demo-vcs-label">Perforce</span></TabsTrigger>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild><Button size="icon-sm" variant="ghost" className="demo-options" aria-label={t("demo.menu")}><MenuIcon /></Button></DropdownMenuTrigger>
+            <DropdownMenuContent align="start"><DropdownMenuItem onSelect={reset}><RotateCcwIcon />{t("demo.reset")}</DropdownMenuItem></DropdownMenuContent>
+          </DropdownMenu>
+          <TabsList aria-label={t("demo.repositories")} className="demo-repository-tabs">
+            <TabsTrigger value="git"><VcsIcon vcs="git" /><span>atlas</span><span className="demo-vcs-label">Git</span></TabsTrigger>
+            <TabsTrigger value="perforce"><VcsIcon vcs="perforce" /><span>studio</span><span className="demo-vcs-label">Perforce</span></TabsTrigger>
           </TabsList>
           {platform === "windows" ? <span className="demo-window-controls" aria-hidden="true"><MinusIcon /><SquareIcon /><XIcon /></span> : null}
         </div>
         <TabsContent forceMount hidden={repository !== "git"} value="git" className="demo-repository-panel"><GitDemo key={`git-${generation}`} onNotice={setNotice} /></TabsContent>
-        <TabsContent forceMount hidden={repository !== "perforce"} value="perforce" className="demo-repository-panel"><PerforceDemo key={`p4-${generation}`} onNotice={setNotice} /></TabsContent>
+        <TabsContent forceMount hidden={repository !== "perforce"} value="perforce" className="demo-repository-panel">
+          {PerforceDemo ? <PerforceDemo key={`p4-${generation}`} onNotice={setNotice} /> : perforceRequested ? <div className="demo-load-state" role={perforceFailed ? "alert" : "status"}>
+            <p>{t(perforceFailed ? "demo.loadPerforceFailed" : "demo.loadingPerforce")}</p>
+            {perforceFailed ? <Button size="sm" variant="outline" onClick={() => { setPerforceFailed(false); setPerforceAttempt((current) => current + 1); }}>{t("demo.retryPerforce")}</Button> : null}
+          </div> : null}
+        </TabsContent>
       </Tabs>
-      <div className="site-demo-help"><p role="status" aria-live="polite">{notice}</p><Button size="sm" variant="ghost" onClick={() => { setGeneration((current) => current + 1); setNotice("Demo reset. Choose a project and try another change."); }}><RotateCcwIcon />Reset demo</Button></div>
+      <div className="site-demo-help"><p role="status" aria-live="polite">{notice}</p><Button size="sm" variant="ghost" onClick={reset}><RotateCcwIcon />{t("demo.reset")}</Button></div>
     </>
   );
 }

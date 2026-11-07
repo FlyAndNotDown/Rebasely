@@ -4,14 +4,14 @@ fn temp_repo() -> (PathBuf, Repository) {
     // Tests run in parallel and the clock is too coarse to tell them apart.
     static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let root = std::env::temp_dir().join(format!(
-        "rebasely-test-{}-{}",
+        "rebaseraven-test-{}-{}",
         std::process::id(),
         NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     ));
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(&root).unwrap();
     run_git_stdout(&root, &["init"]).unwrap();
-    run_git_stdout(&root, &["config", "user.name", "Rebasely Test"]).unwrap();
+    run_git_stdout(&root, &["config", "user.name", "RebaseRaven Test"]).unwrap();
     run_git_stdout(&root, &["config", "user.email", "test@example.com"]).unwrap();
     let repo = open_at(&root).unwrap();
     (root, repo)
@@ -56,6 +56,112 @@ fn other_branch(repo: &Repository, except: &str) -> String {
         .find(|name| !name.is_empty() && *name != except)
         .unwrap()
         .to_string()
+}
+
+#[test]
+fn passive_discovery_uses_c_locale_without_changing_git_commands() {
+    const CHILD_ENV: &str = "REBASERAVEN_GIT_LOCALE_TEST_CHILD";
+    const ROOT_ENV: &str = "REBASERAVEN_GIT_LOCALE_TEST_ROOT";
+    if std::env::var_os(CHILD_ENV).as_deref() != Some(std::ffi::OsStr::new("1")) {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path().join("workspace");
+        fs::create_dir(&root).unwrap();
+        let mut command = crate::platform::background_command(std::env::current_exe().unwrap());
+        command.args([
+            "--exact",
+            "git::tests::passive_discovery_uses_c_locale_without_changing_git_commands",
+            "--nocapture",
+        ]);
+        command
+            .env(CHILD_ENV, "1")
+            .env(ROOT_ENV, &root)
+            .env("LC_ALL", "zh_CN.UTF-8")
+            .env("LANG", "fr_FR.UTF-8")
+            .env("LANGUAGE", "zh_CN:fr")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", temporary.path().join("global.config"))
+            .env("GIT_CONFIG_COUNT", "0")
+            .env("GIT_CEILING_DIRECTORIES", temporary.path())
+            .env("GIT_TRACE2_EVENT", temporary.path().join("probe.trace"))
+            .env("GIT_TRACE2_ENV_VARS", "LC_ALL,LANG,LANGUAGE");
+        for key in [
+            "GIT_DIR",
+            "GIT_WORK_TREE",
+            "GIT_COMMON_DIR",
+            "GIT_INDEX_FILE",
+            "GIT_OBJECT_DIRECTORY",
+            "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+            "GIT_TEMPLATE_DIR",
+        ] {
+            command.env_remove(key);
+        }
+        let output = command.output().unwrap();
+        assert!(
+            output.status.success(),
+            "isolated locale test failed:\n{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
+
+    let root = PathBuf::from(std::env::var_os(ROOT_ENV).unwrap());
+    let missing = open_for_detection(&root).unwrap_err().to_string();
+    assert!(
+        missing.starts_with("fatal: not a git repository"),
+        "{missing}"
+    );
+    // Trace2 observes the actual Git child's environment, so this assertion
+    // does not depend on a machine having translated Git catalogs installed.
+    let trace = fs::read_to_string(std::env::var_os("GIT_TRACE2_EVENT").unwrap()).unwrap();
+    let observed: HashMap<String, String> = trace
+        .lines()
+        .filter_map(|line| {
+            let event: serde_json::Value = serde_json::from_str(line).ok()?;
+            if event["event"] != "def_param" {
+                return None;
+            }
+            Some((
+                event["param"].as_str()?.to_string(),
+                event["value"].as_str()?.to_string(),
+            ))
+        })
+        .collect();
+    for key in ["LC_ALL", "LANG", "LANGUAGE"] {
+        assert_eq!(observed.get(key).map(String::as_str), Some("C"), "{key}");
+    }
+    run_git_stdout(&root, &["-c", "init.templateDir=", "init"]).unwrap();
+    let repo = open_for_detection(&root).unwrap();
+    assert_eq!(
+        fs::canonicalize(repo.workdir()).unwrap(),
+        fs::canonicalize(&root).unwrap()
+    );
+
+    let ordinary = run_git(
+        &root,
+        &[
+            "-c",
+            "alias.fixture-locale=!printf '%s' \"$LC_ALL|$LANG|$LANGUAGE\"",
+            "fixture-locale",
+        ],
+    )
+    .unwrap();
+    assert!(ordinary.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&ordinary.stdout),
+        "zh_CN.UTF-8|fr_FR.UTF-8|zh_CN:fr"
+    );
+    for (key, expected) in [
+        ("LC_ALL", "zh_CN.UTF-8"),
+        ("LANG", "fr_FR.UTF-8"),
+        ("LANGUAGE", "zh_CN:fr"),
+    ] {
+        assert_eq!(std::env::var(key).unwrap(), expected);
+    }
+
+    fs::write(root.join(".git/config"), "[invalid\n").unwrap();
+    let broken = open_for_detection(&root).unwrap_err().to_string();
+    assert!(broken.contains("bad config line"), "{broken}");
 }
 
 #[test]
@@ -279,7 +385,7 @@ fn amend_keeps_original_author() {
     let head = commit_info(&repo, "HEAD").unwrap();
     assert_eq!(head.summary(), Some("reworded"));
     assert_eq!(head.author_name, "Original Author");
-    assert_eq!(head.committer_name, "Rebasely Test");
+    assert_eq!(head.committer_name, "RebaseRaven Test");
     let _ = fs::remove_dir_all(&root);
 }
 
@@ -767,11 +873,11 @@ fn history_pages_are_contiguous_whether_or_not_the_stream_is_reused() {
     let _ = fs::remove_dir_all(&root);
 }
 
-/// `REBASELY_BENCH_REPO=<path> cargo test bench_history_pages -- --ignored --nocapture`
+/// `REBASERAVEN_BENCH_REPO=<path> cargo test bench_history_pages -- --ignored --nocapture`
 #[test]
 #[ignore]
 fn bench_history_pages() {
-    let Ok(path) = std::env::var("REBASELY_BENCH_REPO") else {
+    let Ok(path) = std::env::var("REBASERAVEN_BENCH_REPO") else {
         return;
     };
     let mut repo = open_at(Path::new(&path)).unwrap();
@@ -1052,7 +1158,7 @@ fn pull_and_push_follow_an_upstream_with_a_different_name() {
     )
     .unwrap();
     let mut local = open_at(&local_root).unwrap();
-    run_git_stdout(&local_root, &["config", "user.name", "Rebasely Test"]).unwrap();
+    run_git_stdout(&local_root, &["config", "user.name", "RebaseRaven Test"]).unwrap();
     run_git_stdout(&local_root, &["config", "user.email", "test@example.com"]).unwrap();
     run_git_stdout(
         &local_root,
@@ -1078,6 +1184,155 @@ fn pull_and_push_follow_an_upstream_with_a_different_name() {
 
     let _ = fs::remove_dir_all(&local_root);
     let _ = fs::remove_dir_all(&origin_root);
+}
+
+#[test]
+fn renaming_a_branch_preserves_its_tip_tracking_config_and_reflog() {
+    let (root, repo) = temp_repo();
+    commit_file(&repo, &root, "file.txt", "base\n", "base");
+    create_branch(&repo, "feature/original", true, None).unwrap();
+    commit_file(&repo, &root, "file.txt", "feature\n", "feature");
+    let tip = head_id(&repo);
+    run_git_stdout(
+        &root,
+        &["config", "branch.feature/original.remote", "origin"],
+    )
+    .unwrap();
+    run_git_stdout(
+        &root,
+        &[
+            "config",
+            "branch.feature/original.merge",
+            "refs/heads/remote-feature",
+        ],
+    )
+    .unwrap();
+    let reflog = run_git_stdout(
+        &root,
+        &["reflog", "show", "--format=%H", "feature/original"],
+    )
+    .unwrap();
+
+    rename_branch(&repo, "feature/original", "feature/renamed").unwrap();
+    assert_eq!(symbolic_branch(&repo).as_deref(), Some("feature/renamed"));
+    assert_eq!(head_id(&repo), tip);
+    assert!(!ref_exists(&repo, "refs/heads/feature/original"));
+    assert_eq!(
+        config_get(&repo, "branch.feature/renamed.remote").as_deref(),
+        Some("origin")
+    );
+    assert_eq!(
+        config_get(&repo, "branch.feature/renamed.merge").as_deref(),
+        Some("refs/heads/remote-feature")
+    );
+    assert!(config_get(&repo, "branch.feature/original.remote").is_none());
+    let renamed_log =
+        run_git_stdout(&root, &["reflog", "show", "--format=%H", "feature/renamed"]).unwrap();
+    assert!(renamed_log.ends_with(&reflog));
+
+    create_branch(&repo, "occupied", false, None).unwrap();
+    assert!(rename_branch(&repo, "feature/renamed", "occupied").is_err());
+    assert!(rename_branch(&repo, "feature/renamed", "invalid..name").is_err());
+    assert!(rename_branch(&repo, "feature/renamed", "--force").is_err());
+    assert!(rename_branch(&repo, "missing", "new").is_err());
+    assert_eq!(symbolic_branch(&repo).as_deref(), Some("feature/renamed"));
+    assert_eq!(head_id(&repo), tip);
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn upstream_can_be_changed_and_removed_without_switching_or_pushing() {
+    let (root, repo) = temp_repo();
+    commit_file(&repo, &root, "file.txt", "base\n", "base");
+    let original_branch = symbolic_branch(&repo).unwrap();
+    let tip = head_id(&repo);
+    create_branch(&repo, "feature", false, None).unwrap();
+    add_remote(&repo, "origin", "https://git.example.com/team/project.git").unwrap();
+    for name in ["first", "second"] {
+        run_git_stdout(
+            &root,
+            &["update-ref", &format!("refs/remotes/origin/{name}"), &tip],
+        )
+        .unwrap();
+    }
+
+    set_branch_upstream(&repo, "feature", Some("origin/first")).unwrap();
+    assert_eq!(
+        config_get(&repo, "branch.feature.remote").as_deref(),
+        Some("origin")
+    );
+    assert_eq!(
+        config_get(&repo, "branch.feature.merge").as_deref(),
+        Some("refs/heads/first")
+    );
+    set_branch_upstream(&repo, "feature", Some("origin/second")).unwrap();
+    let listed = branches(&repo, true).unwrap();
+    assert_eq!(
+        listed
+            .local
+            .iter()
+            .find(|branch| branch.name == "feature")
+            .unwrap()
+            .upstream
+            .as_deref(),
+        Some("origin/second")
+    );
+    assert!(set_branch_upstream(&repo, "feature", Some("origin/missing")).is_err());
+    assert!(set_branch_upstream(&repo, "feature", Some("origin/HEAD")).is_err());
+    assert!(set_branch_upstream(&repo, "feature", Some("--help")).is_err());
+    assert!(set_branch_upstream(&repo, "origin/first", None).is_err());
+    assert_eq!(
+        config_get(&repo, "branch.feature.merge").as_deref(),
+        Some("refs/heads/second")
+    );
+
+    set_branch_upstream(&repo, "feature", None).unwrap();
+    assert!(config_get(&repo, "branch.feature.remote").is_none());
+    assert!(config_get(&repo, "branch.feature.merge").is_none());
+    assert_eq!(
+        symbolic_branch(&repo).as_deref(),
+        Some(original_branch.as_str())
+    );
+    assert_eq!(head_id(&repo), tip);
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn editing_a_remote_fetch_url_persists_without_changing_its_explicit_push_url() {
+    let (root, repo) = temp_repo();
+    add_remote(&repo, "origin", "https://git.example.com/team/old.git").unwrap();
+    run_git_stdout(
+        &root,
+        &[
+            "remote",
+            "set-url",
+            "--push",
+            "origin",
+            "ssh://git@git.example.com/team/push.git",
+        ],
+    )
+    .unwrap();
+    set_remote_url(&repo, "origin", "https://git.example.com/team/new.git").unwrap();
+    let reopened = open_at(&root).unwrap();
+    let remotes = list_remotes(&reopened).unwrap();
+    let remote = remotes
+        .iter()
+        .find(|remote| remote.name == "origin")
+        .unwrap();
+    assert_eq!(
+        remote.url.as_deref(),
+        Some("https://git.example.com/team/new.git")
+    );
+    assert_eq!(
+        remote.push_url.as_deref(),
+        Some("ssh://git@git.example.com/team/push.git")
+    );
+    assert!(set_remote_url(&repo, "origin", " ").is_err());
+    assert_eq!(
+        config_get(&repo, "remote.origin.url").as_deref(),
+        Some("https://git.example.com/team/new.git")
+    );
+    let _ = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -1615,6 +1870,31 @@ fn submodule_status_lines_are_parsed() {
 
 #[test]
 fn submodules_are_listed_and_updated() {
+    const CHILD_ENV: &str = "REBASERAVEN_SUBMODULE_TEST_CHILD";
+    if std::env::var_os(CHILD_ENV).as_deref() != Some(std::ffi::OsStr::new("1")) {
+        // Set inherited Git configuration before the child starts so parallel
+        // tests cannot observe an incomplete GIT_CONFIG_COUNT/KEY/VALUE tuple.
+        let output = crate::platform::background_command(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "git::tests::submodules_are_listed_and_updated",
+                "--nocapture",
+            ])
+            .env(CHILD_ENV, "1")
+            .env("GIT_CONFIG_COUNT", "1")
+            .env("GIT_CONFIG_KEY_0", "protocol.file.allow")
+            .env("GIT_CONFIG_VALUE_0", "always")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "isolated submodule test failed:\n{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
+
     let (sub_root, sub) = temp_repo();
     commit_file(&sub, &sub_root, "lib.txt", "lib\n", "lib");
     let (root, mut repo) = temp_repo();
@@ -1641,14 +1921,10 @@ fn submodules_are_listed_and_updated() {
 
     run_git_stdout(&root, &["submodule", "deinit", "-q", "--force", "libs/sub"]).unwrap();
     assert_eq!(list_submodules(&repo).unwrap()[0].state, "uninitialized");
-    unsafe {
-        std::env::set_var("GIT_CONFIG_COUNT", "1");
-        std::env::set_var("GIT_CONFIG_KEY_0", "protocol.file.allow");
-        std::env::set_var("GIT_CONFIG_VALUE_0", "always");
-    }
-    let result = update_submodules(&mut repo, &[], |_| {});
-    unsafe { std::env::remove_var("GIT_CONFIG_COUNT") };
-    result.unwrap();
+    // Require a fresh clone so the update exercises inherited file transport
+    // configuration rather than reusing the first checkout's object cache.
+    fs::remove_dir_all(repo.path().join("modules/libs/sub")).unwrap();
+    update_submodules(&mut repo, &[], |_| {}).unwrap();
     assert_eq!(list_submodules(&repo).unwrap()[0].state, "clean");
     assert!(root.join("libs/sub/lib.txt").is_file());
     let _ = fs::remove_dir_all(&root);
@@ -1695,6 +1971,32 @@ fn tags_go_through_git_and_reject_bad_names() {
     assert!(
         text.contains("\n\nfirst release\n") || text.trim_end().ends_with("first release"),
         "{text}"
+    );
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn directory_listing_sorts_folders_first_without_case() {
+    let (root, repo) = temp_repo();
+    for folder in ["z-folder", "A-folder"] {
+        fs::create_dir(root.join(folder)).unwrap();
+    }
+    for file in ["z-file.txt", "B-file.txt", "a-file.txt"] {
+        fs::write(root.join(file), "content\n").unwrap();
+    }
+    let entries = list_directory(&repo, "").unwrap();
+    assert_eq!(
+        entries
+            .iter()
+            .map(|entry| entry.name.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "A-folder",
+            "z-folder",
+            "a-file.txt",
+            "B-file.txt",
+            "z-file.txt"
+        ]
     );
     let _ = fs::remove_dir_all(&root);
 }

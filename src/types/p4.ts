@@ -48,6 +48,8 @@ export interface P4ResolveView {
   summary: string;
   content: boolean;
   comparable: boolean;
+  workingCopy: boolean;
+  pendingResolves: number;
   diff: FileDiff;
 }
 
@@ -89,6 +91,8 @@ export type P4RevisionMode = "latest" | "revision" | "changelist" | "datetime" |
 
 export interface P4GetRevision {
   paths: string[];
+  changeId?: string;
+  recursive?: boolean;
   mode: P4RevisionMode;
   value: string;
   force: boolean;
@@ -96,6 +100,35 @@ export interface P4GetRevision {
   changelistFilesOnly: boolean;
   removeNotInLabel: boolean;
   preview: boolean;
+}
+
+export interface P4RevisionRange {
+  from: string;
+  to: string;
+}
+
+export interface P4IntegrateRequest {
+  source: string;
+  target: string;
+  range: P4RevisionRange | null;
+  changeId: string;
+}
+
+export type P4UndoSelector =
+  | { mode: "revision"; revision: string }
+  | { mode: "range"; from: string; to: string }
+  | { mode: "changelist"; change: string };
+
+export interface P4UndoRequest {
+  path: string;
+  selector: P4UndoSelector;
+  changeId: string;
+}
+
+export interface P4OperationPreview {
+  output: string;
+  fingerprint: string;
+  target: string;
 }
 
 export interface P4Auth {

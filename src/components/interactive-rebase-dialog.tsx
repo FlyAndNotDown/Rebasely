@@ -1,3 +1,4 @@
+import { t, useTranslation } from "@/i18n";
 import { useEffect, useState } from "react";
 import { ArrowDownIcon, ArrowUpIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -15,12 +16,12 @@ import { cn } from "@/lib/utils";
 import { useGitPick } from "@/state/git-context";
 import type { RebaseAction, RebaseCommit, RebaseStep } from "@/types/git";
 
-const ACTIONS: { id: RebaseAction; label: string }[] = [
-  { id: "pick", label: "Pick" },
-  { id: "reword", label: "Reword" },
-  { id: "squash", label: "Squash" },
-  { id: "fixup", label: "Fixup" },
-  { id: "drop", label: "Drop" },
+const ACTIONS: { id: RebaseAction; labelKey: string }[] = [
+  { id: "pick", labelKey: "git.ui.pick" },
+  { id: "reword", labelKey: "git.ui.reword" },
+  { id: "squash", labelKey: "git.ui.squash" },
+  { id: "fixup", labelKey: "git.ui.fixup" },
+  { id: "drop", labelKey: "git.ui.drop" },
 ];
 
 type Step = RebaseCommit & { action: RebaseAction; message: string };
@@ -32,6 +33,7 @@ export function InteractiveRebaseDialog({
   onto: { id: string; label: string } | null;
   onOpenChange: (open: boolean) => void;
 }) {
+  useTranslation();
   return (
     <Dialog open={Boolean(onto)} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
@@ -48,6 +50,7 @@ function InteractiveRebaseForm({
   onto: { id: string; label: string };
   onOpenChange: (open: boolean) => void;
 }) {
+  useTranslation();
   const { snapshot, rebaseInteractive } = useGitPick(["snapshot", "rebaseInteractive"]);
   const repoPath = snapshot?.repo.path;
   const [steps, setSteps] = useState<Step[]>([]);
@@ -108,23 +111,22 @@ function InteractiveRebaseForm({
   return (
     <>
       <DialogHeader>
-        <DialogTitle>Interactive rebase</DialogTitle>
+        <DialogTitle>{t("git.ui.interactive_rebase")}</DialogTitle>
         <DialogDescription>
-          Replay commits after <span className="font-mono text-foreground">{onto.label}</span>.
-          Oldest is first. Squash and fixup fold a commit into the one above it.
+          {t("git.dynamic.interactiveDescription", { target: onto.label })}
         </DialogDescription>
       </DialogHeader>
       <div className="max-h-80 space-y-2 overflow-auto pr-1">
-        {loading ? <p role="status" className="text-sm text-muted-foreground">Loading commits…</p> : null}
+        {loading ? <p role="status" className="text-sm text-muted-foreground">{t("git.ui.loading_commits")}</p> : null}
         {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
         {!loading && !error && steps.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Nothing to rebase.</p>
+          <p className="text-sm text-muted-foreground">{t("git.ui.nothing_to_rebase")}</p>
         ) : null}
         {steps.map((step, index) => (
           <div key={step.id} className="rounded-md border px-2 py-2">
             <div className="flex items-center gap-2">
               <select
-                aria-label={`Action for ${step.shortId}`}
+                aria-label={t("git.dynamic.rebaseAction", { id: step.shortId })}
                 className="h-7 shrink-0 rounded-md border bg-background px-1.5 text-xs"
                 value={step.action}
                 onChange={(event) =>
@@ -133,7 +135,7 @@ function InteractiveRebaseForm({
               >
                 {ACTIONS.map((action) => (
                   <option key={action.id} value={action.id}>
-                    {action.label}
+                    {t(action.labelKey)}
                   </option>
                 ))}
               </select>
@@ -146,14 +148,14 @@ function InteractiveRebaseForm({
                   step.action === "drop" && "text-muted-foreground line-through",
                 )}
               >
-                {step.summary || "(no message)"}
+                {step.summary || t("git.ui.no_message")}
               </span>
               <Button
                 type="button"
                 variant="ghost"
                 size="icon-xs"
                 disabled={index === 0}
-                aria-label="Move up"
+                aria-label={t("git.ui.move_up")}
                 onClick={() => move(index, -1)}
               >
                 <ArrowUpIcon />
@@ -163,7 +165,7 @@ function InteractiveRebaseForm({
                 variant="ghost"
                 size="icon-xs"
                 disabled={index === steps.length - 1}
-                aria-label="Move down"
+                aria-label={t("git.ui.move_down")}
                 onClick={() => move(index, 1)}
               >
                 <ArrowDownIcon />
@@ -173,7 +175,7 @@ function InteractiveRebaseForm({
               <Textarea
                 className="mt-2 min-h-16 resize-none font-mono text-xs"
                 value={step.message}
-                aria-label={step.action === "reword" ? "New message" : "Squash message"}
+                aria-label={step.action === "reword" ? t("git.ui.new_message") : t("git.ui.squash_message")}
                 onChange={(event) => update(step.id, { message: event.target.value })}
               />
             ) : null}
@@ -181,9 +183,7 @@ function InteractiveRebaseForm({
         ))}
       </div>
       <DialogFooter>
-        <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-          Cancel
-        </Button>
+        <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>{t("git.ui.cancel")}</Button>
         <Button
           type="button"
           disabled={!canStart}
@@ -191,9 +191,7 @@ function InteractiveRebaseForm({
             onOpenChange(false);
             void rebaseInteractive(onto.id, payload);
           }}
-        >
-          Start rebase
-        </Button>
+        >{t("git.ui.start_rebase")}</Button>
       </DialogFooter>
     </>
   );

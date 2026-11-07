@@ -94,6 +94,11 @@ async fn get_diagnostic_summary(app: AppHandle) -> AppResult<diagnostics::Summar
 }
 
 #[tauri::command]
+async fn clear_diagnostic_logs(app: AppHandle) -> AppResult<()> {
+    blocking(move || diagnostics::clear(&app)).await
+}
+
+#[tauri::command]
 async fn export_diagnostic_logs(
     destination: String,
     app: AppHandle,
@@ -628,6 +633,32 @@ async fn create_branch(
 }
 
 #[tauri::command]
+async fn rename_branch(
+    repo_path: String,
+    name: String,
+    new_name: String,
+) -> AppResult<WorkspaceSnapshot> {
+    with_repo_async(repo_path, move |repo| {
+        git::rename_branch(repo, &name, &new_name)?;
+        git::snapshot(repo)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn set_branch_upstream(
+    repo_path: String,
+    name: String,
+    upstream: Option<String>,
+) -> AppResult<WorkspaceSnapshot> {
+    with_repo_async(repo_path, move |repo| {
+        git::set_branch_upstream(repo, &name, upstream.as_deref())?;
+        git::snapshot(repo)
+    })
+    .await
+}
+
+#[tauri::command]
 async fn delete_branch(
     repo_path: String,
     name: String,
@@ -911,6 +942,11 @@ async fn open_in_file_manager(path: String) -> AppResult<()> {
 #[tauri::command]
 async fn open_mailto(email: String) -> AppResult<()> {
     blocking(move || editor::open_mailto(&email)).await
+}
+
+#[tauri::command]
+async fn open_external_url(url: String) -> AppResult<()> {
+    blocking(move || platform::open_url(&url)).await
 }
 
 #[tauri::command]
@@ -1231,6 +1267,20 @@ async fn p4_new_change(connection: p4::P4Connection, description: String) -> App
 }
 
 #[tauri::command]
+async fn p4_delete_change(connection: p4::P4Connection, change_id: String) -> AppResult<()> {
+    blocking(move || p4::delete_change(&connection, &change_id)).await
+}
+
+#[tauri::command]
+async fn p4_move_file(
+    connection: p4::P4Connection,
+    source: String,
+    destination: String,
+) -> AppResult<()> {
+    blocking(move || p4::move_file(&connection, &source, &destination)).await
+}
+
+#[tauri::command]
 async fn p4_reopen(
     connection: p4::P4Connection,
     change_id: String,
@@ -1293,7 +1343,13 @@ async fn p4_resolve_accept(
     path: String,
     mode: String,
 ) -> AppResult<()> {
-    blocking(move || p4::resolve_accept(&connection, &path, &mode)).await
+    blocking(move || {
+        let started = std::time::Instant::now();
+        let result = p4::resolve_accept(&connection, &path, &mode);
+        diagnostics::record_slow_or_failed(diagnostics::Code::PerforceResolve, started, &result);
+        result
+    })
+    .await
 }
 
 #[tauri::command]
@@ -1340,12 +1396,47 @@ async fn p4_reconcile(
 }
 
 #[tauri::command]
+async fn p4_preview_integrate(
+    connection: p4::P4Connection,
+    request: p4::P4IntegrateRequest,
+) -> AppResult<p4::P4OperationPreview> {
+    blocking(move || p4::preview_integrate(&connection, &request)).await
+}
+
+#[tauri::command]
+async fn p4_apply_integrate(
+    connection: p4::P4Connection,
+    request: p4::P4IntegrateRequest,
+    fingerprint: String,
+) -> AppResult<String> {
+    blocking(move || p4::apply_integrate(&connection, &request, &fingerprint)).await
+}
+
+#[tauri::command]
+async fn p4_preview_undo(
+    connection: p4::P4Connection,
+    request: p4::P4UndoRequest,
+) -> AppResult<p4::P4OperationPreview> {
+    blocking(move || p4::preview_undo(&connection, &request)).await
+}
+
+#[tauri::command]
+async fn p4_apply_undo(
+    connection: p4::P4Connection,
+    request: p4::P4UndoRequest,
+    fingerprint: String,
+) -> AppResult<String> {
+    blocking(move || p4::apply_undo(&connection, &request, &fingerprint)).await
+}
+
+#[tauri::command]
 async fn p4_file_action(
     connection: p4::P4Connection,
     action: String,
     paths: Vec<String>,
+    change_id: Option<String>,
 ) -> AppResult<()> {
-    blocking(move || p4::file_action(&connection, &action, &paths)).await
+    blocking(move || p4::file_action(&connection, &action, &paths, change_id.as_deref())).await
 }
 
 #[tauri::command]
@@ -1540,7 +1631,7 @@ fn macos_menu<R: tauri::Runtime>(app: &AppHandle<R>) -> tauri::Result<tauri::men
     // Close Window is omitted. Command-W closes the repository tab.
     let app_menu = Submenu::with_items(
         app,
-        "Rebasely",
+        "RebaseRaven",
         true,
         &[
             &PredefinedMenuItem::about(app, None, None)?,
@@ -1653,6 +1744,8 @@ pub fn run() {
                 }
                 window_state::restore(&window, app.handle());
                 window_state::watch(&window, app.handle());
+                #[cfg(target_os = "macos")]
+                platform::watch_main_titlebar(&window);
                 silence_browser_shortcuts(&window);
                 // The page normally reveals the window. This covers a load that never finishes.
                 let app_handle = app.handle().clone();
@@ -1674,6 +1767,7 @@ pub fn run() {
             initialize_repository,
             get_author_avatar,
             get_diagnostic_summary,
+            clear_diagnostic_logs,
             export_diagnostic_logs,
             open_diagnostic_directory,
             open_diagnostic_issues,
@@ -1722,6 +1816,8 @@ pub fn run() {
             pull_remote,
             push_remote,
             create_branch,
+            rename_branch,
+            set_branch_upstream,
             create_tag,
             delete_tag,
             push_tag,
@@ -1760,6 +1856,7 @@ pub fn run() {
             set_local_git_identity,
             open_in_file_manager,
             open_mailto,
+            open_external_url,
             reveal_in_file_manager,
             ignore_patterns,
             list_terminals,
@@ -1796,6 +1893,8 @@ pub fn run() {
             p4_submit,
             p4_save_change,
             p4_new_change,
+            p4_delete_change,
+            p4_move_file,
             p4_reopen,
             p4_revert,
             p4_revert_unchanged,
@@ -1808,6 +1907,10 @@ pub fn run() {
             p4_sync,
             p4_reconcile,
             p4_file_action,
+            p4_preview_integrate,
+            p4_apply_integrate,
+            p4_preview_undo,
+            p4_apply_undo,
             p4_login,
             p4_check_connection,
             p4_list_streams,
@@ -1828,5 +1931,5 @@ pub fn run() {
             sync_window_chrome
         ])
         .run(context)
-        .expect("error while running Rebasely");
+        .expect("error while running RebaseRaven");
 }

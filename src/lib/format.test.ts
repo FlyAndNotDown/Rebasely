@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { setLanguagePreference } from "@/i18n";
 import {
   disambiguateRepoLabels,
   displayPath,
@@ -14,6 +15,8 @@ import {
   pathsIgnoreCase,
   sameRepoPath,
 } from "./format";
+
+beforeEach(() => { setLanguagePreference("en"); });
 
 afterEach(() => {
   vi.useRealTimers();

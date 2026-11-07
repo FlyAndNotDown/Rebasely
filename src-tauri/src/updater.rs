@@ -10,7 +10,7 @@ use crate::error::{redact_credentials, AppError, AppResult};
 use crate::network::HttpPolicy;
 
 const UPDATE_ENDPOINT: &str =
-    "https://github.com/FlyAndNotDown/Rebasely/releases/latest/download/latest.json";
+    "https://github.com/FlyAndNotDown/RebaseRaven/releases/latest/download/latest.json";
 const UPDATE_EVENT: &str = "app-update";
 const MAX_VERSION_BYTES: usize = 128;
 const MAX_NOTES_BYTES: usize = 16 * 1024;
@@ -140,7 +140,7 @@ fn release_download_url(url: &url::Url) -> bool {
         && url.fragment().is_none()
         && url
             .path()
-            .starts_with("/FlyAndNotDown/Rebasely/releases/download/")
+            .starts_with("/FlyAndNotDown/RebaseRaven/releases/download/")
         && url
             .path_segments()
             .is_some_and(|segments| segments.count() >= 6)
@@ -177,7 +177,7 @@ fn validate_install(snapshot: &UpdateState, version: &str, has_pending: bool) ->
     }
     if snapshot.status == UpdateStatus::Installed {
         return Err(AppError::msg(
-            "The update is already installed. Restart Rebasely to use it.",
+            "The update is already installed. Restart RebaseRaven to use it.",
         ));
     }
     if version.len() > MAX_VERSION_BYTES
@@ -402,7 +402,7 @@ pub async fn install_update(version: String, app: AppHandle) -> AppResult<Update
 pub fn restart_after_update(app: AppHandle) -> AppResult<()> {
     if app.state::<UpdateManager>().snapshot().status != UpdateStatus::Installed {
         return Err(AppError::msg(
-            "Install the update before restarting Rebasely.",
+            "Install the update before restarting RebaseRaven.",
         ));
     }
     diagnostics::record(Code::UpdateRestart, Status::Success, None);
@@ -428,15 +428,16 @@ mod tests {
 
     #[test]
     fn only_public_release_downloads_from_this_repository_are_accepted() {
-        let valid = "https://github.com/FlyAndNotDown/Rebasely/releases/download/v0.0.2/update.exe";
+        let valid =
+            "https://github.com/FlyAndNotDown/RebaseRaven/releases/download/v0.0.2/update.exe";
         assert!(release_download_url(&url::Url::parse(valid).unwrap()));
         for invalid in [
-            "http://github.com/FlyAndNotDown/Rebasely/releases/download/v0.0.2/update.exe",
-            "https://example.com/FlyAndNotDown/Rebasely/releases/download/v0.0.2/update.exe",
+            "http://github.com/FlyAndNotDown/RebaseRaven/releases/download/v0.0.2/update.exe",
+            "https://example.com/FlyAndNotDown/RebaseRaven/releases/download/v0.0.2/update.exe",
             "https://github.com/other/repo/releases/download/v0.0.2/update.exe",
-            "https://github.com/FlyAndNotDown/Rebasely/releases/latest/download/update.exe",
-            "https://alice:secret@github.com/FlyAndNotDown/Rebasely/releases/download/v0.0.2/update.exe",
-            "https://github.com/FlyAndNotDown/Rebasely/releases/download/v0.0.2/update.exe?token=secret",
+            "https://github.com/FlyAndNotDown/RebaseRaven/releases/latest/download/update.exe",
+            "https://alice:secret@github.com/FlyAndNotDown/RebaseRaven/releases/download/v0.0.2/update.exe",
+            "https://github.com/FlyAndNotDown/RebaseRaven/releases/download/v0.0.2/update.exe?token=secret",
         ] {
             assert!(!release_download_url(&url::Url::parse(invalid).unwrap()));
         }
@@ -509,7 +510,7 @@ mod tests {
                 "notes": "Fixture update",
                 "platforms": {
                     "fixture-target": {
-                        "url": "https://github.com/FlyAndNotDown/Rebasely/releases/download/v9.9.9/fixture.tar.gz",
+                        "url": "https://github.com/FlyAndNotDown/RebaseRaven/releases/download/v9.9.9/fixture.tar.gz",
                         "signature": "not-a-real-signature"
                     }
                 }
@@ -540,7 +541,7 @@ mod tests {
             let builder = app
                 .updater_builder()
                 .target("fixture-target")
-                .executable_path(std::env::temp_dir().join("rebasely-fixture-app"))
+                .executable_path(std::env::temp_dir().join("rebaseraven-fixture-app"))
                 .timeout(Duration::from_secs(3))
                 .endpoints(vec![url::Url::parse(
                     "http://release.example.test/latest.json",

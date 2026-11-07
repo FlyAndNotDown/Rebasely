@@ -1,4 +1,6 @@
 import type { LucideIcon } from "lucide-react";
+import { useTranslation } from "@/i18n";
+import { p4DisplayText } from "@/lib/p4-display";
 import {
   CheckIcon,
   CircleAlertIcon,
@@ -31,6 +33,7 @@ export function fileStatusText(depotPath: string, detail: string, action = "") {
 }
 
 export function FileStatusTip({ text }: { text: string }) {
+  useTranslation();
   const lines = text
     .split("\n")
     .map((line) => line.trim())
@@ -44,7 +47,7 @@ export function FileStatusTip({ text }: { text: string }) {
         return (
           <span key={`${index}:${line}`} className="flex items-start gap-1.5">
             <Icon className="mt-0.5 size-3 shrink-0 opacity-70" aria-hidden />
-            <span className={depot ? "min-w-0 font-mono break-all" : "min-w-0"}>{line}</span>
+            <span className={depot ? "min-w-0 font-mono break-all" : "min-w-0"}>{p4DisplayText(line)}</span>
           </span>
         );
       })}

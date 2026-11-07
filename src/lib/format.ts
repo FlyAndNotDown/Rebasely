@@ -1,10 +1,7 @@
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+import { formatDate, t } from "@/i18n";
 
-function formatEnglishDate(date: Date, withYear: boolean): string {
-  const month = MONTHS[date.getMonth()];
-  const day = date.getDate();
-  if (!withYear) return `${month} ${day}`;
-  return `${month} ${day}, ${date.getFullYear()}`;
+function formatCalendarDate(date: Date, withYear: boolean): string {
+  return formatDate(date, { month: "short", day: "numeric", ...(withYear ? { year: "numeric" } as const : {}) });
 }
 
 export function formatRelativeTime(timestamp: number): string {
@@ -16,20 +13,20 @@ export function formatRelativeTime(timestamp: number): string {
   const day = 24 * hour;
   const date = new Date(then);
 
-  if (delta < minute) return "just now";
+  if (delta < minute) return t("time.now");
   if (delta < hour) {
     const value = Math.floor(delta / minute);
-    return `${value}m ago`;
+    return t("time.minutes", { count: value });
   }
   if (delta < day) {
     const value = Math.floor(delta / hour);
-    return `${value}h ago`;
+    return t("time.hours", { count: value });
   }
   if (delta < 7 * day) {
     const value = Math.floor(delta / day);
-    return `${value}d ago`;
+    return t("time.days", { count: value });
   }
-  return formatEnglishDate(date, date.getFullYear() !== new Date().getFullYear());
+  return formatCalendarDate(date, date.getFullYear() !== new Date().getFullYear());
 }
 
 /** Calendar date for the blame gutter, zero-padded so columns line up: 2014-03-16. */

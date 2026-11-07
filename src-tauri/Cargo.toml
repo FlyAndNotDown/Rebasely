@@ -1,12 +1,12 @@
 [package]
-name = "rebasely"
-version = "0.0.1"
+name = "rebaseraven"
+version = "0.1.5"
 description = "A unified version control client"
 license = "MIT"
 edition = "2021"
 
 [lib]
-name = "rebasely_lib"
+name = "rebaseraven_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
@@ -20,6 +20,9 @@ reqwest = { version = "0.13", default-features = false, features = ["rustls-no-p
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+log = "0.4"
+log4rs = { version = "1.4", default-features = false, features = ["file_appender", "rolling_file_appender", "compound_policy", "fixed_window_roller"] }
 thiserror = "2"
 base64 = "0.22"
 notify = "6.1"
@@ -33,9 +36,17 @@ zeroize = "1.9"
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.30", features = ["signal", "process"] }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6"
+dispatch2 = "0.3"
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSButton", "NSControl", "NSResponder", "NSView", "NSWindow", "objc2-core-foundation"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSNotification", "NSObject", "NSOperation", "NSString", "block2"] }
+
 [target.'cfg(windows)'.dependencies]
 webview2-com = "0.39.1"
 windows-core = "0.62.2"
+windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Diagnostics_ToolHelp", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_Storage_FileSystem"] }
 
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }

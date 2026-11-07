@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { emptyBinaryDiff } from "@/lib/git";
 import { P4_LOGIN, p4Api } from "@/lib/p4";
 import type { P4Connection } from "@/types/p4";
-import { pendingDiffRequest, pendingRefreshRequest, withP4Login } from "./p4-requests";
+import { p4ReadRequest, pendingDiffRequest, pendingRefreshRequest, withP4Login } from "./p4-requests";
 
 const connection: P4Connection = {
   root: "C:\\work\\client", port: "ssl:perforce.example.com:1666", user: "alice", client: "dev-pc",
@@ -12,6 +12,15 @@ const connection: P4Connection = {
 afterEach(() => vi.restoreAllMocks());
 
 describe("Perforce credential retries", () => {
+  it.each([false, true])("keeps a resumed workspace diff non-interactive (shelved: %s)", async (shelved) => {
+    const read = vi.spyOn(p4Api, shelved ? "shelfDiff" : "openedDiff").mockRejectedValue(P4_LOGIN);
+    const interactive = vi.fn();
+    const request = pendingDiffRequest(connection, "42", "//depot/main/a.bin", shelved);
+    await expect(p4ReadRequest(request, true, interactive)).rejects.toBe(P4_LOGIN);
+    expect(read).toHaveBeenCalledOnce();
+    expect(interactive).not.toHaveBeenCalled();
+  });
+
   it("keeps a background refresh non-interactive after its ticket expires", async () => {
     const refresh = vi.spyOn(p4Api, "refreshPending").mockRejectedValue(P4_LOGIN);
     const interactive = vi.fn();

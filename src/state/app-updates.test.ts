@@ -62,6 +62,29 @@ describe("application update lifecycle", () => {
     expect(client.subscribe).not.toHaveBeenCalled();
   });
 
+  it("retains which action failed after its notice is dismissed and Settings remounts", async () => {
+    const { client, store } = fixture();
+    client.check.mockResolvedValueOnce(state(2, "available"));
+    await store.check();
+    client.check.mockRejectedValueOnce(new Error("Could not check for updates"));
+    await store.check();
+    store.dismissNotice(store.getSnapshot().notice!.id);
+    expect(store.getSnapshot()).toMatchObject({
+      status: "error", lastRequest: "check", request: null, notice: null,
+      update: { version: "0.0.2" },
+    });
+
+    client.install.mockRejectedValueOnce(new Error("Could not install the update"));
+    await store.install("0.0.2");
+    store.dismissNotice(store.getSnapshot().notice!.id);
+    const unsubscribe = store.subscribe(() => {});
+    unsubscribe();
+    expect(store.getSnapshot()).toMatchObject({
+      status: "error", lastRequest: "install", request: null, notice: null,
+      update: { version: "0.0.2" },
+    });
+  });
+
   it("ignores old snapshots returned after newer native events", async () => {
     const { client, store, emit } = fixture();
     const initial = deferred<UpdateState>();

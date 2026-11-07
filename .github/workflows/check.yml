@@ -39,11 +39,20 @@ jobs:
           package-manager-cache: false
       - name: System packages
         if: runner.os == 'Linux'
+        timeout-minutes: 12
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev \
-            build-essential curl wget file libxdo-dev libssl-dev \
-            libayatana-appindicator3-dev librsvg2-dev
+          packages=(libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev
+            libayatana-appindicator3-dev librsvg2-dev)
+          download_packages() {
+            sudo timeout --kill-after=15s 90s apt-get update &&
+              sudo timeout --kill-after=15s 3m apt-get install -y --download-only --no-install-recommends "${packages[@]}"
+          }
+          if ! download_packages; then
+            echo "::warning::Retrying Ubuntu package downloads without the Azure mirror."
+            sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt
+            download_packages
+          fi
+          sudo apt-get install -y --no-download --no-install-recommends "${packages[@]}"
       - name: Rust
         run: |
           rustup toolchain install stable --profile minimal --component rustfmt --component clippy
@@ -62,7 +71,7 @@ jobs:
       - name: Frontend build
         run: npm run vite:build
       - name: Askpass helper
-        run: cargo build --manifest-path src-tauri/Cargo.toml --locked --bin rebasely
+        run: cargo build --manifest-path src-tauri/Cargo.toml --locked --bin rebaseraven
       - name: Rust checks
         run: npm run check:rust
       - name: Source proof
@@ -70,4 +79,4 @@ jobs:
         run: |
           git diff --quiet HEAD --
           checked_tree="$(git rev-parse 'HEAD^{tree}')"
-          printf '::notice title=Rebasely checked source::%s\n' "$checked_tree"
+          printf '::notice title=RebaseRaven checked source::%s\n' "$checked_tree"

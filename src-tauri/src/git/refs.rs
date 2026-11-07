@@ -318,6 +318,48 @@ pub(super) fn split_remote_branch(repo: &Repository, name: &str) -> AppResult<(S
     best.ok_or_else(|| AppError::msg(format!("Not a remote branch: {name}")))
 }
 
+pub fn rename_branch(repo: &Repository, name: &str, new_name: &str) -> AppResult<()> {
+    let name = name.trim();
+    let new_name = new_name.trim();
+    if !ref_exists(repo, &format!("refs/heads/{name}")) {
+        return Err(AppError::msg(format!("Local branch not found: {name}")));
+    }
+    if new_name.is_empty() {
+        return Err(AppError::msg("Branch name cannot be empty"));
+    }
+    let root = workdir(repo)?;
+    run_git_stdout(root, &["check-ref-format", "--branch", new_name])?;
+    // Do not force: Git must reject an existing destination or a branch that
+    // cannot safely be renamed, and preserve its config and reflog itself.
+    run_git_stdout(root, &["branch", "--move", "--", name, new_name])?;
+    Ok(())
+}
+
+pub fn set_branch_upstream(repo: &Repository, name: &str, upstream: Option<&str>) -> AppResult<()> {
+    let name = name.trim();
+    if !ref_exists(repo, &format!("refs/heads/{name}")) {
+        return Err(AppError::msg(format!("Local branch not found: {name}")));
+    }
+    let root = workdir(repo)?;
+    if let Some(upstream) = upstream {
+        let upstream = upstream.trim();
+        let remote_ref = format!("refs/remotes/{upstream}");
+        if upstream.is_empty()
+            || split_remote_branch(repo, upstream).is_err()
+            || !ref_exists(repo, &remote_ref)
+        {
+            return Err(AppError::msg(format!(
+                "Remote branch not found: {upstream}"
+            )));
+        }
+        let argument = format!("--set-upstream-to={remote_ref}");
+        run_git_stdout(root, &["branch", &argument, "--", name])?;
+    } else {
+        run_git_stdout(root, &["branch", "--unset-upstream", "--", name])?;
+    }
+    Ok(())
+}
+
 pub fn delete_branch(
     repo: &mut Repository,
     name: &str,

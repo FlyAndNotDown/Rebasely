@@ -22,7 +22,7 @@ mod tests {
 
     #[test]
     fn replaces_the_file_and_leaves_no_temp_behind() {
-        let dir = std::env::temp_dir().join(format!("rebasely-fsutil-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("rebaseraven-fsutil-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         let path = dir.join("prefs.json");
@@ -44,7 +44,7 @@ mod tests {
         use std::os::windows::fs::OpenOptionsExt;
 
         let dir =
-            std::env::temp_dir().join(format!("rebasely-fsutil-locked-{}", std::process::id()));
+            std::env::temp_dir().join(format!("rebaseraven-fsutil-locked-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         let path = dir.join("prefs.json");
         fs::write(&path, b"original").unwrap();

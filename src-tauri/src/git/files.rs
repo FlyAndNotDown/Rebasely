@@ -71,12 +71,9 @@ pub fn list_directory(repo: &Repository, path: &str) -> AppResult<Vec<DirEntry>>
             dir,
         });
     }
-    entries.sort_by(|left, right| {
-        right
-            .dir
-            .cmp(&left.dir)
-            .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
-    });
+    // Folding a filename in every comparison allocates O(n log n) strings for
+    // large directories. Keep the same ordering with one key per entry.
+    entries.sort_by_cached_key(|entry| (!entry.dir, entry.name.to_lowercase()));
     Ok(entries)
 }
 

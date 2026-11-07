@@ -54,12 +54,12 @@ function cargoPackage(text, array) {
     const start = section.index;
     const end = sections[index + 1]?.index ?? text.length;
     const block = text.slice(start, end);
-    if (!/^name[ \t]*=[ \t]*"rebasely"[ \t]*\r?$/m.test(block)) return [];
+    if (!/^name[ \t]*=[ \t]*"rebaseraven"[ \t]*\r?$/m.test(block)) return [];
     const version = block.match(/^version[ \t]*=[ \t]*"([^"]+)"[ \t]*\r?$/m);
-    if (!version) throw new Error(`Missing Rebasely version in Cargo ${header} section.`);
+    if (!version) throw new Error(`Missing RebaseRaven version in Cargo ${header} section.`);
     return [{ start, end, block, version: version[1] }];
   });
-  if (matches.length !== 1) throw new Error(`Expected one Rebasely Cargo ${header} section.`);
+  if (matches.length !== 1) throw new Error(`Expected one RebaseRaven Cargo ${header} section.`);
   return matches[0];
 }
 

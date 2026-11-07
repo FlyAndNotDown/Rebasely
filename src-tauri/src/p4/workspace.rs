@@ -8,6 +8,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
@@ -209,7 +210,13 @@ struct ConfigFile {
 pub fn detect_repository(path: &str) -> AppResult<RepoDetection> {
     let start = existing_dir(path)?;
     let git = git_root(&start)?;
-    let p4 = match p4_connection(&start) {
+    let deadline = Instant::now() + Duration::from_millis(1_500);
+    let p4 = match p4_connection_with(
+        &start,
+        find_config(&start),
+        cli::active_p4().is_some(),
+        |env, args| cli::run_p4_probe(env, args, deadline),
+    ) {
         Ok(value) => value,
         Err(err) if err.to_string() == P4_MISSING && git.is_some() => None,
         Err(err) => return Err(err),
@@ -626,6 +633,10 @@ pub fn list_dir(connection: &P4Connection, relative: &str) -> AppResult<Vec<P4Di
 
 fn workspace_directory(root: &Path, directory: &str) -> AppResult<PathBuf> {
     let directory = PathBuf::from(strip_verbatim_prefix(directory.trim()));
+    workspace_directory_path(root, directory)
+}
+
+pub(super) fn workspace_directory_path(root: &Path, directory: PathBuf) -> AppResult<PathBuf> {
     let dir = if directory.as_os_str().is_empty() {
         root.to_path_buf()
     } else if directory.is_absolute() {
@@ -1509,6 +1520,9 @@ fn status_of(record: &ZtagRecord) -> (String, String) {
             push_line(&mut lines, format!("Your changelist {change}"));
         }
     }
+    if record.contains_key("ourLock") {
+        push_line(&mut lines, "Locked by you".to_string());
+    }
     for opener in &openers {
         note_opener(&mut lines, opener);
     }
@@ -1650,6 +1664,34 @@ pub fn new_change(connection: &P4Connection, description: &str) -> AppResult<Str
     created_change_id(&output).ok_or_else(|| AppError::msg(output.trim().to_string()))
 }
 
+pub fn delete_change(connection: &P4Connection, change_id: &str) -> AppResult<()> {
+    let env = env_for(connection);
+    delete_change_with(connection, change_id, |args| run_ok(&env, args, None))
+}
+
+fn delete_change_with(
+    connection: &P4Connection,
+    change_id: &str,
+    mut run: impl FnMut(&[&str]) -> AppResult<String>,
+) -> AppResult<()> {
+    let id = require_numbered(change_id)?;
+    if id.parse::<i64>().unwrap_or(0) <= 0 {
+        return Err(AppError::msg("Choose a numbered changelist."));
+    }
+    let spec = run(&["change", "-o", &id])?;
+    if spec_field(&spec, "Status") != "pending"
+        || spec_field(&spec, "Client") != connection.client
+        || spec_field(&spec, "User") != connection.user
+    {
+        return Err(AppError::msg(
+            "Choose your own pending changelist in this workspace.",
+        ));
+    }
+    // The server atomically refuses a changelist with opened files or a shelf.
+    run(&["change", "-d", &id])?;
+    Ok(())
+}
+
 pub fn reopen(connection: &P4Connection, change_id: &str, files: &[String]) -> AppResult<()> {
     if files.is_empty() {
         return Ok(());
@@ -1754,6 +1796,8 @@ pub struct P4ResolveView {
     pub content: bool,
     /// False when the two sides could not be diffed. The choices still work.
     pub comparable: bool,
+    pub working_copy: bool,
+    pub pending_resolves: usize,
     pub diff: FileDiff,
 }
 
@@ -1764,24 +1808,18 @@ pub fn resolve_view(connection: &P4Connection, path: &str) -> AppResult<P4Resolv
     }
     let env = env_for(connection);
     let spec = workspace_file_spec(&connection.root, path);
-    let stdout = run_ok(&env, &["-ztag", "fstat", "-Or", &spec], None)?;
-    let record = parse_ztag(&stdout).into_iter().next().unwrap_or_default();
-    let mut facts = facts_from_fstat(&record, path);
-    if facts.from_file.is_empty() {
-        let preview = run_ok(&env, &["resolve", "-n", "-o", &spec], None).unwrap_or_default();
-        if let Some(parsed) = parse_resolve_preview(&preview) {
-            facts = parsed;
-        }
-    }
-    if facts.from_file.is_empty() && facts.action.is_empty() {
-        return Err(AppError::msg("This file does not need resolve."));
-    }
-    let (diff, comparable) = resolve_diff(&env, &facts);
+    // Unlike fstat -Or, this lists only resolves that still need a decision.
+    let preview = run_ok(&env, &["-ztag", "resolve", "-n", "-o", &spec], None)?;
+    let (facts, pending_resolves) = pending_resolve_facts(&preview, &spec)
+        .ok_or_else(|| AppError::msg("This file does not need resolve."))?;
+    let (diff, comparable, working_copy) = resolve_diff(&env, &facts);
     Ok(P4ResolveView {
         path: facts.depot.clone(),
         summary: resolve_summary(&facts),
         content: resolve_can_merge(&facts.action, &facts.kind),
         comparable,
+        working_copy,
+        pending_resolves,
         diff,
     })
 }
@@ -1800,10 +1838,12 @@ pub fn resolve_accept(connection: &P4Connection, path: &str, mode: &str) -> AppR
     let env = env_for(connection);
     let spec = workspace_file_spec(&connection.root, path);
     run_ok(&env, &["resolve", flag, &spec], None)?;
-    if mode == "merge" && resolve_still_open(&env, &spec)? {
-        return Err(AppError::msg(
-            "The merge has conflicts. Accept yours or theirs.",
-        ));
+    if resolve_still_open(&env, &spec)? {
+        return Err(AppError::msg(if mode == "merge" {
+            crate::error::P4_RESOLVE_CONFLICTS
+        } else {
+            "This file still needs resolve."
+        }));
     }
     Ok(())
 }
@@ -1819,29 +1859,34 @@ struct ResolveFacts {
     base_rev: String,
 }
 
-fn facts_from_fstat(record: &ZtagRecord, fallback_path: &str) -> ResolveFacts {
-    let depot = field(record, "depotFile");
-    ResolveFacts {
-        depot: if depot.starts_with("//") {
-            depot
+fn pending_resolve_facts(text: &str, depot: &str) -> Option<(ResolveFacts, usize)> {
+    let mut records = parse_ztag(text)
+        .into_iter()
+        .filter(|record| record.contains_key("clientFile") && record.contains_key("resolveType"));
+    if let Some(record) = records.next() {
+        let action = field(&record, "resolveType");
+        let content_kind = field(&record, "contentResolveType");
+        let kind = if content_kind.is_empty() {
+            action.clone()
         } else {
-            fallback_path.to_string()
-        },
-        action: first_field(record, &["resolveAction0", "resolveAction"]),
-        kind: first_field(record, &["resolveType0", "resolveType"]),
-        from_file: first_field(record, &["resolveFromFile0", "resolveFromFile"]),
-        start_rev: first_field(record, &["resolveStartFromRev0", "resolveStartFromRev"]),
-        end_rev: first_field(record, &["resolveEndFromRev0", "resolveEndFromRev"]),
-        base_file: first_field(record, &["resolveBaseFile0", "resolveBaseFile"]),
-        base_rev: first_field(record, &["resolveBaseRev0", "resolveBaseRev"]),
+            content_kind
+        };
+        let facts = ResolveFacts {
+            depot: depot.to_string(),
+            action,
+            kind,
+            from_file: field(&record, "fromFile"),
+            start_rev: field(&record, "startFromRev"),
+            end_rev: field(&record, "endFromRev"),
+            base_file: field(&record, "baseFile"),
+            base_rev: field(&record, "baseRev"),
+        };
+        return Some((facts, 1 + records.count()));
     }
-}
-
-fn first_field(record: &ZtagRecord, keys: &[&str]) -> String {
-    keys.iter()
-        .map(|key| field(record, key))
-        .find(|value| !value.is_empty())
-        .unwrap_or_default()
+    let mut facts = parse_resolve_preview(text)?;
+    facts.depot = depot.to_string();
+    let count = text.lines().filter(|line| line.contains(" - ")).count();
+    Some((facts, count))
 }
 
 fn parse_resolve_preview(text: &str) -> Option<ResolveFacts> {
@@ -1981,10 +2026,10 @@ fn resolve_can_merge(action: &str, kind: &str) -> bool {
     if kind.contains("binary") || kind.contains("delete") || action == "delete" {
         return false;
     }
-    kind.contains("content") || action == "merge" || action == "edit"
+    kind.contains("content") || action == "content" || action == "merge" || action == "edit"
 }
 
-fn resolve_diff(env: &P4Env, facts: &ResolveFacts) -> (FileDiff, bool) {
+fn resolve_diff(env: &P4Env, facts: &ResolveFacts) -> (FileDiff, bool, bool) {
     let depot = facts.depot.clone();
     let end = if facts.end_rev.is_empty() {
         facts.start_rev.clone()
@@ -1992,13 +2037,18 @@ fn resolve_diff(env: &P4Env, facts: &ResolveFacts) -> (FileDiff, bool) {
         facts.end_rev.clone()
     };
     if !depot.starts_with("//") || facts.from_file.is_empty() || end.is_empty() {
-        return (empty_diff(&depot), false);
+        return (empty_diff(&depot), false, false);
     }
-    let yours = format!("{depot}#have");
-    let theirs = format!("{}#{end}", facts.from_file);
-    match cli::run_p4_diff(env, &["diff2", "-du", &yours, &theirs]) {
-        Ok(text) => (parse_single_diff(&text, &depot), true),
-        Err(_) => (empty_diff(&depot), false),
+    let incoming = format!("{}#{end}", facts.from_file);
+    if depot == facts.from_file {
+        if let Ok(text) = cli::run_p4_diff(env, &["diff", "-du", "-f", &incoming]) {
+            return (parse_single_diff(&text, &depot), true, true);
+        }
+    }
+    let have = format!("{depot}#have");
+    match cli::run_p4_diff(env, &["diff2", "-du", &have, &incoming]) {
+        Ok(text) => (parse_single_diff(&text, &depot), true, false),
+        Err(_) => (empty_diff(&depot), false, false),
     }
 }
 
@@ -2030,6 +2080,9 @@ fn empty_diff(path: &str) -> FileDiff {
 #[serde(rename_all = "camelCase")]
 pub struct P4GetRevision {
     pub paths: Vec<String>,
+    pub change_id: Option<String>,
+    #[serde(default)]
+    pub recursive: bool,
     pub mode: String,
     pub value: String,
     pub force: bool,
@@ -2061,35 +2114,73 @@ pub fn sync(
 pub fn get_revision(
     connection: &P4Connection,
     request: &P4GetRevision,
-    progress: impl FnMut(&str),
+    mut progress: impl FnMut(&str),
 ) -> AppResult<String> {
-    if request.paths.is_empty() {
-        return Err(AppError::msg("Choose a file."));
+    if request.force && request.safe {
+        return Err(AppError::msg(
+            "Choose either force overwrite or safe update.",
+        ));
     }
     let env = env_for(connection);
-    let (paths, note) = revision_targets(&env, request)?;
-    if paths.is_empty() {
-        return Ok(if note.is_empty() {
-            "Up to date.".to_string()
-        } else {
-            note
-        });
-    }
-    let mut output = sync_paths(
-        &env,
-        &paths,
-        SyncFlags {
-            force: request.force,
-            safe: request.safe,
-            preview: request.preview,
-        },
-        progress,
-    )?;
-    if !note.is_empty() {
-        if !output.is_empty() && !output.ends_with('\n') {
-            output.push('\n');
+    let changed_files;
+    let targets = if let Some(id) = &request.change_id {
+        if !request.paths.is_empty() || request.recursive {
+            return Err(AppError::msg("Choose paths or a changelist."));
         }
-        output.push_str(&note);
+        let id = require_revision_number(id, "Choose a numbered changelist.")?.to_string();
+        changed_files = mapped_change_files(&env, &id)?;
+        &changed_files
+    } else {
+        &request.paths
+    };
+    if targets.is_empty() {
+        return Err(AppError::msg("Choose a file."));
+    }
+    let exact = match request.mode.as_str() {
+        "changelist" => request.changelist_files_only,
+        "label" => !request.remove_not_in_label,
+        _ => false,
+    };
+    let suffix = revision_suffix(&request.mode, &request.value, exact)?;
+    let paths = targets
+        .iter()
+        .map(|path| revision_file_spec(&connection.root, path, request.recursive, &suffix))
+        .collect::<AppResult<Vec<_>>>()?;
+    let flags = SyncFlags {
+        force: request.force,
+        safe: request.safe,
+        preview: request.preview,
+    };
+    let mut output = String::new();
+    // Keep argument lists short even for large changelists on Windows.
+    let mut remaining = paths.as_slice();
+    while !remaining.is_empty() {
+        let mut arg_bytes = 0;
+        let count = remaining
+            .iter()
+            .take_while(|path| {
+                arg_bytes += path.len() + 3;
+                arg_bytes <= 16_384
+            })
+            .count()
+            .max(1);
+        let (chunk, rest) = remaining.split_at(count);
+        remaining = rest;
+        let text = sync_paths(&env, chunk, flags, &mut progress)?;
+        if request.preview {
+            output.push_str(&text);
+            if output.lines().count() > REVISION_PREVIEW_LINES {
+                output = output
+                    .lines()
+                    .take(REVISION_PREVIEW_LINES)
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                output.push_str("\nPreview truncated.");
+                break;
+            }
+        } else if !text.trim().is_empty() {
+            output = text;
+        }
     }
     if output.trim().is_empty() {
         output = "Up to date.".to_string();
@@ -2097,66 +2188,37 @@ pub fn get_revision(
     Ok(output)
 }
 
-fn revision_targets(env: &P4Env, request: &P4GetRevision) -> AppResult<(Vec<String>, String)> {
-    let suffix = revision_suffix(&request.mode, &request.value, request.changelist_files_only)?;
-    if request.mode != "label" || request.remove_not_in_label {
-        let paths = request
-            .paths
-            .iter()
-            .map(|path| workspace_file_at(&env.cwd.to_string_lossy(), path, &suffix))
-            .collect();
-        return Ok((paths, String::new()));
+fn mapped_change_files(env: &P4Env, id: &str) -> AppResult<Vec<String>> {
+    let text = run_ok(
+        env,
+        &[
+            "-ztag",
+            "fstat",
+            "-Rc",
+            "-e",
+            id,
+            "-T",
+            "depotFile",
+            "//...",
+        ],
+        None,
+    )?;
+    let files: Vec<_> = parse_ztag(&text)
+        .into_iter()
+        .map(|record| field(&record, "depotFile"))
+        .filter(|path| path.starts_with("//"))
+        .collect();
+    if files.is_empty() {
+        return Err(AppError::msg(
+            "No files in that changelist are mapped to this workspace.",
+        ));
     }
-    let label = request.value.trim();
-    let mut paths = Vec::new();
-    let mut skipped = 0usize;
-    for path in &request.paths {
-        match file_rev_at_label(env, path, label)? {
-            Some(rev) => paths.push(workspace_file_at(
-                &env.cwd.to_string_lossy(),
-                path,
-                &format!("#{rev}"),
-            )),
-            None => skipped += 1,
-        }
-    }
-    let note = if skipped == 0 {
-        String::new()
-    } else if paths.is_empty() {
-        "The file is not in that label, so it stays in the workspace.".to_string()
-    } else {
-        format!("{skipped} files are not in that label and stay in the workspace.")
-    };
-    Ok((paths, note))
+    Ok(files)
 }
 
-fn file_rev_at_label(env: &P4Env, path: &str, label: &str) -> AppResult<Option<String>> {
-    let spec = workspace_file_at(&env.cwd.to_string_lossy(), path, &format!("@{label}"));
-    match run_ok(env, &["-ztag", "files", &spec], None) {
-        Ok(stdout) => Ok(parse_ztag(&stdout).into_iter().find_map(|record| {
-            let rev = field(&record, "rev");
-            if rev.is_empty() || !rev.chars().all(|ch| ch.is_ascii_digit()) {
-                None
-            } else {
-                Some(rev)
-            }
-        })),
-        Err(err) => {
-            let message = err.to_string();
-            if message == P4_LOGIN || !missing_label_file(&message) {
-                return Err(err);
-            }
-            Ok(None)
-        }
-    }
-}
+const REVISION_PREVIEW_LINES: usize = 200;
 
-fn missing_label_file(message: &str) -> bool {
-    let lower = message.to_ascii_lowercase();
-    lower.contains("no such file") || lower.contains("not in label")
-}
-
-fn revision_suffix(mode: &str, value: &str, files_only: bool) -> AppResult<String> {
+fn revision_suffix(mode: &str, value: &str, exact: bool) -> AppResult<String> {
     let value = value.trim();
     match mode {
         "latest" => Ok(String::new()),
@@ -2166,7 +2228,7 @@ fn revision_suffix(mode: &str, value: &str, files_only: bool) -> AppResult<Strin
         }
         "changelist" => {
             let change = require_revision_number(value, "Enter a changelist number.")?;
-            if files_only {
+            if exact {
                 Ok(format!("@{change},@{change}"))
             } else {
                 Ok(format!("@{change}"))
@@ -2177,7 +2239,11 @@ fn revision_suffix(mode: &str, value: &str, files_only: bool) -> AppResult<Strin
             if !valid_label(value) {
                 return Err(AppError::msg("Enter a label name."));
             }
-            Ok(format!("@{value}"))
+            if exact {
+                Ok(format!("@{value},@{value}"))
+            } else {
+                Ok(format!("@{value}"))
+            }
         }
         "workspace" => {
             if !valid_client_name(value) {
@@ -2283,21 +2349,39 @@ fn file_at(path: &str, suffix: &str) -> String {
     format!("{}{suffix}", file_spec(path))
 }
 
-fn workspace_file_spec(root: &str, path: &str) -> String {
+pub(super) fn workspace_file_spec(root: &str, path: &str) -> String {
     file_spec(&workspace_cli_path(root, path))
 }
 
-fn workspace_file_at(root: &str, path: &str, suffix: &str) -> String {
-    file_at(&workspace_cli_path(root, path), suffix)
+fn revision_file_spec(root: &str, path: &str, recursive: bool, suffix: &str) -> AppResult<String> {
+    let path = workspace_cli_path(root, path);
+    if !path.starts_with("//") && !Path::new(&path).is_absolute() {
+        return Err(AppError::msg("Choose a file or folder."));
+    }
+    if !recursive {
+        return Ok(file_at(&path, suffix));
+    }
+    let spec = file_spec(&path);
+    if spec == "//" {
+        return Ok(format!("//...{suffix}"));
+    }
+    let (directory, separator) = if cfg!(windows) && !spec.starts_with("//") {
+        let separator = if spec.contains('\\') { '\\' } else { '/' };
+        (spec.trim_end_matches(['/', '\\']), separator)
+    } else {
+        (spec.trim_end_matches('/'), '/')
+    };
+    Ok(format!("{directory}{separator}...{suffix}"))
 }
 
 fn workspace_cli_path(root: &str, path: &str) -> String {
+    let path = strip_verbatim_prefix(path);
     if cfg!(windows) {
-        if let Some(local) = local_unc_path(root, path) {
+        if let Some(local) = local_unc_path(root, &path) {
             return local;
         }
     }
-    path.to_string()
+    path
 }
 
 /// A forward-slash UNC path inside this workspace is local, even though it begins with //.
@@ -2424,7 +2508,11 @@ fn sync_progress_line(line: &str, total: Option<u64>, transferred: &mut u64) -> 
 fn sync_args(paths: &[String], parallel: bool, estimate: bool, flags: SyncFlags) -> Vec<String> {
     let mut args = vec!["sync".to_string()];
     if flags.preview {
-        args.push("-n".to_string());
+        args.extend([
+            "-n".to_string(),
+            "-m".to_string(),
+            (REVISION_PREVIEW_LINES + 1).to_string(),
+        ]);
     } else if estimate {
         args.push("-N".to_string());
     } else if parallel {
@@ -2461,16 +2549,59 @@ pub fn reconcile(connection: &P4Connection, mut progress: impl FnMut(&str)) -> A
     )
 }
 
-pub fn file_action(connection: &P4Connection, action: &str, paths: &[String]) -> AppResult<()> {
+pub fn file_action(
+    connection: &P4Connection,
+    action: &str,
+    paths: &[String],
+    change_id: Option<&str>,
+) -> AppResult<()> {
+    let args = file_action_args(connection, action, paths, change_id)?;
+    run_owned(&env_for(connection), &args, None)?;
+    Ok(())
+}
+
+fn file_action_args(
+    connection: &P4Connection,
+    action: &str,
+    paths: &[String],
+    change_id: Option<&str>,
+) -> AppResult<Vec<String>> {
     let command = match action {
-        "edit" | "add" | "delete" => action,
+        "edit" | "add" | "delete" | "lock" | "unlock" => action,
         _ => return Err(AppError::msg("Unsupported file action.")),
     };
     if paths.is_empty() {
         return Err(AppError::msg("Choose a file."));
     }
-    let env = env_for(connection);
     let mut args = vec![command.to_string()];
+    if matches!(command, "lock" | "unlock") {
+        let id = change_id.map(str::trim).unwrap_or_default();
+        if id != "default"
+            && (id.is_empty()
+                || !id.bytes().all(|byte| byte.is_ascii_digit())
+                || id.parse::<i64>().unwrap_or(0) <= 0)
+        {
+            return Err(AppError::msg(
+                "Choose a pending changelist to lock or unlock files.",
+            ));
+        }
+        for path in paths {
+            let depot = path.starts_with("//") && local_unc_path(&connection.root, path).is_none();
+            if path.is_empty()
+                || path.chars().any(|ch| matches!(ch, '\0' | '\n' | '\r'))
+                || path.contains("...")
+                || (depot && path.contains(['*', '#', '@']))
+                || (!depot && !Path::new(path).is_absolute())
+            {
+                return Err(AppError::msg(
+                    "Choose explicit opened files to lock or unlock.",
+                ));
+            }
+        }
+        // Numbered changelists need -c, especially for unlock. Always include
+        // the selected files; omitting them would affect the whole changelist.
+        args.extend(["-c".to_string(), id.to_string()]);
+    }
     if command == "add" {
         // Unlike other commands, add -f needs literal filenames, including wildcards.
         args.push("-f".into());
@@ -2486,8 +2617,103 @@ pub fn file_action(connection: &P4Connection, action: &str, paths: &[String]) ->
                 .map(|path| workspace_file_spec(&connection.root, path)),
         );
     }
-    run_owned(&env, &args, None)?;
+    Ok(args)
+}
+
+pub fn move_file(connection: &P4Connection, source: &str, destination: &str) -> AppResult<()> {
+    let env = env_for(connection);
+    move_file_with(connection, source, destination, |args| {
+        run_ok(&env, args, None)
+    })
+}
+
+fn move_file_with(
+    connection: &P4Connection,
+    source: &str,
+    destination: &str,
+    mut run: impl FnMut(&[&str]) -> AppResult<String>,
+) -> AppResult<()> {
+    let (source, target) = move_file_paths(Path::new(&connection.root), source, destination)?;
+    let from = workspace_file_spec(&connection.root, &source.to_string_lossy());
+    let to = workspace_file_spec(&connection.root, &target.to_string_lossy());
+    let meta = run(&["-ztag", "fstat", "-T", "depotFile,action", &from])?;
+    let record = parse_ztag(&meta).into_iter().next().unwrap_or_default();
+    if field(&record, "depotFile").is_empty() {
+        return Err(AppError::msg("Choose a versioned workspace file."));
+    }
+    let action = field(&record, "action");
+    match action.as_str() {
+        "" => {
+            run(&["edit", &from])?;
+        }
+        "edit" | "add" | "move/add" => {}
+        _ => {
+            return Err(AppError::msg(
+                "Resolve or revert this file's pending action before moving it.",
+            ))
+        }
+    }
+    // Never force an overwrite or undo an edit after failure: local content must survive.
+    run(&["move", &from, &to])?;
     Ok(())
+}
+
+fn move_file_paths(root: &Path, source: &str, destination: &str) -> AppResult<(PathBuf, PathBuf)> {
+    let source = PathBuf::from(strip_verbatim_prefix(source));
+    if !source.is_absolute() {
+        return Err(AppError::msg("Choose a local workspace file."));
+    }
+    let parent = source
+        .parent()
+        .ok_or_else(|| AppError::msg("Choose a file."))?;
+    let source_parent = workspace_directory_path(root, parent.to_path_buf())?;
+    let source = fs::canonicalize(source_parent)?.join(
+        source
+            .file_name()
+            .ok_or_else(|| AppError::msg("Choose a file."))?,
+    );
+    if !fs::symlink_metadata(&source)?.file_type().is_file() {
+        return Err(AppError::msg("Choose a regular workspace file."));
+    }
+    let relative = if cfg!(windows) {
+        destination.replace('\\', "/")
+    } else {
+        destination.to_string()
+    };
+    if relative.is_empty()
+        || relative.contains('\0')
+        || relative.starts_with('/')
+        || relative.split('/').any(|part| {
+            part.is_empty()
+                || part == "."
+                || part == ".."
+                || part.contains(':')
+                || part.contains("...")
+        })
+        || Path::new(&relative).has_root()
+    {
+        return Err(AppError::msg(
+            "Enter a relative destination inside this workspace.",
+        ));
+    }
+    let relative = Path::new(&relative);
+    let parent = relative.parent().unwrap_or_else(|| Path::new(""));
+    let target_parent = workspace_directory_path(root, parent.to_path_buf())?;
+    let target = fs::canonicalize(target_parent)?.join(
+        relative
+            .file_name()
+            .ok_or_else(|| AppError::msg("Enter a file name."))?,
+    );
+    match fs::symlink_metadata(&target) {
+        Ok(_) => {
+            return Err(AppError::msg(
+                "The destination already exists. Choose another file name.",
+            ))
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.into()),
+    }
+    Ok((source, target))
 }
 
 pub fn login(connection: &P4Connection, password: &str) -> AppResult<()> {
@@ -3125,8 +3351,21 @@ fn push_history_range(args: &mut Vec<String>, before: Option<i64>) {
 }
 
 fn p4_connection(start: &Path) -> AppResult<Option<P4Connection>> {
-    let config = find_config(start);
-    if cli::active_p4().is_none() {
+    p4_connection_with(
+        start,
+        find_config(start),
+        cli::active_p4().is_some(),
+        |env, args| run_ok(env, args, None),
+    )
+}
+
+fn p4_connection_with(
+    start: &Path,
+    config: Option<ConfigFile>,
+    available: bool,
+    mut run: impl FnMut(&P4Env, &[&str]) -> AppResult<String>,
+) -> AppResult<Option<P4Connection>> {
+    if !available {
         if config.as_ref().is_some_and(config_is_workspace) {
             return Err(AppError::msg(P4_MISSING));
         }
@@ -3134,19 +3373,14 @@ fn p4_connection(start: &Path) -> AppResult<Option<P4Connection>> {
     }
     let env = match &config {
         Some(config) if config_is_workspace(config) => env_from_config(start, config),
-        _ => ambient_env(start),
+        _ => ambient_env(start, &mut run),
     };
-    match info_connection(start, &env) {
-        Ok(found) => Ok(found),
+    match run(&env, &["-ztag", "info"]) {
+        Ok(stdout) => Ok(connection_from_info(start, &env, &stdout)),
         Err(_) => Ok(config
             .filter(config_is_workspace)
             .map(|config| connection_from_config(&config))),
     }
-}
-
-fn info_connection(start: &Path, env: &P4Env) -> AppResult<Option<P4Connection>> {
-    let stdout = run_ok(env, &["-ztag", "info"], None)?;
-    Ok(connection_from_info(start, env, &stdout))
 }
 
 fn connection_from_info(start: &Path, env: &P4Env, stdout: &str) -> Option<P4Connection> {
@@ -3175,7 +3409,7 @@ fn connection_from_info(start: &Path, env: &P4Env, stdout: &str) -> Option<P4Con
     })
 }
 
-fn ambient_env(start: &Path) -> P4Env {
+fn ambient_env(start: &Path, run: &mut impl FnMut(&P4Env, &[&str]) -> AppResult<String>) -> P4Env {
     let mut env = P4Env {
         cwd: start.to_path_buf(),
         port: String::new(),
@@ -3183,7 +3417,7 @@ fn ambient_env(start: &Path) -> P4Env {
         client: String::new(),
         charset: String::new(),
     };
-    if let Ok(text) = run_ok(&env, &["set"], None) {
+    if let Ok(text) = run(&env, &["set"]) {
         let map = parse_p4_set(&text);
         env.port = map.get("P4PORT").cloned().unwrap_or_default();
         env.user = map.get("P4USER").cloned().unwrap_or_default();
@@ -3286,13 +3520,26 @@ fn read_config(path: &Path) -> Option<BTreeMap<String, String>> {
 }
 
 fn git_root(start: &Path) -> AppResult<Option<String>> {
-    match crate::git::discover(&start.to_string_lossy()) {
-        Ok(repo) => Ok(Some(strip_verbatim_prefix(
-            &repo.workdir().to_string_lossy(),
-        ))),
+    let found = crate::git::open_for_detection(start)
+        .map(|repo| strip_verbatim_prefix(&repo.workdir().to_string_lossy()));
+    git_root_result(start, found)
+}
+
+fn git_root_result(start: &Path, found: AppResult<String>) -> AppResult<Option<String>> {
+    match found {
+        Ok(root) => Ok(Some(root)),
         Err(err) if err.to_string() == crate::error::GIT_MISSING => Ok(find_git_dir(start)),
-        Err(err) if err.to_string().contains("Bare repositories") => Err(err),
-        Err(_) => Ok(None),
+        Err(err)
+            if err
+                .to_string()
+                .starts_with("fatal: not a git repository (or any of the parent directories):")
+                || err.to_string().starts_with(
+                    "fatal: not a git repository (or any parent up to mount point ",
+                ) =>
+        {
+            Ok(None)
+        }
+        Err(err) => Err(err),
     }
 }
 
@@ -3448,7 +3695,7 @@ fn content_file_diff(
     }
 }
 
-fn env_for(connection: &P4Connection) -> P4Env {
+pub(super) fn env_for(connection: &P4Connection) -> P4Env {
     P4Env {
         cwd: PathBuf::from(&connection.root),
         port: connection.port.clone(),
@@ -3546,7 +3793,7 @@ mod tests {
                 .unwrap()
                 .as_nanos();
             let path = std::env::temp_dir().join(format!(
-                "rebasely-p4-{label}-{}-{unique}",
+                "rebaseraven-p4-{label}-{}-{unique}",
                 std::process::id()
             ));
             fs::create_dir(&path).unwrap();
@@ -3565,6 +3812,462 @@ mod tests {
             .iter()
             .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
             .collect()
+    }
+
+    fn discovery_config(root: &Path) -> ConfigFile {
+        ConfigFile {
+            directory: root.to_path_buf(),
+            values: BTreeMap::from([
+                ("P4PORT".into(), "ssl:perforce.example.com:1666".into()),
+                ("P4USER".into(), "alice".into()),
+                ("P4CLIENT".into(), "dev-pc".into()),
+            ]),
+        }
+    }
+
+    #[test]
+    fn discovery_ignores_unreachable_ambient_servers_but_keeps_explicit_workspace_hints() {
+        let temporary = TestDirectory::new("discovery-unreachable");
+        let mut calls = Vec::new();
+        let found = p4_connection_with(&temporary.0, None, true, |env, args| {
+            calls.push(
+                args.iter()
+                    .map(|value| value.to_string())
+                    .collect::<Vec<_>>(),
+            );
+            if args == ["set"] {
+                Ok("P4PORT=ssl:perforce.example.com:1666 (set)\nP4CLIENT=other-pc (set)\n".into())
+            } else {
+                assert_eq!(env.client, "other-pc");
+                Err(AppError::msg("Perforce workspace discovery timed out."))
+            }
+        })
+        .unwrap();
+        assert!(found.is_none());
+        assert_eq!(calls, [vec!["set"], vec!["-ztag", "info"]]);
+
+        let found = p4_connection_with(
+            &temporary.0,
+            Some(discovery_config(&temporary.0)),
+            true,
+            |_, args| {
+                assert_eq!(args, ["-ztag", "info"]);
+                Err(AppError::msg("Perforce workspace discovery timed out."))
+            },
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(found.root, temporary.0.to_string_lossy());
+        assert_eq!(found.port, "ssl:perforce.example.com:1666");
+        assert_eq!(found.client, "dev-pc");
+    }
+
+    #[test]
+    fn discovery_handles_expired_settings_and_missing_optional_p4() {
+        let temporary = TestDirectory::new("discovery-local");
+        assert!(p4_connection_with(&temporary.0, None, false, |_, _| panic!(
+            "missing CLI was launched"
+        ))
+        .unwrap()
+        .is_none());
+        assert_eq!(
+            p4_connection_with(
+                &temporary.0,
+                Some(discovery_config(&temporary.0)),
+                false,
+                |_, _| panic!("missing CLI was launched")
+            )
+            .unwrap_err()
+            .to_string(),
+            P4_MISSING
+        );
+        let mut calls = 0;
+        assert!(p4_connection_with(&temporary.0, None, true, |_, _| {
+            calls += 1;
+            Err(AppError::msg("Perforce workspace discovery timed out."))
+        })
+        .unwrap()
+        .is_none());
+        assert_eq!(calls, 2);
+    }
+
+    #[test]
+    fn reachable_ambient_discovery_preserves_same_and_nested_root_selection() {
+        let temporary = TestDirectory::new("discovery-roots");
+        let inner = temporary.0.join("inner");
+        let selected = inner.join("src");
+        fs::create_dir_all(&selected).unwrap();
+        let root = temporary.0.to_string_lossy().into_owned();
+        let inner = inner.to_string_lossy().into_owned();
+        let selected_text = selected.to_string_lossy().into_owned();
+        for (git_root, p4_root, expected) in [
+            (root.as_str(), root.as_str(), "ambiguous"),
+            (inner.as_str(), root.as_str(), "git"),
+            (root.as_str(), inner.as_str(), "perforce"),
+        ] {
+            let found = p4_connection_with(&selected, None, true, |env, args| {
+                if args == ["set"] {
+                    Ok("P4PORT=ssl:perforce.example.com:1666 (set)\nP4USER=alice (set)\nP4CLIENT=dev-pc (set)\n".into())
+                } else {
+                    assert_eq!(env.port, "ssl:perforce.example.com:1666");
+                    Ok(format!("... clientName dev-pc\n... clientRoot {p4_root}\n... userName alice\n... serverAddress identity.example.com:1666\n"))
+                }
+            }).unwrap().unwrap();
+            let found =
+                pick_closer(&selected, selected_text.clone(), git_root.into(), found).unwrap();
+            assert!(
+                matches!(
+                    (&found, expected),
+                    (RepoDetection::Ambiguous { .. }, "ambiguous")
+                        | (RepoDetection::Git { .. }, "git")
+                        | (RepoDetection::Perforce { .. }, "perforce")
+                ),
+                "{found:?}"
+            );
+        }
+        assert!(
+            p4_connection_with(&temporary.0, None, true, |_, args| {
+                Ok(if args == ["set"] {
+                    String::new()
+                } else {
+                    format!(
+                        "... clientName other-pc\n... clientRoot {}\n",
+                        selected.display()
+                    )
+                })
+            })
+            .unwrap()
+            .is_none(),
+            "an unrelated workspace must not claim a Git folder"
+        );
+    }
+
+    #[test]
+    fn git_discovery_only_treats_absent_repositories_as_an_optional_match() {
+        let temporary = TestDirectory::new("discovery-git-errors");
+        assert!(git_root_result(
+            &temporary.0,
+            Err(AppError::msg(
+                "fatal: not a git repository (or any of the parent directories): .git"
+            ))
+        )
+        .unwrap()
+        .is_none());
+        assert!(git_root_result(
+            &temporary.0,
+            Err(AppError::msg("fatal: not a git repository (or any parent up to mount point /)\nStopping at filesystem boundary.")),
+        ).unwrap().is_none());
+        for message in [
+            "Bare repositories are not supported yet",
+            "fatal: bad config line 1",
+            "fatal: not a git repository: /work/missing.git",
+            "fatal: detected dubious ownership in repository",
+            "Could not start Git",
+        ] {
+            let error = git_root_result(&temporary.0, Err(AppError::msg(message))).unwrap_err();
+            assert_eq!(error.to_string(), message);
+        }
+        fs::write(
+            temporary.0.join(".git"),
+            "gitdir: /work/shared.git/worktrees/example\n",
+        )
+        .unwrap();
+        assert_eq!(
+            git_root_result(&temporary.0, Err(AppError::msg(crate::error::GIT_MISSING)))
+                .unwrap()
+                .unwrap(),
+            temporary.0.to_string_lossy()
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn cli_filespecs_normalize_verbatim_drive_and_unc_paths() {
+        assert_eq!(
+            workspace_file_spec(r"C:\work\client", r"\\?\C:\work\client\ leading #@%.txt"),
+            r"C:\work\client\ leading %23%40%25.txt"
+        );
+        assert_eq!(
+            workspace_file_spec(
+                r"\\server\share\client",
+                r"\\?\UNC\server\share\client\ leading #@%.txt"
+            ),
+            r"\\server\share\client\ leading %23%40%25.txt"
+        );
+        assert_eq!(
+            workspace_file_spec(r"C:\work\client", "//depot/main/file%23name.txt"),
+            "//depot/main/file%23name.txt"
+        );
+    }
+
+    fn mutation_connection(root: &Path) -> P4Connection {
+        P4Connection {
+            root: root.to_string_lossy().into_owned(),
+            port: "perforce.example.com:1666".into(),
+            user: "alice".into(),
+            client: "dev-pc".into(),
+            charset: String::new(),
+            stream: None,
+            server: String::new(),
+        }
+    }
+
+    #[test]
+    fn lock_actions_target_only_explicit_files_in_the_selected_changelist() {
+        let temporary = TestDirectory::new("lock-args");
+        let connection = mutation_connection(&temporary.0);
+        let local = temporary
+            .0
+            .join("asset #@%*.bin")
+            .to_string_lossy()
+            .into_owned();
+        let paths = vec![local, "//depot/main/asset%23%40%25%2A.bin".into()];
+        for command in ["lock", "unlock"] {
+            for change in ["default", "42"] {
+                let args = file_action_args(&connection, command, &paths, Some(change)).unwrap();
+                assert_eq!(&args[..3], &[command, "-c", change]);
+                assert_eq!(args.len(), 5);
+                assert!(args[3].ends_with("asset %23%40%25%2A.bin"));
+                assert_eq!(args[4], "//depot/main/asset%23%40%25%2A.bin");
+                assert!(!args
+                    .iter()
+                    .any(|arg| matches!(arg.as_str(), "-f" | "-x" | "-g")));
+            }
+            assert!(file_action_args(&connection, command, &[], Some("42")).is_err());
+            assert!(file_action_args(&connection, command, &paths, None).is_err());
+            for change in ["", "0", "-1", "42 -f", "42,43", "999999999999999999999"] {
+                assert!(file_action_args(&connection, command, &paths, Some(change)).is_err());
+            }
+            for path in [
+                "",
+                "-f",
+                "relative.txt",
+                "//depot/main/...",
+                "//depot/main/*",
+                "//depot/main/file#1",
+                "//depot/main/file@42",
+            ] {
+                assert!(
+                    file_action_args(&connection, command, &[path.into()], Some("42")).is_err()
+                );
+            }
+        }
+        assert!(file_action_args(&connection, "unlock -f", &paths, Some("42")).is_err());
+        assert!(file_action_args(&connection, "revert", &paths, Some("42")).is_err());
+        // Existing add semantics still pass literal wildcard bytes with -f.
+        let add = file_action_args(&connection, "add", &paths[..1], None).unwrap();
+        assert_eq!(&add[..2], &["add", "-f"]);
+        assert!(add[2].ends_with("asset #@%*.bin"));
+    }
+
+    #[test]
+    fn an_empty_our_lock_tag_is_visible_without_replacing_the_open_action() {
+        let record = parse_ztag("... depotFile //depot/main/asset.bin\n... action edit\n... change 42\n... haveRev 1\n... headRev 1\n... ourLock\n").remove(0);
+        let (status, detail) = status_of(&record);
+        assert_eq!(status, "edit");
+        assert!(detail.lines().any(|line| line == "Locked by you"));
+        assert!(detail.lines().any(|line| line == "Checked out for edit"));
+        assert!(detail.lines().any(|line| line == "Your changelist 42"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn locking_a_forward_slash_unc_workspace_file_escapes_its_literal_filename() {
+        let connection = mutation_connection(Path::new(r"\\fileserver\share\workspace"));
+        let args = file_action_args(
+            &connection,
+            "lock",
+            &["//fileserver/share/workspace/asset#@%*.bin".into()],
+            Some("42"),
+        )
+        .unwrap();
+        assert_eq!(
+            args,
+            [
+                "lock",
+                "-c",
+                "42",
+                r"\\fileserver\share\workspace\asset%23%40%25%2A.bin"
+            ]
+        );
+    }
+
+    #[test]
+    fn delete_change_requires_an_owned_pending_numbered_change_and_never_forces() {
+        let connection = mutation_connection(Path::new(""));
+        for invalid in ["default", "0", "-1", "42 -f"] {
+            assert!(delete_change_with(&connection, invalid, |_| panic!(
+                "invalid change reached CLI"
+            ))
+            .is_err());
+        }
+        for spec in [
+            "Status: submitted\nClient: dev-pc\nUser: alice\n",
+            "Status: pending\nClient: other-pc\nUser: alice\n",
+            "Status: pending\nClient: dev-pc\nUser: bob\n",
+        ] {
+            assert!(delete_change_with(&connection, "42", |args| {
+                assert_eq!(args, ["change", "-o", "42"]);
+                Ok(spec.into())
+            })
+            .is_err());
+        }
+        let mut calls = Vec::new();
+        let error = delete_change_with(&connection, "42", |args| {
+            calls.push(args.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+            if args[1] == "-o" {
+                Ok("Status: pending\nClient: dev-pc\nUser: alice\n".into())
+            } else {
+                Err(AppError::msg("Changelist contains shelved files."))
+            }
+        })
+        .unwrap_err();
+        assert!(error.to_string().contains("shelved"));
+        assert_eq!(
+            calls,
+            [vec!["change", "-o", "42"], vec!["change", "-d", "42"]]
+        );
+    }
+
+    #[test]
+    fn move_file_validates_destinations_before_any_cli_call() {
+        let temporary = TestDirectory::new("move-paths");
+        let source = temporary.0.join("source.txt");
+        fs::write(&source, b"local edits\n").unwrap();
+        fs::write(temporary.0.join("existing.txt"), b"keep\n").unwrap();
+        let connection = mutation_connection(&temporary.0);
+        for invalid in [
+            "../escape.txt",
+            "/outside.txt",
+            "C:/outside.txt",
+            "a/../b.txt",
+            "missing/file.txt",
+            "existing.txt",
+            "file...txt",
+            "",
+        ] {
+            assert!(
+                move_file_with(&connection, &source.to_string_lossy(), invalid, |_| panic!(
+                    "invalid destination reached CLI"
+                ))
+                .is_err()
+            );
+        }
+        assert_eq!(fs::read(&source).unwrap(), b"local edits\n");
+        assert_eq!(
+            fs::read(temporary.0.join("existing.txt")).unwrap(),
+            b"keep\n"
+        );
+    }
+
+    #[test]
+    fn move_file_rejects_unversioned_files_without_checking_them_out() {
+        let temporary = TestDirectory::new("move-unversioned");
+        let source = temporary.0.join("local.txt");
+        fs::write(&source, b"keep local content\n").unwrap();
+        let connection = mutation_connection(&temporary.0);
+        let error = move_file_with(
+            &connection,
+            &source.to_string_lossy(),
+            "target.txt",
+            |args| {
+                assert_eq!(&args[..4], &["-ztag", "fstat", "-T", "depotFile,action"]);
+                Ok(String::new())
+            },
+        )
+        .unwrap_err();
+        assert_eq!(error.to_string(), "Choose a versioned workspace file.");
+        assert_eq!(fs::read(source).unwrap(), b"keep local content\n");
+        assert!(!temporary.0.join("target.txt").exists());
+    }
+
+    #[test]
+    fn move_file_keeps_literal_leading_spaces_in_destination_folders_and_names() {
+        let temporary = TestDirectory::new("move-literal-spaces");
+        let source = temporary.0.join("source.txt");
+        fs::write(&source, b"local edits\n").unwrap();
+        fs::create_dir(temporary.0.join("folder")).unwrap();
+        let intended = temporary.0.join(" folder");
+        fs::create_dir(&intended).unwrap();
+        let (actual_source, destination) = move_file_paths(
+            &temporary.0,
+            &source.to_string_lossy(),
+            " folder/ target.txt",
+        )
+        .unwrap();
+        assert_eq!(actual_source, fs::canonicalize(&source).unwrap());
+        assert_eq!(
+            destination,
+            fs::canonicalize(&intended).unwrap().join(" target.txt")
+        );
+        assert!(!temporary.0.join("folder/ target.txt").exists());
+        assert_eq!(fs::read(&source).unwrap(), b"local edits\n");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn move_file_keeps_trailing_spaces_in_source_and_destination_directories() {
+        let temporary = TestDirectory::new("move-trailing-spaces");
+        let source_directory = temporary.0.join("source folder ");
+        let target_directory = temporary.0.join("target folder ");
+        fs::create_dir(&source_directory).unwrap();
+        fs::create_dir(&target_directory).unwrap();
+        let source = source_directory.join("source.txt");
+        fs::write(&source, b"local edits\n").unwrap();
+        let (actual_source, destination) = move_file_paths(
+            &temporary.0,
+            &source.to_string_lossy(),
+            "target folder /target.txt",
+        )
+        .unwrap();
+        assert_eq!(actual_source, fs::canonicalize(&source).unwrap());
+        assert_eq!(
+            destination,
+            fs::canonicalize(&target_directory)
+                .unwrap()
+                .join("target.txt")
+        );
+    }
+
+    #[test]
+    fn move_file_preserves_changelist_escapes_filespecs_and_keeps_edits_after_failure() {
+        let temporary = TestDirectory::new("move-command");
+        let source = temporary.0.join("source #@%.txt");
+        fs::write(&source, b"local edits\n").unwrap();
+        let connection = mutation_connection(&temporary.0);
+        for action in ["", "edit", "add", "move/add"] {
+            let mut calls = Vec::new();
+            let result = move_file_with(
+                &connection,
+                &source.to_string_lossy(),
+                "target #@%.txt",
+                |args| {
+                    calls.push(args.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+                    if args[0] == "-ztag" {
+                        assert_eq!(&args[1..4], &["fstat", "-T", "depotFile,action"]);
+                        Ok(format!(
+                            "... depotFile //depot/source.txt\n... action {action}\n"
+                        ))
+                    } else if args[0] == "move" {
+                        Err(AppError::msg("Move rejected."))
+                    } else {
+                        Ok(String::new())
+                    }
+                },
+            );
+            assert!(result.is_err());
+            assert_eq!(calls.len(), if action.is_empty() { 3 } else { 2 });
+            let last = calls.last().unwrap();
+            assert_eq!(last[0], "move");
+            assert_eq!(last.len(), 3);
+            assert!(last[1].ends_with("source %23%40%25.txt"));
+            assert!(last[2].ends_with("target %23%40%25.txt"));
+            assert!(!calls
+                .iter()
+                .flatten()
+                .any(|arg| arg == "-f" || arg == "-c" || arg == "revert"));
+            assert_eq!(fs::read(&source).unwrap(), b"local edits\n");
+        }
     }
 
     #[test]
@@ -3803,7 +4506,7 @@ View:
 \t//... //pc/everything/...
 
 Description:
-\tCreated by Rebasely.
+\tCreated by RebaseRaven.
 ";
         assert_eq!(
             client_view_roots(spec),
@@ -3862,6 +4565,10 @@ Description:
             "@rel-1.0"
         );
         assert_eq!(
+            revision_suffix("label", "rel-1.0", true).unwrap(),
+            "@rel-1.0,@rel-1.0"
+        );
+        assert_eq!(
             revision_suffix("workspace", "dev-workspace", false).unwrap(),
             "@dev-workspace"
         );
@@ -3869,6 +4576,24 @@ Description:
         assert!(revision_suffix("datetime", "2026-10-16", false).is_err());
         assert!(revision_suffix("label", "bad label", false).is_err());
         assert_eq!(file_at(r"C:\work\a#b.txt", "#3"), r"C:\work\a%23b.txt#3");
+    }
+
+    #[test]
+    fn directory_revisions_append_a_wildcard_after_escaping_the_path() {
+        let path = if cfg!(windows) {
+            "C:/work/docs @ home"
+        } else {
+            "/work/docs @ home"
+        };
+        assert_eq!(
+            revision_file_spec("", path, true, "@release,@release").unwrap(),
+            format!("{}/...@release,@release", path.replace('@', "%40"))
+        );
+        assert_eq!(
+            revision_file_spec("", "//depot/docs%23notes", true, "#4").unwrap(),
+            "//depot/docs%23notes/...#4"
+        );
+        assert!(revision_file_spec("", "-f", true, "").is_err());
     }
 
     #[test]
@@ -4006,7 +4731,7 @@ Description:
     #[test]
     fn workspace_search_keeps_hierarchy_and_skips_generated_trees() {
         let root = std::env::temp_dir().join(format!(
-            "rebasely-walk-{}-{}",
+            "rebaseraven-walk-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -4060,25 +4785,31 @@ Description:
     }
 
     #[test]
-    fn resolve_summary_names_the_source_and_base() {
-        let facts = facts_from_fstat(
-            &record(&[
-                ("depotFile", "//depot/main/app.ini"),
-                ("resolveAction0", "merge"),
-                ("resolveType0", "content"),
-                ("resolveFromFile0", "//depot/dev/app.ini"),
-                ("resolveStartFromRev0", "4"),
-                ("resolveEndFromRev0", "7"),
-                ("resolveBaseFile0", "//depot/dev/app.ini"),
-                ("resolveBaseRev0", "3"),
-            ]),
-            "//depot/main/app.ini",
-        );
+    fn resolve_summary_names_the_pending_source_and_base() {
+        let tagged = "\
+... clientFile /fixture/main/app.ini
+... fromFile //depot/dev/app.ini
+... startFromRev 4
+... endFromRev 7
+... baseFile //depot/dev/app.ini
+... baseRev 3
+... resolveType content
+... contentResolveType 3waytext
+
+... clientFile /fixture/main/app.ini
+... fromFile //depot/dev/app.ini
+... endFromRev 8
+... resolveType filetype
+";
+        let (facts, count) = pending_resolve_facts(tagged, "//depot/main/app.ini").unwrap();
+        assert_eq!(count, 2);
+        assert_eq!(facts.depot, "//depot/main/app.ini");
         assert!(resolve_can_merge(&facts.action, &facts.kind));
         assert_eq!(
             resolve_summary(&facts),
             "Merging //depot/dev/app.ini#4,#7 using base //depot/dev/app.ini#3"
         );
+        assert!(pending_resolve_facts("", "//depot/main/app.ini").is_none());
     }
 
     #[test]

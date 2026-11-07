@@ -386,8 +386,10 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let root =
-            std::env::temp_dir().join(format!("rebasely-editor-{}-{unique}", std::process::id()));
+        let root = std::env::temp_dir().join(format!(
+            "rebaseraven-editor-{}-{unique}",
+            std::process::id()
+        ));
         let bin = root.join("bin");
         std::fs::create_dir_all(&bin).unwrap();
         let shim = bin.join("code.cmd");
@@ -401,11 +403,11 @@ mod tests {
 
     #[test]
     fn expands_environment_variables_in_install_paths() {
-        unsafe { std::env::set_var("REBASELY_EDITOR_TEST", r"C:\Users\me") };
+        unsafe { std::env::set_var("REBASERAVEN_EDITOR_TEST", r"C:\Users\me") };
         assert_eq!(
-            expand_env(r"%REBASELY_EDITOR_TEST%\Programs\x.exe").unwrap(),
+            expand_env(r"%REBASERAVEN_EDITOR_TEST%\Programs\x.exe").unwrap(),
             std::path::PathBuf::from(r"C:\Users\me\Programs\x.exe")
         );
-        assert!(expand_env(r"%REBASELY_MISSING_VAR%\x.exe").is_none());
+        assert!(expand_env(r"%REBASERAVEN_MISSING_VAR%\x.exe").is_none());
     }
 }

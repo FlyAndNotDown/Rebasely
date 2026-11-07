@@ -78,7 +78,7 @@ describe("tabs", () => {
 
   it("finds a repo tab regardless of slash direction and case", () => {
     expect(findRepoTab(tabs, "e:/B/")?.id).toBe("repo:E:\\b");
-    expect(tabFromPath("E:\\code\\rebasely").name).toBe("rebasely");
+    expect(tabFromPath("E:\\code\\rebaseraven").name).toBe("rebaseraven");
   });
 
   it("keeps Git and Perforce of the same folder as different tabs", () => {

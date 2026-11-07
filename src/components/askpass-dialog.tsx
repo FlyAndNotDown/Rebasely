@@ -1,3 +1,4 @@
+import { t, useTranslation } from "@/i18n";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { Button } from "@/components/ui/button";
@@ -19,6 +20,7 @@ const YES_NO = /\(yes\/no/i;
 
 /** Answers the username, password, and passphrase prompts git and ssh raise. */
 export function AskpassDialog() {
+
   const activities = useActivities();
   const [queue] = useState(() => createAskpassQueue(
     (id, answer) => gitApi.answerAskpass(id, answer),
@@ -91,6 +93,7 @@ function PromptForm({
   context?: string;
   onAnswer: (answer: string | null) => void;
 }) {
+  useTranslation();
   const [value, setValue] = useState("");
   const confirm = YES_NO.test(prompt);
   const secret = SECRET.test(prompt);
@@ -103,8 +106,8 @@ function PromptForm({
       }}
     >
       <DialogHeader>
-        <DialogTitle>{confirm ? "Confirm connection" : "Authentication required"}</DialogTitle>
-        <DialogDescription>{context ?? "Git is asking for input"}</DialogDescription>
+        <DialogTitle>{confirm ? t("desktop.askpassDialog.confirm_connection") : t("desktop.askpassDialog.authentication_required")}</DialogTitle>
+        <DialogDescription>{context ?? t("desktop.askpassDialog.git_is_asking_for_input")}</DialogDescription>
       </DialogHeader>
       <p className="mt-3 whitespace-pre-wrap break-words font-mono text-xs text-muted-foreground">
         {prompt}
@@ -112,11 +115,9 @@ function PromptForm({
       {confirm ? (
         <DialogFooter className="mt-4">
           <Button type="button" variant="outline" onClick={() => onAnswer("no")}>
-            No
-          </Button>
+            {t("desktop.askpassDialog.no")}</Button>
           <Button type="button" onClick={() => onAnswer("yes")}>
-            Yes
-          </Button>
+            {t("desktop.askpassDialog.yes")}</Button>
         </DialogFooter>
       ) : (
         <>
@@ -132,9 +133,8 @@ function PromptForm({
           />
           <DialogFooter className="mt-4">
             <Button type="button" variant="outline" onClick={() => onAnswer(null)}>
-              Cancel
-            </Button>
-            <Button type="submit">Continue</Button>
+              {t("common.cancel")}</Button>
+            <Button type="submit">{t("desktop.askpassDialog.continue")}</Button>
           </DialogFooter>
         </>
       )}

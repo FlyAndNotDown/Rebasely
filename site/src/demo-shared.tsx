@@ -1,9 +1,10 @@
+import { useTranslation } from "react-i18next";
 import { useState, type ReactNode, type Ref } from "react";
-import { CheckIcon, FileIcon, MinusIcon, PlusIcon } from "lucide-react";
+import { CheckIcon, Columns2Icon, MinusIcon, PlusIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { SegmentedControl } from "@/components/ui/segmented-control";
 import { HoverTip } from "@/components/ui/tooltip";
+import { FileStatusIcon } from "@/components/p4/file-status-icon";
 import { cn } from "@/lib/utils";
 import type { DemoFile, DemoHunk, DemoLine } from "./demo-data";
 
@@ -11,7 +12,7 @@ export function PaneHeader({ children, className }: { children: ReactNode; class
   return <div className={cn("demo-pane-header", className)}>{children}</div>;
 }
 
-export function DemoFileRow({ file, active, onSelect, action, actionLabel, onAction, selectRef }: {
+export function DemoFileRow({ file, active, onSelect, action, actionLabel, onAction, selectRef, directory = true, perforce = false }: {
   file: DemoFile;
   active?: boolean;
   onSelect: () => void;
@@ -19,13 +20,16 @@ export function DemoFileRow({ file, active, onSelect, action, actionLabel, onAct
   actionLabel?: string;
   onAction?: () => void;
   selectRef?: Ref<HTMLButtonElement>;
+  directory?: boolean;
+  perforce?: boolean;
 }) {
   return (
     <div className={cn("demo-file-row", active && "selected")}>
-      <button ref={selectRef} type="button" className="demo-file-select" onClick={onSelect} aria-pressed={active}>
-        <span className={file.status === "A" ? "demo-added" : "demo-modified"}>{file.status}</span>
+      <HoverTip label={file.path}><button ref={selectRef} type="button" className="demo-file-select" onClick={onSelect} aria-pressed={active}>
+        {perforce ? <FileStatusIcon status={file.status === "A" ? "add" : "edit"} /> : <span className={file.status === "A" ? "demo-added" : "demo-modified"}>{file.status}</span>}
         <span className="demo-file-name">{file.path.split("/").at(-1)}</span>
-      </button>
+        {directory && !perforce ? <span className="demo-file-directory">{file.path.slice(0, file.path.lastIndexOf("/"))}</span> : null}
+      </button></HoverTip>
       {onAction ? (
         <HoverTip label={actionLabel}>
           <Button variant="ghost" size="icon-xs" className="demo-file-action" aria-label={actionLabel} onClick={onAction}>
@@ -37,23 +41,29 @@ export function DemoFileRow({ file, active, onSelect, action, actionLabel, onAct
   );
 }
 
-export function DiffPane({ file, hunks = file.hunks, actionLabel, onHunkAction, emptyAction }: {
+export function DiffPane({ file, hunks = file.hunks, actionLabel, onHunkAction, emptyAction, scopeLabel }: {
   file: DemoFile;
   hunks?: DemoHunk[];
   actionLabel?: string;
   onHunkAction?: (hunk: DemoHunk) => void;
   emptyAction?: ReactNode;
+  scopeLabel?: string;
 }) {
+  const { t } = useTranslation();
   const [mode, setMode] = useState<"unified" | "split">("unified");
   return (
-    <section className="demo-diff" aria-label={`Diff for ${file.path}`}>
-      <PaneHeader><span className="demo-path"><FileIcon />{file.path}</span><span className="demo-language">TypeScript</span></PaneHeader>
-      <div className="demo-diff-toolbar">
-        <SegmentedControl label="Diff layout" value={mode} onChange={setMode} options={[{ value: "unified", label: "Unified" }, { value: "split", label: "Split" }]} />
-        <span className="demo-diff-scope">{actionLabel ? "Working changes" : "Read only"}</span>
-      </div>
+    <section className="demo-diff" aria-label={t("demo.diff", { path: file.path })}>
+      <PaneHeader className="demo-diff-header">
+        <span className="demo-path" title={file.path}>{file.path}</span>
+        <div className="demo-diff-actions" role="group" aria-label={t("demo.diffLayout")}>
+          <span className="demo-diff-scope">{scopeLabel ?? (actionLabel ? t("demo.workingChanges") : t("demo.readOnly"))}</span>
+          <HoverTip label={t("demo.split")}>
+            <Button size="icon-xs" variant={mode === "split" ? "secondary" : "ghost"} aria-label={t("demo.split")} aria-pressed={mode === "split"} onClick={() => setMode(mode === "split" ? "unified" : "split")}><Columns2Icon /></Button>
+          </HoverTip>
+        </div>
+      </PaneHeader>
       {hunks.length ? (
-        <ScrollArea className="demo-code-scroll" gutter={false} viewportClassName="demo-code-viewport" aria-label="Diff lines" tabIndex={0}>
+        <ScrollArea className="demo-code-scroll" gutter={false} viewportClassName="demo-code-viewport focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring" viewportProps={{ role: "region", "aria-label": t("demo.diffLines"), tabIndex: 0 }}>
           <div className={cn("demo-code", mode === "split" && "demo-code-split")}>
             {hunks.map((hunk) => (
               <div key={hunk.id} className="demo-hunk">
@@ -63,7 +73,7 @@ export function DiffPane({ file, hunks = file.hunks, actionLabel, onHunkAction, 
             ))}
           </div>
         </ScrollArea>
-      ) : <EmptyPane title="No changes in this view." detail="Select a file from the other group.">{emptyAction}</EmptyPane>}
+      ) : <EmptyPane title={t("demo.noChanges")} detail={t("demo.selectOther")}>{emptyAction}</EmptyPane>}
     </section>
   );
 }

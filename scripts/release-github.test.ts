@@ -8,6 +8,12 @@ vi.mock("node:fs/promises", async (importOriginal) => {
   return { ...original, readFile: vi.fn(original.readFile) };
 });
 
+vi.mock("./release-version.mjs", async (importOriginal) => {
+  const original = await importOriginal<typeof import("./release-version.mjs")>();
+  // Publication fixtures use their own version, independently of the application.
+  return { ...original, checkVersions: vi.fn(async () => "0.0.1") };
+});
+
 const tag = "v0.0.1";
 const repository = "maintainer/sample-app";
 const packet = Buffer.alloc(74);
@@ -80,7 +86,7 @@ function githubFixture() {
     jobs: ["Check (Linux)", "Check (Windows)", "Check (macOS arm64)"].map((name, index) => ({
       name, status: "completed", conclusion: "success", check_run_url: `https://api.github.com/repos/${repository}/check-runs/${101 + index}`,
     })),
-    annotations: new Map([101, 102, 103].map((id) => [id, [{ annotation_level: "notice", title: "Rebasely checked source", message: tree }]])),
+    annotations: new Map([101, 102, 103].map((id) => [id, [{ annotation_level: "notice", title: "RebaseRaven checked source", message: tree }]])),
   };
   const github = {
     rest: {
@@ -200,10 +206,10 @@ describe("release preflight", () => {
   it("rejects missing, duplicate, wrong-level, or stale source tree annotations", async () => {
     const inputs = [githubFixture(), githubFixture(), githubFixture(), githubFixture()];
     inputs[0].lists.annotations.set(101, []);
-    const duplicate = { annotation_level: "notice", title: "Rebasely checked source", message: inputs[1].tree };
+    const duplicate = { annotation_level: "notice", title: "RebaseRaven checked source", message: inputs[1].tree };
     inputs[1].lists.annotations.set(102, [duplicate, duplicate]);
-    inputs[2].lists.annotations.set(103, [{ annotation_level: "warning", title: "Rebasely checked source", message: inputs[2].tree }]);
-    inputs[3].lists.annotations.set(101, [{ annotation_level: "notice", title: "Rebasely checked source", message: "d".repeat(40) }]);
+    inputs[2].lists.annotations.set(103, [{ annotation_level: "warning", title: "RebaseRaven checked source", message: inputs[2].tree }]);
+    inputs[3].lists.annotations.set(101, [{ annotation_level: "notice", title: "RebaseRaven checked source", message: "d".repeat(40) }]);
     for (const input of inputs) {
       await expect(preflight({ ...input, tag: "v1.0.0" })).rejects.toThrow("does not prove the current master source tree");
       expect(input.core.setOutput).not.toHaveBeenCalled();
@@ -323,13 +329,13 @@ describe("release publication guards", () => {
 describe("release updater manifest", () => {
   it("publishes only Windows x64 and macOS Apple Silicon packages", () => {
     expect(releaseAssets(tag)).toEqual([
-      { platform: "windows-x86_64", name: "Rebasely_v0.0.1_windows_x64.exe" },
-      { platform: "darwin-aarch64", name: "Rebasely_v0.0.1_macos_arm64.app.tar.gz", installer: "Rebasely_v0.0.1_macos_arm64.dmg" },
+      { platform: "windows-x86_64", name: "RebaseRaven_v0.0.1_windows_x64.exe" },
+      { platform: "darwin-aarch64", name: "RebaseRaven_v0.0.1_macos_arm64.app.tar.gz", installer: "RebaseRaven_v0.0.1_macos_arm64.dmg" },
     ]);
     const manifest = buildUpdaterManifest(fixture());
     expect(manifest.version).toBe("0.0.1");
     expect(Object.keys(manifest.platforms).sort()).toEqual(["darwin-aarch64", "windows-x86_64"]);
-    expect(manifest.platforms).toHaveProperty("windows-x86_64.url", expect.stringContaining("/v0.0.1/Rebasely_v0.0.1_windows_x64.exe"));
+    expect(manifest.platforms).toHaveProperty("windows-x86_64.url", expect.stringContaining("/v0.0.1/RebaseRaven_v0.0.1_windows_x64.exe"));
     expect(manifest.platforms).toHaveProperty("darwin-aarch64.signature", signature);
     expect(manifest.platforms).not.toHaveProperty("darwin-x86_64");
   });
@@ -337,8 +343,8 @@ describe("release updater manifest", () => {
   it("does not add unsupported platform assets to the updater manifest", () => {
     const input = fixture();
     input.assets.push(...["linux_x64.AppImage", "linux_x64.deb", "macos_x64.app.tar.gz"].map((suffix, index) => ({
-      id: 100 + index, name: `Rebasely_${tag}_${suffix}`, state: "uploaded", size: 100,
-      browser_download_url: `https://github.com/${repository}/releases/download/${tag}/Rebasely_${tag}_${suffix}`,
+      id: 100 + index, name: `RebaseRaven_${tag}_${suffix}`, state: "uploaded", size: 100,
+      browser_download_url: `https://github.com/${repository}/releases/download/${tag}/RebaseRaven_${tag}_${suffix}`,
     })));
     const manifest = buildUpdaterManifest(input);
     expect(Object.keys(manifest.platforms).sort()).toEqual(["darwin-aarch64", "windows-x86_64"]);
@@ -401,7 +407,7 @@ describe("release updater manifest", () => {
   });
 
   it("refuses partial uploads, missing signatures, and missing installer packages", () => {
-    for (const missing of ["Rebasely_v0.0.1_macos_arm64.app.tar.gz", "Rebasely_v0.0.1_windows_x64.exe.sig", "Rebasely_v0.0.1_macos_arm64.dmg"]) {
+    for (const missing of ["RebaseRaven_v0.0.1_macos_arm64.app.tar.gz", "RebaseRaven_v0.0.1_windows_x64.exe.sig", "RebaseRaven_v0.0.1_macos_arm64.dmg"]) {
       const input = fixture();
       input.assets = input.assets.filter((asset: { name: string }) => asset.name !== missing);
       expect(() => buildUpdaterManifest(input)).toThrow("Required release asset");

@@ -619,7 +619,7 @@ mod tests {
 
     #[test]
     fn follows_the_repository_gitignore_except_for_tracked_files() {
-        let root = std::env::temp_dir().join(format!("rebasely-watch-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("rebaseraven-watch-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(root.join("out")).unwrap();
         fs::create_dir_all(root.join("src")).unwrap();

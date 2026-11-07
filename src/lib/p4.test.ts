@@ -1,10 +1,16 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { i18n } from "@/i18n";
 import { invoke } from "@tauri-apps/api/core";
 import { isP4Missing, P4_MISSING, p4Api, relativeToRoot, subscribeP4Availability, syncSummary } from "./p4";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn().mockResolvedValue(undefined) }));
 
-afterEach(() => vi.unstubAllGlobals());
+const initialLanguage = i18n.language;
+beforeEach(async () => { await i18n.changeLanguage("en"); });
+afterEach(async () => {
+  vi.unstubAllGlobals();
+  await i18n.changeLanguage(initialLanguage);
+});
 
 it("reports a missing p4 executable and clears the notice after a successful discovery", async () => {
   vi.mocked(invoke).mockRejectedValueOnce(P4_MISSING);
@@ -39,6 +45,13 @@ it("cancels only the depot search belonging to the supplied connection", async (
 });
 
 describe("syncSummary", () => {
+  it("localizes the summary without changing how CLI output is counted", async () => {
+    await i18n.changeLanguage("zh-CN");
+    const summary = syncSummary("//depot/a.txt#2 - updating C:\\work\\a.txt");
+    expect(summary).toContain("1");
+    expect(summary).not.toMatch(/updated|file|p4\./i);
+    expect(summary).not.toContain("//depot/");
+  });
   it("counts updated, added, and deleted files", () => {
     const output = [
       "//depot/a.txt#2 - updating E:\\a.txt",

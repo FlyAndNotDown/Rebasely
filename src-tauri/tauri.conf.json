@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Rebasely",
-  "version": "0.0.1",
-  "identifier": "com.rebasely.app",
+  "productName": "RebaseRaven",
+  "version": "0.1.5",
+  "identifier": "com.rebaseraven.app",
   "build": {
     "beforeDevCommand": "npm run vite",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Rebasely",
+        "title": "RebaseRaven",
         "width": 1280,
         "height": 840,
         "minWidth": 960,
@@ -30,6 +30,7 @@
         "default-src": "'self'",
         "script-src": "'self'",
         "connect-src": "'self' ipc: http://ipc.localhost",
+        "frame-src": "https://rebaseraven.flyandnotdown.com/analytics/",
         "img-src": "'self' data: blob:",
         "style-src": "'self' 'unsafe-inline'",
         "font-src": "'self' data:",
@@ -40,19 +41,31 @@
         "default-src": "'self'",
         "script-src": "'self' 'unsafe-inline'",
         "connect-src": "'self' ipc: http://ipc.localhost ws://localhost:1420 ws://localhost:1421",
+        "frame-src": "https://rebaseraven.flyandnotdown.com/analytics/",
         "img-src": "'self' data: blob:",
         "style-src": "'self' 'unsafe-inline'",
         "font-src": "'self' data:",
         "object-src": "'none'",
         "base-uri": "'self'"
       },
-      "dangerousDisableAssetCspModification": ["style-src"]
+      "dangerousDisableAssetCspModification": [
+        "style-src"
+      ]
     }
   },
   "bundle": {
     "active": true,
     "createUpdaterArtifacts": false,
     "targets": "all",
+    "windows": {
+      "nsis": {
+        "languages": [
+          "English",
+          "SimpChinese"
+        ],
+        "displayLanguageSelector": false
+      }
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -66,7 +79,7 @@
       "requireSignedVersion": true,
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEMzRDcxMEU5RjE5MURGRQpSV1QrSFJtZkRuRTlEQ0ZtSWg0MjhvZ1VONml1c053L1J5QmJtZmhmOGRBa2hZNElySWhQcXdRSwo=",
       "endpoints": [
-        "https://github.com/FlyAndNotDown/Rebasely/releases/latest/download/latest.json"
+        "https://github.com/FlyAndNotDown/RebaseRaven/releases/latest/download/latest.json"
       ],
       "windows": {
         "installMode": "passive"

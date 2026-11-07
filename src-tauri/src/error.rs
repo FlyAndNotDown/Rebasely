@@ -22,6 +22,10 @@ pub const P4_MISSING: &str = "p4 executable was not found. Choose one in Setting
 /// The frontend matches this exact text and asks for a Perforce password.
 pub const P4_LOGIN: &str = "Perforce login is required.";
 
+pub const GIT_BACKGROUND_TIMEOUT: &str = "Background fetch timed out. Fetch manually to retry.";
+pub const P4_PROBE_TIMEOUT: &str = "Perforce workspace discovery timed out.";
+pub const P4_RESOLVE_CONFLICTS: &str = "The merge has conflicts. Accept yours or theirs.";
+
 impl AppError {
     pub fn msg(message: impl Into<String>) -> Self {
         Self::Message(message.into())

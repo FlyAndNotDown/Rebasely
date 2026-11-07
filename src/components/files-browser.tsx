@@ -1,13 +1,15 @@
+import { t, useTranslation } from "@/i18n";
 import { memo, startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { SquarePenIcon, XIcon } from "lucide-react";
+import { FolderOpenIcon, SquarePenIcon, XIcon } from "lucide-react";
 import { toast } from "sonner";
 import { AuthorName, ExactTime } from "@/components/revision-meta";
 import { avatarColor, avatarInitial, avatarSeed } from "@/lib/avatar";
 import { DiffLines } from "@/components/diff-viewer";
-import { FileTree, FileTreeFilter, FilteredFileTree } from "@/components/file-tree";
+import { FileTreeFilter, FilteredFileTree, VirtualFileTree, type FileTreeEntry } from "@/components/file-tree";
 import { ImageDiff, isImagePath } from "@/components/image-diff";
 import { DiffSkeleton, FileTreeSkeleton } from "@/components/skeletons";
 import { Button } from "@/components/ui/button";
+import { ContextMenuContent, ContextMenuItem } from "@/components/ui/context-menu";
 import { HoverTip } from "@/components/ui/tooltip";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -32,9 +34,10 @@ function ancestorDirs(path: string): string[] {
 }
 
 export function FilesBrowser() {
+  useTranslation();
   const shell = usePanelGroupLayout("files");
   const repoPath = useGitSelect((state) => state.snapshot?.repo.path ?? "");
-  const { openInEditor } = useGitPick(["openInEditor"]);
+  const { openInEditor, revealRepoFile } = useGitPick(["openInEditor", "revealRepoFile"]);
   const fileFocus = useGitSelect((state) => state.fileFocus);
   const [entries, setEntries] = useState<Record<string, DirEntry[]>>({});
   const [open, setOpen] = useState<Set<string>>(
@@ -71,17 +74,25 @@ export function FilesBrowser() {
     setOpen((current) => new Set([...current, ...ancestorDirs(fileFocus.path)]));
   }
   const entriesRef = useRef(entries);
+  const directoryLoads = useRef(new Map<string, Promise<void>>());
+  const directoryGeneration = useRef(0);
+  const [loadingDirs, setLoadingDirs] = useState<ReadonlySet<string>>(() => new Set([""]));
   useLayoutEffect(() => {
     entriesRef.current = entries;
   });
 
   const loadDir = useCallback(
-    async (dir: string, quiet = false) => {
-      if (!repoPath) return;
-      try {
-        const items = await gitApi.listDirectory(repoPath, dir);
+    (dir: string, quiet = false): Promise<void> => {
+      if (!repoPath) return Promise.resolve();
+      const pending = directoryLoads.current.get(dir);
+      if (pending) return pending;
+      const generation = directoryGeneration.current;
+      setLoadingDirs((current) => new Set(current).add(dir));
+      const request = gitApi.listDirectory(repoPath, dir).then((items) => {
+        if (generation !== directoryGeneration.current) return;
         setEntries((current) => ({ ...current, [dir]: items }));
-      } catch (error) {
+      }).catch((error) => {
+        if (generation !== directoryGeneration.current) return;
         if (!quiet) {
           toast.error(errorMessage(error));
           return;
@@ -91,25 +102,30 @@ export function FilesBrowser() {
           const { [dir]: _gone, ...rest } = current;
           return rest;
         });
-      }
+      }).finally(() => {
+        if (generation !== directoryGeneration.current) return;
+        directoryLoads.current.delete(dir);
+        setLoadingDirs((current) => {
+          const next = new Set(current);
+          next.delete(dir);
+          return next;
+        });
+      });
+      directoryLoads.current.set(dir, request);
+      return request;
     },
     [repoPath],
   );
 
   // The workspace remounts per repository, so the root is listed once here.
   useEffect(() => {
-    if (!repoPath) return;
-    let cancelled = false;
-    void gitApi
-      .listDirectory(repoPath, "")
-      .then((items) => {
-        if (!cancelled) setEntries((current) => ({ ...current, "": items }));
-      })
-      .catch((error) => toast.error(errorMessage(error)));
+    const requests = directoryLoads.current;
+    void loadDir("");
     return () => {
-      cancelled = true;
+      directoryGeneration.current += 1;
+      requests.clear();
     };
-  }, [repoPath]);
+  }, [loadDir]);
 
   // Folders opened on another view's behalf are listed here.
   useEffect(() => {
@@ -120,9 +136,24 @@ export function FilesBrowser() {
 
   useRepoChanged(repoPath, (changed) => {
     for (const dir of dirsToReload(repoPath, changed, Object.keys(entriesRef.current))) {
-      void loadDir(dir, true);
+      const pending = directoryLoads.current.get(dir);
+      // A watcher event can arrive while a listing is in flight. Refresh once
+      // afterwards so the first response cannot hide a newly created entry.
+      const generation = directoryGeneration.current;
+      if (pending) void pending.then(() => {
+        if (generation === directoryGeneration.current) void loadDir(dir, true);
+      });
+      else void loadDir(dir, true);
     }
   });
+
+  const fileMenu = (entry: FileTreeEntry) => (
+    <ContextMenuContent>
+      <ContextMenuItem onClick={() => void revealRepoFile(entry.path)}>
+        <FolderOpenIcon />{t("git.ui.reveal_in_file_manager")}
+      </ContextMenuItem>
+    </ContextMenuContent>
+  );
 
   const openBlameCommit = useCallback((commitId: string) => {
     setPin(commitId);
@@ -140,16 +171,24 @@ export function FilesBrowser() {
     >
       <ResizablePanel id="files-tree" defaultSize="22%" minSize="14%" maxSize="40%">
         <div className="absolute inset-0 flex min-h-0 flex-col">
-          <FileTreeFilter title="Files" query={query} onQuery={setQuery} />
-          <ScrollArea className="min-h-0 flex-1">
-            <div className={fileQuery.active ? "hidden" : undefined}>
-              <FileTree
+          <FileTreeFilter title={t("git-files.files")} query={query} onQuery={setQuery} />
+          <div className="flex min-h-0 flex-1 flex-col">
+            <div className={cn("flex min-h-0 flex-1 flex-col", fileQuery.active && "hidden")}>
+              {!entries[""] ? (
+                loadingDirs.has("") ? <FileTreeSkeleton fill /> : (
+                  <Button type="button" variant="ghost" size="sm" className="m-2" onClick={() => void loadDir("")}>
+                    {t("git.ui.retry")}
+                  </Button>
+                )
+              ) : <VirtualFileTree
                 dir=""
                 depth={0}
                 entries={entries}
                 open={open}
                 selected={path}
-                onToggle={async (dir) => {
+                loading={loadingDirs}
+                menu={fileMenu}
+                onToggle={(dir) => {
                   if (open.has(dir)) {
                     setOpen((current) => {
                       const next = new Set(current);
@@ -158,23 +197,25 @@ export function FilesBrowser() {
                     });
                     return;
                   }
-                  if (!entries[dir]) await loadDir(dir);
                   setOpen((current) => new Set(current).add(dir));
+                  if (!entries[dir]) void loadDir(dir);
                 }}
                 onOpenFile={(next) => {
                   setPath(next);
                   setPin(null);
                 }}
-              />
+              />}
             </div>
             {fileQuery.active ? (
               fileQuery.searching ? (
                 <FileTreeSkeleton fill />
               ) : (
                 <FilteredFileTree
+                  virtualized
                   nodes={searchNodes}
                   toPath={(relative) => relative}
                   selected={path}
+                  menu={fileMenu}
                   onOpenFile={(next) => {
                     setPath(next);
                     setPin(null);
@@ -196,25 +237,25 @@ export function FilesBrowser() {
                 />
               )
             ) : null}
-          </ScrollArea>
+          </div>
         </div>
       </ResizablePanel>
       <ResizableHandle />
       <ResizablePanel id="files-main" defaultSize="78%" minSize="40%">
         {!path ? (
           <div className="flex h-full items-center justify-center p-6 text-sm text-muted-foreground">
-            Select a file
+            {t("git-files.selectFile")}
           </div>
         ) : (
           <div className="absolute inset-0 flex min-h-0 flex-col">
             <div className="flex h-10 shrink-0 items-center gap-2 border-b px-3">
               <span className="min-w-0 flex-1 truncate font-mono text-xs">{path}</span>
-              <HoverTip label="Open in editor">
+              <HoverTip label={t("git-files.openEditor")}>
                 <Button
                   type="button"
                   size="icon-xs"
                   variant="ghost"
-                  aria-label="Open in editor"
+                  aria-label={t("git-files.openEditor")}
                   onClick={() => void openInEditor(path)}
                 >
                   <SquarePenIcon />
@@ -228,7 +269,7 @@ export function FilesBrowser() {
                   className="h-6 px-2 text-xs"
                   onClick={() => setMode("browse")}
                 >
-                  File
+                  {t("git-files.file")}
                 </Button>
                 <Button
                   type="button"
@@ -240,15 +281,15 @@ export function FilesBrowser() {
                     setMode("history");
                   }}
                 >
-                  History
+                  {t("git-files.history")}
                 </Button>
               </div>
-              <HoverTip label="Close">
+              <HoverTip label={t("git-files.close")}>
                 <Button
                   type="button"
                   size="icon-xs"
                   variant="ghost"
-                  aria-label="Close"
+                  aria-label={t("git-files.close")}
                   onClick={() => {
                     setPath(null);
                     setPin(null);
@@ -280,6 +321,7 @@ function FileBrowsePane({
   path: string;
   onOpenCommit: (commitId: string) => void;
 }) {
+  useTranslation();
   const { beginActivity, endActivity } = useGitPick(["beginActivity", "endActivity"]);
   const [fileText, setFileText] = useState<string | null>(null);
   const [binary, setBinary] = useState(false);
@@ -289,8 +331,8 @@ function FileBrowsePane({
 
   useEffect(() => {
     let cancelled = false;
-    const textActivity = beginActivity("Reading file", path);
-    const blameActivity = beginActivity("Blaming file", path);
+    const textActivity = beginActivity(t("git-files.readingFile"), path);
+    const blameActivity = beginActivity(t("git-files.blamingFile"), path);
     void gitApi
       .readFile(repoPath, path)
       .then((result) => {
@@ -351,6 +393,7 @@ function FileBrowsePane({
 
 /** One file's commit history and the selected commit's diff. Keyed by path and pin. */
 function FileHistoryPane({ repoPath, path, pin }: { repoPath: string; path: string; pin: string | null }) {
+  useTranslation();
   const layout = usePanelGroupLayout("fileHistory");
   const { beginActivity, endActivity } = useGitPick(["beginActivity", "endActivity"]);
   const [commits, setCommits] = useState<CommitSummary[]>([]);
@@ -363,7 +406,7 @@ function FileHistoryPane({ repoPath, path, pin }: { repoPath: string; path: stri
 
   useEffect(() => {
     let cancelled = false;
-    const activity = beginActivity("Loading file history", path);
+    const activity = beginActivity(t("git-files.loadingFileHistory"), path);
     void (async () => {
       try {
         const page = await gitApi.fileCommits(repoPath, path, PAGE, 0);
@@ -393,7 +436,7 @@ function FileHistoryPane({ repoPath, path, pin }: { repoPath: string; path: stri
   async function loadMore() {
     if (loading) return;
     setLoading(true);
-    const activity = beginActivity("Loading file history", path);
+    const activity = beginActivity(t("git-files.loadingFileHistory"), path);
     try {
       const page = await gitApi.fileCommits(repoPath, path, PAGE, fetched);
       setCommits((current) => [
@@ -491,7 +534,7 @@ interface BlameRow {
   when: string | null;
 }
 
-function blameRows(lines: string[], hunks: BlameHunk[] | null, blameLoading: boolean): BlameRow[] {
+function blameRows(lines: string[], hunks: BlameHunk[] | null, blameLoading: boolean, language: string): BlameRow[] {
   let hunkIndex = 0;
   let previousId: string | null | undefined;
   let block = -1;
@@ -516,7 +559,7 @@ function blameRows(lines: string[], hunks: BlameHunk[] | null, blameLoading: boo
       } else if (dirty) {
         heat = 0;
         when = null;
-        tip = "Not committed";
+        tip = t("git-files.notCommitted", { lng: language });
       } else {
         heat = 0;
         when = null;
@@ -595,6 +638,7 @@ function BlameMargin({
   hot: boolean;
   onOpenCommit: (commitId: string) => void;
 }) {
+  useTranslation();
   const { hunk, dirty, label } = row;
   const spine = hunk || dirty;
   const fill = hot ? BLAME_HOT : BLAME_FILL;
@@ -621,7 +665,7 @@ function BlameMargin({
           </span>
         </>
       ) : label && dirty ? (
-        <span className="truncate text-[11px] text-muted-foreground italic">Not committed</span>
+        <span className="truncate text-[11px] text-muted-foreground italic">{t("git-files.notCommitted")}</span>
       ) : null}
     </>
   );
@@ -631,7 +675,7 @@ function BlameMargin({
   );
   if (!hunk) {
     return (
-      <HoverTip label={dirty ? "Not committed" : undefined}>
+      <HoverTip label={dirty ? t("git-files.notCommitted") : undefined}>
         <div className={className} style={{ background: fill }}>
           {body}
         </div>
@@ -656,7 +700,7 @@ function BlameMargin({
     <HoverTip label={row.tip}>
     <button
       type="button"
-      aria-label={`${hunk.author}, ${row.when}`}
+      aria-label={t("git-files.blameAuthor", { author: hunk.author, when: row.when })}
       className={cn(
         className,
         "cursor-pointer text-left outline-none focus-visible:outline focus-visible:outline-1 focus-visible:-outline-offset-1 focus-visible:outline-ring",
@@ -742,8 +786,10 @@ const FileBrowse = memo(function FileBrowse({
   hunks: BlameHunk[] | null;
   onOpenCommit: (commitId: string) => void;
 }) {
+  const { i18n } = useTranslation();
+  const language = i18n.resolvedLanguage ?? "en";
   const lines = useMemo(() => (text == null || text.length === 0 ? [] : text.split("\n")), [text]);
-  const rows = useMemo(() => blameRows(lines, hunks, blameLoading), [blameLoading, hunks, lines]);
+  const rows = useMemo(() => blameRows(lines, hunks, blameLoading, language), [blameLoading, hunks, language, lines]);
   const syntax = useFileSyntax(path, binary || text == null ? null : lines);
   const widest = useMemo(() => lines.reduce((max, line) => Math.max(max, textColumns(line)), 0), [lines]);
   const visibleRows = useWindowedRows(rows.length, FILE_ROW_HEIGHT, 12, 640);
@@ -765,12 +811,12 @@ const FileBrowse = memo(function FileBrowse({
   if (textLoading || text === null) {
     return (
       <div className="relative min-h-0 flex-1">
-        <DiffSkeleton fill label="Loading file" />
+        <DiffSkeleton fill label={t("git-files.loadingFile")} />
       </div>
     );
   }
   if (binary) {
-    return <div className="p-4 text-sm text-muted-foreground">Binary file</div>;
+    return <div className="p-4 text-sm text-muted-foreground">{t("git-files.binaryFile")}</div>;
   }
   return (
     <ScrollArea className="min-h-0 flex-1" viewportRef={visibleRows.viewportRef}>
@@ -831,6 +877,7 @@ function FileHistory({
   onSelect: (id: string) => void;
   onLoadMore: () => void;
 }) {
+  useTranslation();
   const selectedRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     selectedRef.current?.scrollIntoView({ block: "nearest" });
@@ -838,9 +885,9 @@ function FileHistory({
 
   return (
     <ScrollArea className="absolute inset-0">
-      {commits.length === 0 && loading ? <DiffSkeleton fill label="Loading history" /> : null}
+      {commits.length === 0 && loading ? <DiffSkeleton fill label={t("git-files.loadingHistory")} /> : null}
       {commits.length === 0 && !loading ? (
-        <div className="p-4 text-sm text-muted-foreground">No commits for this file</div>
+        <div className="p-4 text-sm text-muted-foreground">{t("git-files.noFileCommits")}</div>
       ) : null}
       {commits.map((commit) => (
         <button
@@ -854,7 +901,7 @@ function FileHistory({
           onClick={() => onSelect(commit.id)}
         >
           <span className="shrink-0 whitespace-nowrap font-mono text-[11px] text-muted-foreground">{commit.shortId}</span>
-          <span className="min-w-0 flex-1 truncate text-sm">{commit.summary || "(no message)"}</span>
+          <span className="min-w-0 flex-1 truncate text-sm">{commit.summary || t("git-files.noMessage")}</span>
           <AuthorName name={commit.authorName} email={commit.authorEmail} />
           <ExactTime time={commit.timestamp} />
         </button>
@@ -862,7 +909,7 @@ function FileHistory({
       {hasMore ? (
         <div className="px-3 py-2 text-center">
           <Button type="button" variant="ghost" size="sm" disabled={loading} onClick={onLoadMore}>
-            {loading ? "Loading" : "Load earlier commits"}
+            {loading ? t("git-files.loading") : t("git-files.loadEarlier")}
           </Button>
         </div>
       ) : null}
@@ -881,11 +928,12 @@ function FileCommitDiff({
   commitId: string | null;
   loading: boolean;
 }) {
+  useTranslation();
   if (!diff && loading) return <DiffSkeleton fill />;
   if (!diff) {
     return (
       <div className="absolute inset-0 flex items-center justify-center text-sm text-muted-foreground">
-        Select a commit
+        {t("git-files.selectCommit")}
       </div>
     );
   }
@@ -896,8 +944,8 @@ function FileCommitDiff({
       </div>
     );
   }
-  if (diff.binary) return <p className="p-4 text-sm text-muted-foreground">Binary file</p>;
-  if (diff.lines.length === 0) return <p className="p-4 text-sm text-muted-foreground">No textual diff</p>;
+  if (diff.binary) return <p className="p-4 text-sm text-muted-foreground">{t("git-files.binaryFile")}</p>;
+  if (diff.lines.length === 0) return <p className="p-4 text-sm text-muted-foreground">{t("git-files.noTextDiff")}</p>;
   return (
     <div className="absolute inset-0 flex min-h-0 flex-col">
       <DiffLines diff={diff} />

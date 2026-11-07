@@ -11,15 +11,15 @@ afterEach(async () => {
 });
 
 async function fixture(version = "0.0.1") {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "rebasely-version-"));
+  const directory = await mkdtemp(path.join(os.tmpdir(), "rebaseraven-version-"));
   directories.push(directory);
   await mkdir(path.join(directory, "src-tauri"));
   const files = {
-    "package.json": JSON.stringify({ name: "rebasely", version, dependencies: { library: "2.0.0" } }),
-    "package-lock.json": JSON.stringify({ name: "rebasely", version, packages: { "": { name: "rebasely", version }, "node_modules/library": { version: "2.0.0" } } }),
+    "package.json": JSON.stringify({ name: "rebaseraven", version, dependencies: { library: "2.0.0" } }),
+    "package-lock.json": JSON.stringify({ name: "rebaseraven", version, packages: { "": { name: "rebaseraven", version }, "node_modules/library": { version: "2.0.0" } } }),
     "src-tauri/tauri.conf.json": JSON.stringify({ version, bundle: { createUpdaterArtifacts: true } }),
-    "src-tauri/Cargo.toml": `[package]\nname = "rebasely"\nversion = "${version}"\n\n[dependencies]\nother = "4.0.0"\n`,
-    "src-tauri/Cargo.lock": `version = 4\n\n[[package]]\nname = "other"\nversion = "4.0.0"\n\n[[package]]\nname = "rebasely"\nversion = "${version}"\ndependencies = ["other"]\n\n[[package]]\nname = "third"\nversion = "3.0.0"\n`,
+    "src-tauri/Cargo.toml": `[package]\nname = "rebaseraven"\nversion = "${version}"\n\n[dependencies]\nother = "4.0.0"\n`,
+    "src-tauri/Cargo.lock": `version = 4\n\n[[package]]\nname = "other"\nversion = "4.0.0"\n\n[[package]]\nname = "rebaseraven"\nversion = "${version}"\ndependencies = ["other"]\n\n[[package]]\nname = "third"\nversion = "3.0.0"\n`,
   };
   await Promise.all(Object.entries(files).map(([name, contents]) => writeFile(path.join(directory, name), contents)));
   return directory;
@@ -77,7 +77,7 @@ describe("release versions", () => {
     const directory = await fixture("1.0.0");
     await expect(setVersion("v0.9.0", directory)).rejects.toThrow("decrease");
     const filename = path.join(directory, "src-tauri/Cargo.lock");
-    await writeFile(filename, `${await readFile(filename, "utf8")}\n[[package]]\nname = "rebasely"\nversion = "1.0.0"\n`);
+    await writeFile(filename, `${await readFile(filename, "utf8")}\n[[package]]\nname = "rebaseraven"\nversion = "1.0.0"\n`);
     await expect(setVersion("v2.0.0", directory)).rejects.toThrow("Expected one");
   });
 });

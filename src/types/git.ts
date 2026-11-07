@@ -1,3 +1,4 @@
+
 export type FileKind =
   | "added"
   | "deleted"
@@ -282,6 +283,8 @@ export interface ToolConfig {
 }
 
 export interface AppPrefs {
+  language: "system" | "en" | "zh-CN";
+  analyticsEnabled: boolean;
   httpProxy: { mode: "none" | "system" | "manual"; url: string };
   avatarProvider: "builtin" | "github" | "gitlab";
   terminalId: string;
@@ -321,7 +324,7 @@ export interface AppPrefs {
 export interface GitExecutables {
   /** Full path of `git` on PATH, or null when PATH has none. */
   pathGit: string | null;
-  /** Full path Rebasely will run, or null when none is usable. */
+  /** Full path RebaseRaven will run, or null when none is usable. */
   active: string | null;
 }
 

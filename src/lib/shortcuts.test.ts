@@ -1,9 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { formatCombo, isPlatformModifier, matchesCombo } from "./shortcuts";
+import { formatCombo, isComposingKey, isPlatformModifier, matchesCombo } from "./shortcuts";
 
 const key = { key: "K", ctrlKey: false, metaKey: false, shiftKey: false, altKey: false };
 
 describe("platform keyboard shortcuts", () => {
+  it("leaves IME composition and confirmation keys to text input", () => {
+    expect(isComposingKey({ isComposing: true })).toBe(true);
+    expect(isComposingKey({ isComposing: false, keyCode: 229 })).toBe(true);
+    expect(isComposingKey({ isComposing: false, keyCode: 13 })).toBe(false);
+    expect(matchesCombo({ ...key, key: "F1", isComposing: true }, { key: "F1" }, true)).toBe(false);
+    expect(matchesCombo({ ...key, metaKey: true, keyCode: 229 }, { key: "k", mod: true }, true)).toBe(false);
+  });
   it("uses Command on macOS and Control on Windows and Linux", () => {
     expect(matchesCombo({ ...key, metaKey: true }, { key: "k", mod: true }, true)).toBe(true);
     expect(matchesCombo({ ...key, ctrlKey: true }, { key: "k", mod: true }, true)).toBe(false);

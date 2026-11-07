@@ -3,8 +3,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
-const extensions = new Set([".rs", ".ts", ".tsx", ".js", ".mjs", ".cjs", ".css", ".html", ".json", ".toml", ".yml", ".yaml", ".svg", ".md", ".lock"]);
-const directories = ["src", "src-tauri/src", "src-tauri/capabilities", "scripts", ".github", "docs", "site"];
+const extensions = new Set([".rs", ".ts", ".tsx", ".js", ".mjs", ".cjs", ".css", ".html", ".json", ".toml", ".yml", ".yaml", ".xml", ".svg", ".md", ".lock"]);
+const directories = ["src", "src-tauri/src", "src-tauri/capabilities", "scripts", ".github", "docs", "site", "assets"];
 const ignoredDirectories = new Set(["dist", "dist-ssr", "node_modules"]);
 const files = [];
 const violations = [];
@@ -30,7 +30,10 @@ await collect(path.join(root, "src-tauri"), false);
 for (const directory of directories) await collect(path.join(root, directory), true);
 
 for (const filename of files.sort()) {
+  // Workspace agent instructions are policy, not application source.
+  if (path.basename(filename) === "AGENTS.md") continue;
   const relative = path.relative(root, filename).replaceAll("\\", "/");
+  const localizedContent = /^(?:src\/i18n\/locales\/(?:[a-z0-9-]+\.)?(?:en|zh-CN)\.json|site\/src\/locales\/(?:en|zh-CN)\.json|README\.zh-CN\.md)$/.test(relative);
   if (han.test(relative)) violations.push(`${relative}: source file names must use English`);
   let text;
   try {
@@ -40,7 +43,7 @@ for (const filename of files.sort()) {
     continue;
   }
   for (const [index, line] of text.split("\n").entries()) {
-    if (han.test(line)) violations.push(`${relative}:${index + 1}: source text must use English`);
+    if (!localizedContent && han.test(line)) violations.push(`${relative}:${index + 1}: source text must use English outside translation resources and localized documentation`);
   }
 }
 

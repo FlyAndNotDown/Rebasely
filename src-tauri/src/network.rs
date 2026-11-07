@@ -98,7 +98,7 @@ pub fn client_from_preferences(prefs: &AppPrefs) -> AppResult<Client> {
     }
     policy_from_preferences(prefs)?
         .apply(Client::builder())
-        .user_agent(concat!("Rebasely/", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!("RebaseRaven/", env!("CARGO_PKG_VERSION")))
         .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(Duration::from_secs(5))
         .timeout(Duration::from_secs(10))

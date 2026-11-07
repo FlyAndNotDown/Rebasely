@@ -6,8 +6,8 @@ use serde::Serialize;
 use crate::error::{AppError, AppResult};
 use crate::git::strip_verbatim_prefix;
 
-const TERMINAL_DIRECTORY_ENV: &str = "REBASELY_TERMINAL_DIRECTORY";
-const POWERSHELL_START_DIRECTORY: &str = "Set-Location -LiteralPath $env:REBASELY_TERMINAL_DIRECTORY; Remove-Item -LiteralPath 'Env:REBASELY_TERMINAL_DIRECTORY'";
+const TERMINAL_DIRECTORY_ENV: &str = "REBASERAVEN_TERMINAL_DIRECTORY";
+const POWERSHELL_START_DIRECTORY: &str = "Set-Location -LiteralPath $env:REBASERAVEN_TERMINAL_DIRECTORY; Remove-Item -LiteralPath 'Env:REBASERAVEN_TERMINAL_DIRECTORY'";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -443,7 +443,7 @@ mod tests {
             .unwrap()
             .as_nanos();
         let file = std::env::temp_dir().join(format!(
-            "rebasely-terminal-{}-{unique}.txt",
+            "rebaseraven-terminal-{}-{unique}.txt",
             std::process::id()
         ));
         std::fs::write(&file, "content").unwrap();

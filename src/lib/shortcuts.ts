@@ -33,7 +33,13 @@ export function isPlatformModifier(event: Pick<KeyboardEvent, "ctrlKey" | "metaK
   return mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
 }
 
-export function matchesCombo(event: Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "shiftKey" | "altKey">, combo: KeyCombo, mac = isMac) {
+/** WebKit can report the IME confirmation key as 229 after isComposing resets. */
+export function isComposingKey(event: Partial<Pick<KeyboardEvent, "isComposing" | "keyCode">>) {
+  return event.isComposing === true || event.keyCode === 229;
+}
+
+export function matchesCombo(event: Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "shiftKey" | "altKey"> & Partial<Pick<KeyboardEvent, "isComposing" | "keyCode">>, combo: KeyCombo, mac = isMac) {
+  if (isComposingKey(event)) return false;
   if (mac ? event.ctrlKey : event.metaKey) return false;
   const mod = isPlatformModifier(event, mac);
   return (
