@@ -3,6 +3,17 @@ import type { AnalyticsTag } from "./analytics-bridge";
 import { createGoogleTag } from "./google-tag";
 
 export const DESKTOP_ANALYTICS_NAME = "RebaseRavenApp";
+const SCREEN_NAMES = {
+  welcome: "Welcome",
+  git_changes: "Git changes",
+  git_history: "Git history",
+  git_stash: "Git stashes",
+  git_files: "Git files",
+  p4_pending: "Perforce pending changes",
+  p4_files: "Perforce files",
+  p4_history: "Perforce history",
+  p4_depot: "Perforce depot",
+} satisfies Record<AnalyticsPane, string>;
 
 export function analyticsConfiguration(init: AnalyticsInit) {
   return {
@@ -13,7 +24,7 @@ export function analyticsConfiguration(init: AnalyticsInit) {
     app_version: init.appVersion,
     app_platform: init.platform,
     content_group: "Desktop application",
-    page_title: DESKTOP_ANALYTICS_NAME,
+    page_title: SCREEN_NAMES.welcome,
     page_location: ANALYTICS_BRIDGE_URL,
     page_referrer: "",
     ignore_referrer: true,
@@ -38,11 +49,12 @@ export function analyticsEventParameters(init: AnalyticsInit, event: AnalyticsEv
     app_version: init.appVersion,
     app_platform: init.platform,
     content_group: "Desktop application",
-    screen_name: pane,
+    screen_name: SCREEN_NAMES[pane],
     screen_class: pane,
     pane,
     version_control: pane.startsWith("git_") ? "git" : pane.startsWith("p4_") ? "perforce" : "none",
-    page_title: DESKTOP_ANALYTICS_NAME,
+    // GA4 uses the web title in its combined Pages and screens report.
+    page_title: SCREEN_NAMES[pane],
     page_location: ANALYTICS_BRIDGE_URL,
     page_referrer: "",
     ...(event.event === "app_engagement" ? {

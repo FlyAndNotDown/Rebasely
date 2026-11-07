@@ -26,7 +26,7 @@ describe("official Google tag adapter", () => {
     expect(analyticsConfiguration(init)).toEqual({
       client_id: init.clientId, session_id: init.sessionId, send_page_view: false,
       app_name: "RebaseRavenApp", app_version: "1.2.3", app_platform: "windows", content_group: "Desktop application",
-      page_title: "RebaseRavenApp", page_location: ANALYTICS_BRIDGE_URL, page_referrer: "",
+      page_title: "Welcome", page_location: ANALYTICS_BRIDGE_URL, page_referrer: "",
       ignore_referrer: true, allow_google_signals: false, allow_ad_personalization_signals: false,
       cookie_flags: "SameSite=None;Secure",
       cookie_prefix: "rebaseraven_app", cookie_domain: "none", cookie_path: "/analytics/", cookie_expires: 0, cookie_update: false,
@@ -36,8 +36,8 @@ describe("official Google tag adapter", () => {
     }, "G-EXAMPLE42")).toEqual({
       send_to: "G-EXAMPLE42", client_id: init.clientId, session_id: init.sessionId,
       app_name: "RebaseRavenApp", app_version: "1.2.3", app_platform: "windows", content_group: "Desktop application",
-      screen_name: "git_history", screen_class: "git_history", version_control: "git",
-      page_title: "RebaseRavenApp", page_location: ANALYTICS_BRIDGE_URL, page_referrer: "", pane: "git_history",
+      screen_name: "Git history", screen_class: "git_history", version_control: "git",
+      page_title: "Git history", page_location: ANALYTICS_BRIDGE_URL, page_referrer: "", pane: "git_history",
     });
   });
 
@@ -86,10 +86,10 @@ describe("official Google tag adapter", () => {
     tag.send({ type: "event", generation: init.generation, event: "app_foreground" });
     const commands = (globals.dataLayer as IArguments[]).slice(3).map((args) => Array.from(args));
     expect(commands.map((command) => command[1])).toEqual(["screen_view", "app_engagement", "screen_view", "app_foreground"]);
-    expect(commands[0][2]).toMatchObject({ screen_name: "git_history", version_control: "git" });
-    expect(commands[1][2]).toMatchObject({ screen_name: "git_history", foreground_time_sec: 2.25, engagement_time_msec: 2_250 });
-    expect(commands[2][2]).toMatchObject({ screen_name: "p4_pending", version_control: "perforce" });
-    expect(commands[3][2]).toMatchObject({ screen_name: "p4_pending", version_control: "perforce" });
+    expect(commands[0][2]).toMatchObject({ screen_name: "Git history", page_title: "Git history", version_control: "git" });
+    expect(commands[1][2]).toMatchObject({ screen_name: "Git history", page_title: "Git history", foreground_time_sec: 2.25, engagement_time_msec: 2_250 });
+    expect(commands[2][2]).toMatchObject({ screen_name: "Perforce pending changes", page_title: "Perforce pending changes", version_control: "perforce" });
+    expect(commands[3][2]).toMatchObject({ screen_name: "Perforce pending changes", version_control: "perforce" });
     expect(commands.every((command) => (command[2] as Record<string, unknown>).send_to === "G-EXAMPLE42")).toBe(true);
     tag.disable();
   });
@@ -104,7 +104,7 @@ describe("official Google tag adapter", () => {
     expect(command.slice(0, 2)).toEqual(["event", "app_engagement"]);
     expect(command[2]).toMatchObject({ engagement_time_msec: 1500 });
     expect(command[2]).not.toHaveProperty("generation");
-    expect(command[2]).toMatchObject({ pane: "welcome", screen_name: "welcome", foreground_time_sec: 1.5 });
+    expect(command[2]).toMatchObject({ pane: "welcome", screen_name: "Welcome", foreground_time_sec: 1.5 });
     tag.disable();
   });
 });
